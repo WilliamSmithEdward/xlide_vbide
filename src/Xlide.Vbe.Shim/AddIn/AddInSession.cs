@@ -1416,6 +1416,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
         _editorSurface.ExtractMethodRequested = OnExtractMethodRequested;
         _editorSurface.ImplementInterfaceRequested = OnImplementInterfaceRequested;
+        _editorSurface.EncapsulateFieldRequested = OnEncapsulateFieldRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7683,6 +7684,111 @@ internal sealed partial class AddInSession : IDisposable
     /// host's half - the write, the sync into the open tab, and the undo slot that makes Ctrl+Z
     /// put it back, because an edit the host made was never on the page's undo stack.
     /// </summary>
+    /// <summary>
+    /// Puts a property pair in front of a module variable and makes the variable private.
+    ///
+    /// The third of these, and the same shape as the two before it: the engine works out the whole
+    /// new text and refuses what it cannot write, so the host's half is one write, one sync and
+    /// the undo slot. Nothing outside the module changes, because the property keeps the
+    /// variable's name.
+    /// </summary>
+    private void OnEncapsulateFieldRequested(int requestId, string fieldName)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowEncapsulated(requestId, null, null, [], null, "There is nothing open to encapsulate in.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineEncapsulateField? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .EncapsulateFieldAsync(module, fieldName, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was changed.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The property could not be worked out, so nothing changed.";
+                Log.Info($"encapsulate: {module}.{fieldName} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && answer?.Source is null)
+            {
+                refused = "The engine did not say what the module should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowEncapsulated(requestId, null, null, [], null, why));
+                return;
+            }
+
+            var made = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore([module], _shownProject);
+
+                try
+                {
+                    if (WriteModule(module, made.Source!, _shownProject, hostRewrite: true) is { } stopped)
+                    {
+                        surface.ShowEncapsulated(requestId, null, null, [], null,
+                            $"'{module}' could not be written, so nothing was encapsulated. {stopped}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"encapsulate: writing {module} failed", ex);
+                    surface.ShowEncapsulated(requestId, null, null, [], null,
+                        $"'{module}' could not be written, so nothing was encapsulated.");
+                    return;
+                }
+
+                // The same slot the other three use, holding what the module said before an edit
+                // the HOST made, which the page's undo stack never saw.
+                _undoableRename = new RenameUndo(
+                    made.Field ?? fieldName,
+                    made.BackingField ?? fieldName,
+                    null,
+                    _shownProject,
+                    before);
+
+                surface.Sync(module, display, made.Source!);
+
+                Log.Info($"encapsulate: {module}.{made.Field} is now a property over {made.BackingField}");
+                surface.ShowEncapsulated(
+                    requestId, made.Field, made.BackingField, made.Accessors ?? [], module, null);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     /// <summary>
     /// Writes the stubs a class owes the interfaces it declares.
     ///

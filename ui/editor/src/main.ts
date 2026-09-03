@@ -249,6 +249,38 @@ function implementsOn(model: monaco.editor.ITextModel | null, line: number): str
 }
 
 /**
+ * The module variable declared on a line, or null when the line declares none.
+ *
+ * Read off the text, like the Implements scan above and for the same reason: it decides whether a
+ * menu entry appears, which is asked on every caret move. The engine settles whether the variable
+ * can actually be encapsulated - Const, WithEvents, an array, a shared declaration - once the
+ * entry is chosen, and says so in words.
+ */
+function fieldOn(model: monaco.editor.ITextModel | null, line: number): string | null {
+  if (!model || line < 1 || line > model.getLineCount()) {
+    return null;
+  }
+
+  const declared = /^\s*(?:Public|Friend|Global|Dim)\s+(?:WithEvents\s+)?([\p{L}_][\p{L}\p{M}\p{N}_]*)/u
+    .exec(model.getLineContent(line));
+  return declared ? (declared[1] as string) : null;
+}
+
+/** Encapsulate Field, from the lightbulb or the menu. Nothing to name: the property takes the
+ * variable's own name, which is what keeps every use of it working. */
+function beginEncapsulateField(bridge: EditorBridge, fieldName: string): void {
+  void bridge.requestEncapsulateField(fieldName).then((answer) => {
+    if (answer.refused) {
+      bridge.shell?.notify(answer.refused);
+      return;
+    }
+
+    bridge.shell?.notify(
+      `${answer.field} is now a property over ${answer.backingField}: ${answer.accessors.join(" and ")}`);
+  });
+}
+
+/**
  * Implement Interface, from wherever it was asked for. Nothing is asked of the developer: the
  * members, their names and their signatures all belong to the interface.
  */
@@ -1366,6 +1398,7 @@ function boot(): void {
   const TURN_OFF_RULE_COMMAND = "xlide.analysis.turnOffRule";
   const EXTRACT_METHOD_COMMAND = "xlide.refactor.extractMethod";
   const IMPLEMENT_INTERFACE_COMMAND = "xlide.refactor.implementInterface";
+  const ENCAPSULATE_FIELD_COMMAND = "xlide.refactor.encapsulateField";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1408,8 +1441,10 @@ function boot(): void {
       const selected = model === editor.getModel() ? extractRange(editor.getSelection()) : null;
 
       // An `Implements` line is its own affordance: the one place a developer looks when they
-      // want the members that line commits them to.
+      // want the members that line commits them to. A declaration line is the same for the
+      // variable it declares.
       const promised = implementsOn(model, range.startLineNumber);
+      const declaredField = promised ? null : fieldOn(model, range.startLineNumber);
 
       const markers = monaco.editor
         .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
@@ -1420,7 +1455,7 @@ function boot(): void {
       // SELECTION rather than a finding, so gating it on there being a squiggle meant the one
       // case it exists for - working code a developer wants to tidy - was the one case that
       // offered nothing.
-      if (markers.length === 0 && !selected && !promised) {
+      if (markers.length === 0 && !selected && !promised && !declaredField) {
         return none;
       }
 
@@ -1502,6 +1537,18 @@ function boot(): void {
         });
       }
 
+      if (declaredField) {
+        actions.push({
+          title: `Encapsulate '${declaredField}' in a property`,
+          kind: "refactor.rewrite",
+          command: {
+            id: ENCAPSULATE_FIELD_COMMAND,
+            title: "Encapsulate field",
+            arguments: [declaredField],
+          },
+        });
+      }
+
       const turnOffable = await offRules();
       bridge.trace(`quickFixes: ${markers.length} marker(s), codes `
         + markers.map((m) => JSON.stringify(m.code)).join(",") + `; offable ${turnOffable.size}`);
@@ -1538,6 +1585,10 @@ function boot(): void {
 
   monaco.editor.registerCommand(IMPLEMENT_INTERFACE_COMMAND, (_accessor, interfaceName: string) => {
     beginImplementInterface(bridge, interfaceName);
+  });
+
+  monaco.editor.registerCommand(ENCAPSULATE_FIELD_COMMAND, (_accessor, fieldName: string) => {
+    beginEncapsulateField(bridge, fieldName);
   });
 
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
@@ -2193,6 +2244,24 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
       const at = target.getPosition();
       const named = at ? implementsOn(target.getModel(), at.lineNumber) : null;
       beginImplementInterface(bridge, named ?? undefined);
+    },
+  });
+
+  // Encapsulate Field, on the menu beside the other two. Offered wherever the caret is; when the
+  // line declares nothing the refusal says so, which teaches more than a greyed entry.
+  editor.addAction({
+    id: "xlide.encapsulateField",
+    label: "Encapsulate Field",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.7,
+    run: (target) => {
+      const at = target.getPosition();
+      const named = at ? fieldOn(target.getModel(), at.lineNumber) : null;
+      if (named) {
+        beginEncapsulateField(bridge, named);
+      } else {
+        bridge.shell?.notify("Put the caret on a Public variable's declaration to encapsulate it.");
+      }
     },
   });
 

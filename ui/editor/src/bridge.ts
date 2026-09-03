@@ -87,6 +87,7 @@ export type HostMessage =
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "extractResult"; id: number; procedure?: string | null; from?: string | null; signature?: string | null; module?: string | null; refused?: string | null }
   | { type: "implementResult"; id: number; interfaces: string[]; added: string[]; module?: string | null; refused?: string | null }
+  | { type: "encapsulateResult"; id: number; field?: string | null; backingField?: string | null; accessors: string[]; module?: string | null; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -398,6 +399,15 @@ export interface HostImplementAnswer {
   refused: string | null;
 }
 
+/** What an Encapsulate Field made, or the reason it made nothing. */
+export interface HostEncapsulateAnswer {
+  field: string | null;
+  backingField: string | null;
+  accessors: string[];
+  module: string | null;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -504,6 +514,7 @@ export type ClientMessage =
   | { type: "rename"; id: number; offset: number; newName: string }
   | { type: "extractMethod"; id: number; startLine: number; endLine: number; newName: string }
   | { type: "implementInterface"; id: number; interfaceName?: string }
+  | { type: "encapsulateField"; id: number; fieldName: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -700,6 +711,7 @@ export class EditorBridge {
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
   private readonly pendingExtracts = new RequestTable<HostExtractAnswer>();
   private readonly pendingImplements = new RequestTable<HostImplementAnswer>();
+  private readonly pendingEncapsulations = new RequestTable<HostEncapsulateAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1514,6 +1526,33 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Puts a property pair in front of one module variable, through the host.
+   *
+   * Nothing outside the module changes, because the property keeps the variable's name - which is
+   * also why there is nothing to ask the developer. Undo is armed the way the others are.
+   */
+  requestEncapsulateField(fieldName: string): Promise<HostEncapsulateAnswer> {
+    const project = this.activeProject();
+    return this.pendingEncapsulations.ask(
+      () => ({
+        field: null, backingField: null, accessors: [], module: null,
+        refused: "The request timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "encapsulateField", id, fieldName }))
+      .then((answer) => {
+        this.renameLanded(
+          {
+            modules: answer.refused || !answer.module ? [] : [answer.module],
+            replaced: answer.accessors.length,
+            refused: answer.refused,
+          },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -1897,6 +1936,15 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "encapsulateResult":
+        this.pendingEncapsulations.settle(message.id, {
+          field: message.field ?? null,
+          backingField: message.backingField ?? null,
+          accessors: message.accessors,
+          module: message.module ?? null,
           refused: message.refused ?? null,
         });
         return;

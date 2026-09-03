@@ -39,16 +39,25 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 - **Not signed.** The installer carries no code signature, so Windows warns before running it.
   Signing and update plumbing are the next release-engineering milestone (decision 8).
-- **Four refactorings.** `rename`, `renameModule` and, since 2026-09-03, **Extract Method** and
-  **Implement Interface** - the second writing the `IFace_Member` stub for every member a class
-  promised with `Implements` and has not written, each signature copied from the interface's own
-  text and each body raising rather than silently doing nothing. Extract Method is
-  selected statements lifted into a Private procedure below the one they came from, its signature
-  worked out from the analyzer's reference kinds and its refusals covering every way the meaning
-  could move. [extract-method.md](extract-method.md) is the design and what shipped against it.
-  Extract Variable, Inline, Move to Module and Introduce Parameter are the rest of the set, and
-  they are cheaper now: the selection analysis, the signature synthesis, the refusal vocabulary
-  and the write-and-undo path are built.
+- **Five refactorings**, three of them landed on 2026-09-03.
+
+  - `rename` and `renameModule`, the two this product started with.
+  - **Extract Method**: selected statements lifted into a Private procedure below the one they
+    came from, its signature worked out from the analyzer's reference kinds and its refusals
+    covering every way the meaning could move. [extract-method.md](extract-method.md) is the
+    design and what shipped against it.
+  - **Implement Interface**: the `IFace_Member` stub for every member a class promised with
+    `Implements` and has not written, each signature copied from the interface's own source text
+    rather than rebuilt, each body raising rather than silently doing nothing.
+  - **Encapsulate Field**: a public module variable becomes a private one behind a property pair
+    that keeps its name, so nothing that used it is rewritten - a `Property Let` for a value, a
+    `Property Set` for what VBA assigns with one.
+
+  Extract Variable is blocked upstream on xlide_vscode#61, which asks the analyzer for the
+  declared type of the expression over a span: the one fact none of these three needed and the
+  one it cannot do without. Inline, Move to Module and Introduce Parameter are the rest of the
+  set, and they are cheaper now - the selection analysis, the property rendering, the refusal
+  vocabulary and the write-and-undo path are all built.
 - **The UserForm designer's milestones M1 to M6 have all landed**, so it is no longer a remaining
   milestone; [userform-designer.md](userform-designer.md) stays the ground truth for what it does
   and what it deliberately does not.

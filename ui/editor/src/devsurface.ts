@@ -2656,6 +2656,29 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * ENCAPSULATE FIELD: `{fieldName}` puts a property pair in front of that module variable.
+     *
+     * No dialog and nothing to name - the property takes the variable's own name, which is what
+     * keeps every use of it working - so the answer is the host's, in the words the notification
+     * shows.
+     */
+    encapsulateField: async (args) => {
+      const name = args.fieldName === undefined ? "" : String(args.fieldName);
+      if (!name) { return { did: false, detail: "fieldName is required" }; }
+
+      const answer = await bridge.requestEncapsulateField(name);
+      return {
+        did: !answer.refused,
+        detail: answer.refused
+          ?? `${answer.field} is now a property over ${answer.backingField}`,
+        data: {
+          field: answer.field, backingField: answer.backingField,
+          accessors: answer.accessors, refused: answer.refused,
+        },
+      };
+    },
+
+    /**
      * IMPLEMENT INTERFACE, through the editor action the right-click menu runs.
      *
      * `{interfaceName}` narrows it to one of the interfaces the class declares; without it, every

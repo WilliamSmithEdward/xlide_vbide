@@ -601,6 +601,39 @@ export interface ImplementInterfaceResult {
 }
 
 /**
+ * textDocument/encapsulateField: a public module variable turned into a private one behind a
+ * property pair that keeps the variable's name.
+ *
+ * One module and no call sites, because the name does not change: what used to reach the variable
+ * reaches the property. Whole text back, for the reason rename gives.
+ */
+export interface EncapsulateFieldParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** The variable to encapsulate, by name. */
+    fieldName: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface EncapsulateFieldResult {
+    /** The module rewritten. Absent when it was refused. */
+    module?: string;
+    /** What that module says afterwards, whole. */
+    source?: string;
+    /** The name that is now a property. */
+    field?: string;
+    /** The private variable it now stands in front of. */
+    backingField?: string;
+    /** The two members written, for the summary the surface shows. */
+    accessors?: string[];
+    /** Present when nothing was written, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * workspace/renameModule: the new text of every module that mentions a module being renamed.
  *
  * The module's own name is not in its text - it belongs to the component, which the add-in

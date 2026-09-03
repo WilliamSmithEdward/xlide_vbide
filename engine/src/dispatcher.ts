@@ -27,6 +27,7 @@ import { analyzerInputFor } from './analyzerInput.js';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
+import { encapsulateFieldFor } from './encapsulateField';
 import { extractMethodFor } from './extractMethod';
 import { implementInterfaceFor } from './implementInterface';
 import { searchModules } from './search';
@@ -70,6 +71,8 @@ import {
     type OutlineResult,
     type ProjectOpenParams,
     type RenameModuleParams,
+    type EncapsulateFieldParams,
+    type EncapsulateFieldResult,
     type ExtractMethodParams,
     type ExtractMethodResult,
     type ImplementInterfaceParams,
@@ -401,6 +404,9 @@ export class Dispatcher {
             case 'textDocument/extractMethod':
                 return this.extractMethod(this.require<ExtractMethodParams>(params));
 
+            case 'textDocument/encapsulateField':
+                return this.encapsulateField(this.require<EncapsulateFieldParams>(params));
+
             case 'textDocument/implementInterface':
                 return this.implementInterface(this.require<ImplementInterfaceParams>(params));
 
@@ -685,6 +691,17 @@ export class Dispatcher {
             params.startLine,
             params.endLine,
             params.newName);
+    }
+
+    private encapsulateField(params: EncapsulateFieldParams): EncapsulateFieldResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { refused: 'This module is not one the engine holds.' };
+        }
+
+        return encapsulateFieldFor(params.moduleName, source, params.fieldName);
     }
 
     private implementInterface(params: ImplementInterfaceParams): ImplementInterfaceResult {

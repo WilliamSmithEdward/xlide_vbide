@@ -692,6 +692,32 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what encapsulating one module variable would make of its module. Null when
+    /// there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineEncapsulateField Answer, string ProjectId)?> EncapsulateFieldAsync(
+        string moduleName,
+        string fieldName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .EncapsulateFieldAsync(home.ProjectId, moduleName, home.ModuleType, fieldName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine for the stubs a class owes the interfaces it declares. Null when there is no
     /// engine or no address for the module, which is a different fact from an answer the engine
     /// refused and said why.

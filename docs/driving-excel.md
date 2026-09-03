@@ -490,6 +490,18 @@ await api.act("implementInterface", { interfaceName: "IStore" });   // omit it f
 //    nothing, and is indistinguishable from a member that legitimately does nothing.
 // -> { did: false, detail: "'Store' already implements every member of 'IStore'." } when there is
 //    nothing left to write, which is the answer for asking twice.
+
+// ENCAPSULATE FIELD. A public module variable becomes a private one behind a property pair.
+await api.act("encapsulateField", { fieldName: "Label" });
+// -> { did: true, detail: "Label is now a property over m_Label",
+//      data: { field: "Label", backingField: "m_Label",
+//              accessors: ["Property Get Label", "Property Let Label"] } }
+//    NOTHING OUTSIDE THE MODULE IS REWRITTEN, which is what makes this one safe: the property
+//    keeps the variable's name, so `held.Label = "x"` now calls Property Let and every module
+//    that used the field goes on compiling untouched. An Object field gets a Property Set
+//    instead, because VBA assigns one with Set.
+// -> refused for a Const, a WithEvents variable, an array, a declaration shared with another
+//    name, a variable that is already Private, or a name a procedure already has.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

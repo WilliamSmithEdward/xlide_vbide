@@ -554,6 +554,24 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks what putting a property pair in front of one module variable would make of the module.
+    /// Whole text back, for the reason rename gives.
+    /// </summary>
+    public async Task<EngineEncapsulateField?> EncapsulateFieldAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string fieldName,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["fieldName"] = fieldName;
+
+        var result = await CallAsync("textDocument/encapsulateField", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineEncapsulateField);
+    }
+
+    /// <summary>
     /// Asks for the stubs a class owes the interfaces it declares. Whole module text back, for the
     /// reason rename gives.
     /// </summary>

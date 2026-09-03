@@ -730,6 +730,12 @@ if ($Live) {
                                      # question the engine cannot ask is whether the class the VBE
                                      # compiles ends up holding the stubs.
                                      'implement-interface.mjs',
+                                     # encapsulate-field brings a SECOND module that uses the
+                                     # field, which is the one thing neither its engine suite nor
+                                     # a single-module check can ask: the property keeps the
+                                     # variable's name, so the module full of call sites must
+                                     # still compile without a line of it being rewritten.
+                                     'encapsulate-field.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

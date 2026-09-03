@@ -739,6 +739,19 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Encapsulate Field: what became a property, what the variable behind it is
+/// called, and the two members written - or the reason nothing changed.
+/// </summary>
+public sealed record EncapsulateResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("field")] string? Field,
+    [property: JsonPropertyName("backingField")] string? BackingField,
+    [property: JsonPropertyName("accessors")] string[] Accessors,
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Implement Interface: whose members were written and which ones, or the reason
 /// none were. The new text is not sent back, for the reason a rename's is not.
 /// </summary>
@@ -967,6 +980,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(RenameResultMessage))]
 [JsonSerializable(typeof(ExtractResultMessage))]
 [JsonSerializable(typeof(ImplementResultMessage))]
+[JsonSerializable(typeof(EncapsulateResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

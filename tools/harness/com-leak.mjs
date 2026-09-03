@@ -394,6 +394,32 @@ for (const name of [leakImpl, leakIface]) {
   await api.component("remove", { name, project: project.projectId }).catch(() => {});
 }
 
+// Encapsulate Field on a class of its own, built once for the same reason the pair above is.
+const leakField = "LeakField";
+await api.component("remove", { name: leakField, project: project.projectId }).catch(() => {});
+await api.component("add", { kind: "class", name: leakField, project: project.projectId });
+
+let leakFieldRound = 0;
+await repeat("encapsulating a field and undoing it", 0, async () => {
+  // A fresh name each round: the undo puts the module back, but the round after this one has to
+  // ask about something that is still a public variable either way.
+  const field = `Held${++leakFieldRound}`;
+  await api.writeModule(leakField, ["Option Explicit", "", `Public ${field} As String`].join(CRLF), project.projectId);
+  await api.caret(3, { module: leakField, project: project.projectId });
+
+  const made = await api.act("encapsulateField", { fieldName: field });
+  if (!made.did) {
+    throw new Error(`the field was not encapsulated, so this row measured nothing: ${made.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
+await api.pane("close", { module: leakField, project: project.projectId, answer: "discard" }).catch(() => {});
+await api.component("remove", { name: leakField, project: project.projectId }).catch(() => {});
+
 await repeat("renaming a component and back", 0, async () => {
   await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
   await wait(600);

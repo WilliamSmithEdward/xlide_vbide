@@ -312,6 +312,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, interface name, or null for every one it declares).</summary>
     public Action<int, string?>? ImplementInterfaceRequested { get; set; }
 
+    /// <summary>Raised when the page asks to put a property pair in front of a module variable:
+    /// (requestId, the variable's name).</summary>
+    public Action<int, string>? EncapsulateFieldRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -478,6 +482,28 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Encapsulate Field: what became a property, or why nothing did.</summary>
+    public void ShowEncapsulated(
+        int requestId,
+        string? field,
+        string? backingField,
+        string[] accessors,
+        string? module,
+        string? refused)
+    {
+        ArgumentNullException.ThrowIfNull(accessors);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new EncapsulateResultMessage(
+                "encapsulateResult", requestId, field, backingField, accessors, module, refused),
+            EditorMessageContext.Default.EncapsulateResultMessage));
     }
 
     /// <summary>Answers one Implement Interface: what was written, or why nothing was.</summary>
@@ -2496,6 +2522,17 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "encapsulateField":
+                    if (document.RootElement.TryGetProperty("id", out var encapsulateId)
+                        && encapsulateId.TryGetInt32(out var encapsulateRequestId)
+                        && document.RootElement.TryGetProperty("fieldName", out var encapsulateName)
+                        && encapsulateName.GetString() is { Length: > 0 } encapsulateField)
+                    {
+                        EncapsulateFieldRequested?.Invoke(encapsulateRequestId, encapsulateField);
                     }
 
                     break;

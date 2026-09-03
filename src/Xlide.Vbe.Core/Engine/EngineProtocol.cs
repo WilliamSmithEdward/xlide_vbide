@@ -195,6 +195,21 @@ public sealed record EngineImplementInterface(
     [property: JsonPropertyName("added")] string[]? Added,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of an Encapsulate Field: the one module it rewrites, whole. Refused says why nothing
+/// changed.
+/// </summary>
+public sealed record EngineEncapsulateField(
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("source")] string? Source,
+    /// <summary>The name that is now a property.</summary>
+    [property: JsonPropertyName("field")] string? Field,
+    /// <summary>The private variable it now stands in front of.</summary>
+    [property: JsonPropertyName("backingField")] string? BackingField,
+    /// <summary>The two members written.</summary>
+    [property: JsonPropertyName("accessors")] string[]? Accessors,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -303,6 +318,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineRename))]
 [JsonSerializable(typeof(EngineExtractMethod))]
 [JsonSerializable(typeof(EngineImplementInterface))]
+[JsonSerializable(typeof(EngineEncapsulateField))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
