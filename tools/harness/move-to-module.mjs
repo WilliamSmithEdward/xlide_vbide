@@ -112,16 +112,22 @@ try {
   const mine = [SOURCE, TARGET, CALLER].map((one) => one.toLowerCase());
   const isMine = (one) => mine.includes((one.module ?? "").toLowerCase());
 
+  // COUNTED, because `[].every()` is true. Filtering to this suite's modules and asking whether
+  // they all agree passes VACUOUSLY if the filter matches nothing - a renamed module, a pane that
+  // never opened, a project id that stopped lining up - and a check that cannot go red measures
+  // nothing. So the panes have to BE there, all of them, before their agreement means anything.
   const parity = await waitFor("the rewritten modules to agree with the host", async () => {
     const now = await api.parityAll();
-    return now.panes.filter(isMine).every((one) => one.agreed) ? now : null;
+    const ours = now.panes.filter(isMine);
+    return ours.length === mine.length && ours.every((one) => one.agreed) ? now : null;
   }, { budgetMs: 15000 }).catch(() => null);
 
   const others = ((parity ?? await api.parityAll()).stale ?? []).filter((one) => !isMine(one));
   check("the modules it rewrote agree with the host", parity !== null,
     parity === null
-      ? `stale: ${((await api.parityAll()).stale ?? []).filter(isMine)
-        .map((one) => one.module).join(", ") || "(none named)"}`
+      ? `of ${mine.length} module(s) ${(await api.parityAll()).panes.filter(isMine).length} had a pane; `
+        + `stale: ${((await api.parityAll()).stale ?? []).filter(isMine)
+          .map((one) => one.module).join(", ") || "(none named)"}`
       : `${parity.panes.filter(isMine).length} of this suite's pane(s)`
         + (others.length > 0
           ? `; other suites left stale: ${others.map((one) => one.module).join(", ")}`
