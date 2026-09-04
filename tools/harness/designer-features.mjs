@@ -2563,34 +2563,51 @@ try {
     // Waited for the PICTURE, not just the window: a form that is up has not necessarily painted,
     // and a capture taken in that gap answers a rectangle with none of the form's own colours in
     // it (measured - the row read 0 red and 0 blue while the labels were plainly there).
-    const shot = await waitFor("the form to have painted its colours", async () => {
-      const image = Buffer.from(await api.capture("form", "Quarter Entry"));
+    //
+    // AND WAITED FOR IT TO FINISH. Accepting the first frame carrying ANY red or blue pixel
+    // accepts a form caught mid-paint: on 2026-09-03 the deep gate photographed 10 red and 146
+    // blue where the finished picture holds thousands, and the row failed as though ZOrder had
+    // not reached the model. One qualifying pixel is not a painted form. The counts have to be
+    // substantial AND the same twice running, which is what "it has stopped changing" means when
+    // the thing being waited for is a repaint.
+    const countIn = (image) => {
       const from = image.readUInt32LE(10);
+      let red = 0;
+      let blue = 0;
       for (let px = from; px + 3 < image.length; px += 4) {
         const [b, g, r] = [image[px], image[px + 1], image[px + 2]];
-        if ((r > 200 && g < 60 && b < 60) || (b > 200 && r < 60 && g < 60)) {
-          return image;
-        }
+        if (r > 200 && g < 60 && b < 60) { red += 1; } else if (b > 200 && r < 60 && g < 60) { blue += 1; }
       }
 
-      return null;
-    }, { budgetMs: 15000 });
+      return { red, blue };
+    };
+
+    // Both labels are 90x50, so a finished picture holds thousands of each even fully overlapped.
+    // Well under the smallest real reading and far above a frame that has barely started.
+    const PAINTED = 500;
+
+    let settled = null;
+    const shot = await waitFor("the form to have finished painting its colours", async () => {
+      const image = Buffer.from(await api.capture("form", "Quarter Entry"));
+      const seen = countIn(image);
+      if (seen.red < PAINTED || seen.blue < PAINTED) {
+        settled = null;
+        return null;
+      }
+
+      const same = settled && settled.red === seen.red && settled.blue === seen.blue;
+      settled = seen;
+      return same ? image : null;
+    }, { budgetMs: 20000, pollMs: 250 });
     await api.userforms("close", "Quarter Entry");
     await waitFor("the form to close again", async () =>
       ((await api.userforms()).forms ?? []).length === 0, { budgetMs: 20000 });
     await waitFor("design mode to return", async () =>
       (await api.state()).debugMode === "design", { budgetMs: 20000 });
 
-    // Bottom-up 32-bit BGRA, the same shape designer-parity.mjs decodes.
-    const at = shot.readUInt32LE(10);
-    let red = 0;
-    let blue = 0;
-    for (let px = at; px + 3 < shot.length; px += 4) {
-      const [b, g, r] = [shot[px], shot[px + 1], shot[px + 2]];
-      if (r > 200 && g < 60 && b < 60) { red += 1; } else if (b > 200 && r < 60 && g < 60) { blue += 1; }
-    }
-
-    return { red, blue };
+    // Bottom-up 32-bit BGRA, the same shape designer-parity.mjs decodes - counted by the helper
+    // the wait above uses, so what was waited for and what is reported cannot drift apart.
+    return countIn(shot);
   };
 
   for (const [name, left, top, colour] of [["ZRed", 210, 60, "255"], ["ZBlue", 230, 75, "16711680"]]) {
