@@ -93,11 +93,30 @@ try {
     has(caller, 'Post "there", 1.2'), caller.map((one) => one.trim()).filter(Boolean).join(" | "));
   check("both call sites counted", made.data?.callSites === 2, JSON.stringify(made.data?.callSites));
 
-  const parity = await waitFor("the surface to agree with the host",
-    async () => { const now = await api.parityAll(); return now.agreed ? now : null; },
-    { budgetMs: 15000 }).catch(() => null);
-  check("every open module's surface agrees with the host", parity !== null,
-    parity ? `${parity.panes.length} pane(s)` : "still disagreeing");
+  // THE MODULES THIS SUITE REWROTE, not every pane in the session.
+  //
+  // `parityAll` reads every open pane, and in a gate run most of them were opened by suites this
+  // one has nothing to do with - so asserting on all of them makes this suite fail for somebody
+  // else's stale pane, which is what happened on 2026-09-03. The session-wide question belongs to
+  // three-copies.mjs, which exists for it. Anything else found stale is still REPORTED, so the
+  // information is not lost, but it does not fail a suite that cannot own it.
+  const mine = [OWNER, CALLER].map((one) => one.toLowerCase());
+  const isMine = (one) => mine.includes((one.module ?? "").toLowerCase());
+
+  const parity = await waitFor("the rewritten modules to agree with the host", async () => {
+    const now = await api.parityAll();
+    return now.panes.filter(isMine).every((one) => one.agreed) ? now : null;
+  }, { budgetMs: 15000 }).catch(() => null);
+
+  const others = ((parity ?? await api.parityAll()).stale ?? []).filter((one) => !isMine(one));
+  check("the modules it rewrote agree with the host", parity !== null,
+    parity === null
+      ? `stale: ${((await api.parityAll()).stale ?? []).filter(isMine)
+        .map((one) => one.module).join(", ") || "(none named)"}`
+      : `${parity.panes.filter(isMine).length} of this suite's pane(s)`
+        + (others.length > 0
+          ? `; other suites left stale: ${others.map((one) => one.module).join(", ")}`
+          : ""));
 
   const clean = await waitFor("the findings to settle", async () => {
     const mine = [OWNER, CALLER].map((one) => one.toLowerCase());
