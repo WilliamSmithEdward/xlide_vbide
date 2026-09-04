@@ -3594,6 +3594,13 @@ try {
   // returned in the finally, like anything else borrowed.
   await api.settings({ designerSnap: "grid" }).catch(() => {});
 
+  // THE RENAMED-AWAY NAME TOO. The rename section takes the form to `${form}R` and back, so an
+  // abort between those two steps leaves a form nothing removes - and a form left in the fixture
+  // is not a tidiness problem: module-sync's export counts one plan item per module and a form
+  // writes TWO files, so the next run of a suite that has nothing to do with designers fails on
+  // a fixture the last run poisoned. Observed exactly that way on 2026-09-03, where an aborted
+  // deep run left EntryForm2R behind and the gate failed on module-sync the next time.
+  await api.component("remove", { name: `${form}R`, project }).catch(() => {});
   await api.component("remove", { name: form, project }).catch(() => {});
   // And the FILE too, not only the session. This suite saves the workbook on purpose - the
   // Ctrl+S rows exist to prove the designer's save reaches it - so every run left its temporary

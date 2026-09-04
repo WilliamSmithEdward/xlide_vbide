@@ -29,7 +29,7 @@
  *   node tools\harness\com-leak.mjs 40      # more rounds, for a slower leak
  */
 
-import { open, wait, reporter } from "./xlide-api.mjs";
+import { open, wait, reporter, waitFor } from "./xlide-api.mjs";
 import { buildForm } from "./form-plan.mjs";
 
 const api = await open({});
@@ -102,6 +102,23 @@ const held = async () => {
 };
 
 const live = async () => (await held()).wrappers;
+
+/**
+ * The caret ASKED FOR and the page ACTUALLY SHOWING it are two different moments.
+ *
+ * Every refactoring row below acts on the module the surface is displaying, not on one it names,
+ * so a row that sets the caret and acts immediately can act on whatever was on screen before. It
+ * did: in the 2026-09-03 deep gate the encapsulate row reached `Runner` and threw "declares no
+ * module-level variable", which reads as a product failure and is a race in this file. The rows
+ * are written to throw rather than measure nothing, so it surfaced - but it surfaced as the leak
+ * step having no verdict, three suites away from the cause.
+ */
+async function onScreen(module) {
+  await api.caret(1, { module, project: project.projectId });
+  await waitFor(`the page to show ${module}`, async () =>
+    ((await api.ui()).focus.model ?? "").toLowerCase().endsWith(`/${module.toLowerCase()}`),
+    { budgetMs: 15000 });
+}
 
 /**
  * An operation run many times over, with the live count before and after.
@@ -337,6 +354,7 @@ await repeat("extracting a method and undoing it", 0, async () => {
     throw new Error(`${sample} holds no procedure to extract from, so this row would measure nothing`);
   }
 
+  await onScreen(sample);
   await api.caret(opens + 2, { module: sample, project: project.projectId });
   const lifted = await api.act("extractMethod", {
     startLine: opens + 2, endLine: closes, name: `LeakLift${Date.now() % 100000}`,
@@ -375,6 +393,7 @@ for (const [name, text] of [
 }
 
 await repeat("implementing an interface and undoing it", 0, async () => {
+  await onScreen(leakImpl);
   await api.caret(3, { module: leakImpl, project: project.projectId });
 
   const written = await api.act("implementInterface", { interfaceName: leakIface });
@@ -405,6 +424,7 @@ await repeat("encapsulating a field and undoing it", 0, async () => {
   // ask about something that is still a public variable either way.
   const field = `Held${++leakFieldRound}`;
   await api.writeModule(leakField, ["Option Explicit", "", `Public ${field} As String`].join(CRLF), project.projectId);
+  await onScreen(leakField);
   await api.caret(3, { module: leakField, project: project.projectId });
 
   const made = await api.act("encapsulateField", { fieldName: field });
@@ -426,6 +446,7 @@ await repeat("extracting a variable and undoing it", 0, async () => {
     "Option Explicit", "", "Public Sub Go()", "    Dim n As Long", "    n = 2",
     `    Debug.Print n * ${leakVariableRound}`, "End Sub",
   ].join(CRLF), project.projectId);
+  await onScreen(leakField);
   await api.caret(6, { module: leakField, project: project.projectId });
 
   const named = await api.act("extractVariable", {
@@ -460,6 +481,7 @@ await repeat("moving a procedure and undoing it", 0, async () => {
     "Option Explicit", "", `Public Sub ${proc}()`, "    Debug.Print 1", "End Sub",
   ].join(CRLF), project.projectId);
   await api.writeModule(leakMoveTo, ["Option Explicit"].join(CRLF), project.projectId);
+  await onScreen(leakMoveFrom);
   await api.caret(3, { module: leakMoveFrom, project: project.projectId });
 
   const moved = await api.act("moveToModule", { line: 3, column: 5, targetModule: leakMoveTo });
@@ -495,6 +517,7 @@ await repeat("introducing a parameter and undoing it", 0, async () => {
   await api.writeModule(leakCaller, [
     "Option Explicit", "", "Public Sub Far()", "    Post", "End Sub",
   ].join(CRLF), project.projectId);
+  await onScreen(leakOwner);
   await api.caret(4, { module: leakOwner, project: project.projectId, column: 9 });
 
   const named = await api.act("introduceParameter", { word: local });
