@@ -59,8 +59,9 @@ public sealed record ProductSettings
 
     /// <summary>
     /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
-    /// and everything folds away when the last tab closes. Off leaves the tree entirely to the
-    /// hand that opened it.
+    /// the folders on the way to it open while the workbook's others fold (#23), and everything
+    /// folds away when the last tab closes. Off leaves the tree entirely to the hand that opened
+    /// it.
     /// </summary>
     [JsonPropertyName("explorer.treeFollowsEditor")]
     public bool TreeFollowsEditor { get; set; } = true;

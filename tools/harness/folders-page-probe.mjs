@@ -112,11 +112,12 @@ const DRIVE = `(async () => {
   // the tree following the editor opens the folders above the module it is following.
   act('activate', { module: 'Module2' });
   await waitFor('active', () => state().explorer.active === 'Module2');
-  act('expandFolder', { workbook: 'Book1.xlsm', path: 'Sales', open: false });
-  check('the folder is shut while another module is being edited', !rows().includes('module:Module1'));
+  check('moving to a module outside the folder folds it, the way leaving a workbook folds the workbook',
+    !rows().includes('module:Module1') && state().explorer.workbooks[0].folders.every((one) => !one.expanded),
+    JSON.stringify(state().explorer.workbooks[0].folders));
   act('activate', { module: 'Module1' });
   await waitFor('active', () => state().explorer.active === 'Module1');
-  check('following the editor into a folded folder opens the folders above the module',
+  check('following the editor back into it opens the folders above the module',
     rows().includes('module:Module1') && state().explorer.workbooks[0].folders.every((one) => one.expanded),
     rows().join(' '));
   check('and the accordion unfolds the module there, under its folder',

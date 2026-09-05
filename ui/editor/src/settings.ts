@@ -17,9 +17,9 @@ export interface EditorSettings {
   /** A module xlide creates starts with Option Explicit. Restore never seeds. */
   insertOptionExplicit: boolean;
   /**
-   * The tree follows the editor: the module being worked on unfolds its procedures, and
-   * everything folds away when the last tab closes. Off leaves the tree to the hand that opened
-   * it.
+   * The tree follows the editor: the module being worked on unfolds its procedures, the folders
+   * on the way to it open while the workbook's others fold, and everything folds away when the
+   * last tab closes. Off leaves the tree to the hand that opened it.
    */
   treeFollowsEditor: boolean;
   /**

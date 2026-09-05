@@ -48,8 +48,9 @@ const OPTIONS = [
     kind: "toggle" as const,
     label: "Explorer follows the editor",
     description:
-      "The module you are working on unfolds its procedures in the tree, and everything folds "
-      + "away when the last tab closes. Off leaves the tree exactly as you left it.",
+      "The module you are working on unfolds its procedures in the tree, the folders on the way "
+      + "to it open while the others fold, and everything folds away when the last tab closes. "
+      + "Off leaves the tree exactly as you left it.",
   },
   {
     key: "explorerView" as const,

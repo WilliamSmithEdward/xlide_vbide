@@ -51,6 +51,16 @@ const TWIN_FOLDERS = {
 };
 
 const book = (ui, name) => ui.explorer.workbooks.find((one) => one.name === name);
+/** "A.B.C" -> ["a", "a.b", "a.b.c"]: the folders a module in that path is inside, lower-cased. */
+const ancestorsOf = (path) => {
+  const segments = (path ?? "").split(".").filter((one) => one.length > 0);
+  return segments.map((_, depth) => segments.slice(0, depth + 1).join(".").toLowerCase());
+};
+/** Whether a workbook's folders are exactly those on the way to the module: open on the path, folded elsewhere. */
+const onlyThePath = (ui, workbook, module) => {
+  const inside = ancestorsOf(book(ui, workbook)?.modules.find((one) => one.name === module)?.folder);
+  return (book(ui, workbook)?.folders ?? []).every((one) => one.expanded === inside.includes(one.path.toLowerCase()));
+};
 const foldersOf = (ui, name) => book(ui, name)?.folders.map((one) => one.path) ?? [];
 const folderMap = (rows) => Object.fromEntries(rows.map((row) => [row.name, row.folder ?? null]));
 const differences = (expected, actual) =>
@@ -76,6 +86,11 @@ const settles = (what, predicate, options) => waitFor(what, predicate, options).
 
 const originalSettings = await api.settings();
 let looseText = null;
+
+// Whether this session has already run this suite: the fresh-launch checks below are about the
+// order things arrive in at a session's start, which a rerun cannot reproduce, so a rerun asks
+// the same question by driving the state instead. Never skipped, never vacuous.
+const rerun = ((await api.log({ match: "folders.mjs: ran", max: 5 })).lines ?? []).length > 0;
 
 try {
   // ---- what the host read ----
@@ -103,17 +118,57 @@ try {
     foldersOf(ui, TWIN).join(","));
 
   // ---- the layout is a setting the host keeps ----
-  check("the tree layout is the default", originalSettings.explorerView === "tree" && ui.explorer.view === "tree",
+  // The developer's own choice is recorded and put back, not asserted: the page shows whatever
+  // the host holds, and the suite starts from the tree layout by asking for it.
+  check("the page shows the layout the host holds", ui.explorer.view === originalSettings.explorerView,
     `${originalSettings.explorerView} / ${ui.explorer.view}`);
+  if (originalSettings.explorerView !== "tree") {
+    await api.settings({ explorerView: "tree" });
+    await settles("the tree layout", async () => (await api.ui()).explorer.view === "tree");
+  }
   const switched = await api.act("explorerView", { view: "folders" });
   check("explorerView asks the host for the folder layout", switched.did, switched.detail);
   const landed = await settles("the folder layout", async () => (await api.ui()).explorer.view === "folders");
   check("and the layout lands on the host's echo", landed);
   check("the host keeps it as a setting", (await api.settings()).explorerView === "folders");
 
+  // ---- the folders follow the editor like the workbooks do ----
+  // In the workbook being edited, the folders on the way to the shown module are open and the
+  // others folded; the other workbook, where the attention never was, stands as it started. On a
+  // FRESH launch this is the state the session started in - the active module is announced
+  // before the tree arrives, and the folders have to catch up when it does - and which
+  // workbook the host shows first is the host's choice, so it is read rather than assumed. On a
+  // rerun the same rule is driven in the main workbook: out to the root, then back to Ledger.
+  if (rerun) {
+    await api.caret(1, { module: "Loose", project: MAIN });
+    await settles("Loose active", async () => (await api.ui()).explorer.active === "Loose");
+    await api.caret(1, { module: "Ledger", project: MAIN });
+    await settles("Ledger active", async () => (await api.ui()).explorer.active === "Ledger");
+    ui = await api.ui();
+    check("the folders on the way to the module being edited are open and the others folded (driven)",
+      onlyThePath(ui, MAIN, "Ledger")
+        && book(ui, MAIN).folders.find((one) => one.path === "Accounts.Ledger")?.expanded === true
+        && book(ui, MAIN).folders.find((one) => one.path === "Shared")?.expanded === false,
+      JSON.stringify(book(ui, MAIN).folders));
+  } else {
+    ui = await api.ui();
+    const shownIn = ui.explorer.attentionWorkbook;
+    const other = shownIn === MAIN ? TWIN : MAIN;
+    check("the folders on the way to the module being edited are open and the others folded (fresh launch)",
+      ui.explorer.active !== null && (shownIn === MAIN || shownIn === TWIN)
+        && onlyThePath(ui, shownIn, ui.explorer.active)
+        && book(ui, other).folders.every((one) => one.expanded),
+      `${ui.explorer.active} in ${shownIn}: ${JSON.stringify(book(ui, shownIn ?? MAIN)?.folders)}; other: ${JSON.stringify(book(ui, other)?.folders)}`);
+  }
+
   // ---- the shape, per workbook ----
   await api.act("expandWorkbook", { workbook: MAIN, open: true });
   await api.act("expandWorkbook", { workbook: TWIN, open: true });
+  for (const workbook of [MAIN, TWIN]) {
+    for (const path of foldersOf(ui, workbook)) {
+      await api.act("expandFolder", { workbook, path, open: true });
+    }
+  }
   const mainRows = await rowsOf(MAIN);
   check("the main workbook draws folders before modules, nested, with the root modules last",
     (mainRows ?? []).join(" ") === [
@@ -152,7 +207,9 @@ try {
   // around the module already being edited stays folded, which is the developer's own hand.
   await api.caret(1, { module: "Loose", project: MAIN });
   await settles("Loose active", async () => (await api.ui()).explorer.active === "Loose");
-  await api.act("expandFolder", { workbook: MAIN, path: "Accounts", open: false });
+  check("moving to a module at the root folds every folder of that workbook",
+    book(await api.ui(), MAIN).folders.every((one) => !one.expanded),
+    JSON.stringify(book(await api.ui(), MAIN).folders));
   await api.caret(1, { module: "Bare", project: MAIN });
   const followed = await settles("the follow", async () => {
     const now = await api.ui();
@@ -160,7 +217,8 @@ try {
       && ["Accounts", "Accounts.Billing", "Accounts.Billing.Reminders"]
         .every((path) => book(now, MAIN).folders.find((one) => one.path === path)?.expanded);
   });
-  check("editing a module inside a folded folder opens the folders above it", followed,
+  check("editing a module inside a folded folder opens the folders above it, and only those", followed
+    && book(await api.ui(), MAIN).folders.find((one) => one.path === "Shared")?.expanded === false,
     JSON.stringify(book(await api.ui(), MAIN).folders));
 
   // ---- an annotation typed into a module moves it, and back ----
@@ -233,6 +291,7 @@ try {
   if (looseText !== null) {
     await api.writeModule("Loose", looseText, MAIN).catch(() => {});
   }
+  await api.mark("folders.mjs: ran").catch(() => {});
   await settles("the layout put back", async () => {
     await api.settings({ explorerView: originalSettings.explorerView });
     return (await api.settings()).explorerView === originalSettings.explorerView;

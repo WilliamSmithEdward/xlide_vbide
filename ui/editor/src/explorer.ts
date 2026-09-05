@@ -22,10 +22,13 @@
  * TWO LAYOUTS, tabbed at the top of the pane (#23). "Tree" is the flat list above. "Folders"
  * groups a workbook's modules by the '@Folder("Parent.Child") comment at the top of each one -
  * the Rubberduck convention, so a project organised there is organised here without editing a
- * line. A folder row unfolds and folds like a workbook; a module row is the same row it is in the
- * flat list, one level deeper per folder, and the accordion, the selection and the following all
- * work the same way. Modules with no annotation sit at the workbook's root. Which layout shows is
- * a setting, so it survives the session; the tabs are the handle on it.
+ * line. A folder row unfolds and folds like a workbook, and FOLLOWS like one: the folders on the
+ * way to the module being edited open and the workbook's others fold when the attention moves
+ * between folders, under the same setting as everything else that follows. A module row is the
+ * same row it is in the flat list, one level deeper per folder, and the accordion, the selection
+ * and the following all work the same way. Modules with no annotation sit at the workbook's
+ * root. Which layout shows is a setting, so it survives the session; the tabs are the handle on
+ * it.
  *
  * And the CURRENT PROCEDURE: the row of the procedure the caret is in, under the unfolded module,
  * wears a mark, so where the developer is reads off the tree as well as off the status bar.
@@ -189,6 +192,9 @@ export class Explorer {
   /** The workbook the attention is in, so collapsing others happens only when it moves. */
   private attentionWorkbook: string | null = null;
 
+  /** The folder the attention is in (workbook and path), so folding the others happens only when it moves. */
+  private attentionFolder: string | null = null;
+
   /** Fetched procedures by module, dropped whenever the project set is republished. */
   private readonly outlines = new Map<string, ExplorerProcedure[]>();
 
@@ -198,10 +204,11 @@ export class Explorer {
   private dragConsumedClick = false;
 
   /**
-   * Folders the developer folded, by workbook and path. Folders start OPEN: the view exists to
-   * show the structure, and a fresh tree hiding every module behind a click would show none of
-   * it. A folded folder stays folded until the developer opens it, or the module being edited
-   * turns out to be inside it and the tree is following.
+   * Folded folders, by workbook and path. Folders start OPEN: the view exists to show the
+   * structure, and a fresh tree hiding every module behind a click would show none of it. From
+   * there they follow the editor like the workbooks do (see setExpandedModule): the folders on
+   * the way to the module being edited open, the rest fold when the attention moves, and a
+   * folder the developer opened or shut by hand keeps that until the attention genuinely moves.
    */
   private readonly collapsedFolders = new Set<string>();
 
@@ -516,7 +523,24 @@ export class Explorer {
       void this.fetchOutline(this.expandedModule);
     }
 
+    // THE ACTIVE MODULE IS ANNOUNCED BEFORE THE TREE ARRIVES at a session's start, so the follow
+    // that ran then found no owner: no workbook took the attention, and no folder folded around
+    // the module being edited - the first folder layout a developer saw had every folder open
+    // (the folders suite, 2026-09-05, on a fresh launch and never on a rerun). The whole follow
+    // runs again here, with the projects in hand; setExpandedModule is idempotent for a module
+    // already unfolded, and honours the setting itself.
+    if (this.active !== null && this.ownerOf(this.active, this.activeWorkbook ?? undefined)) {
+      this.setExpandedModule(this.active, this.activeWorkbook ?? undefined);
+    }
+
     this.render();
+  }
+
+  /** The workbook a module belongs to: the one named, or the first that holds the name. */
+  private ownerOf(name: string, workbook?: string): ExplorerProject | undefined {
+    return workbook
+      ? this.projects.find((project) => project.name.toLowerCase() === workbook.toLowerCase())
+      : this.projects.find((project) => project.components.some((component) => component.name === name));
   }
 
   /** The last projects payload applied, so an identical republish is a no-op. */
@@ -621,10 +645,7 @@ export class Explorer {
       return;
     }
 
-    const owner = workbook
-      ? this.projects.find((project) => project.name.toLowerCase() === workbook.toLowerCase())
-      : this.projects.find((project) =>
-        project.components.some((component) => component.name === name));
+    const owner = this.ownerOf(name, workbook);
 
     const ownerName = owner?.name ?? null;
     if (this.expandedModule !== name || this.expandedModuleWorkbook !== ownerName) {
@@ -634,12 +655,7 @@ export class Explorer {
     }
 
     if (owner) {
-      // The folders above the module open on the way to it, or the accordion would unfold a row
-      // the developer cannot see. Only those: a folder folded by hand elsewhere stays folded.
-      const folder = owner.components.find((component) => component.name === name)?.folder;
-      for (const path of ancestorPaths(folder)) {
-        this.collapsedFolders.delete(this.folderStateKey(owner.name, path));
-      }
+      this.followFolders(owner, name);
     }
 
     if (owner) {
@@ -652,6 +668,32 @@ export class Explorer {
         this.attentionWorkbook = owner.name;
       }
       this.expandedWorkbooks.set(owner.name, true);
+    }
+  }
+
+  /**
+   * THE FOLDERS FOLLOW THE SAME RULE AS THE WORKBOOKS (the owner, 2026-09-05). The folders above
+   * the module being edited open on the way to it, or the accordion would unfold a row the
+   * developer cannot see; and when the attention moves into a DIFFERENT folder, the workbook's
+   * other folders fold - so the tree reads as "where I am", the way the accordion does. Only
+   * then: while work continues inside one folder, a folder opened by hand elsewhere stays open,
+   * exactly as a workbook collapsed by hand stays collapsed.
+   */
+  private followFolders(owner: ExplorerProject, name: string): void {
+    const folder = owner.components.find((component) => component.name === name)?.folder;
+    const path = ancestorPaths(folder);
+    const attention = this.folderStateKey(owner.name, path[path.length - 1] ?? "");
+    if (this.attentionFolder !== attention) {
+      this.attentionFolder = attention;
+      const onPath = new Set(path.map((one) => folderKey(one)));
+      for (const one of allFolders(this.folderTreeOf(owner))) {
+        if (!onPath.has(folderKey(one.path))) {
+          this.collapsedFolders.add(this.folderStateKey(owner.name, one.path));
+        }
+      }
+    }
+    for (const one of path) {
+      this.collapsedFolders.delete(this.folderStateKey(owner.name, one));
     }
   }
 
@@ -683,7 +725,9 @@ export class Explorer {
     const soleWorkbook = this.projects.length <= 1;
 
     const wasUnfolded = this.expandedModule !== null
-      || (!soleWorkbook && [...this.expandedWorkbooks.values()].some((open) => open));
+      || (!soleWorkbook && [...this.expandedWorkbooks.values()].some((open) => open))
+      || this.projects.some((project) =>
+        allFolders(this.folderTreeOf(project)).some((folder) => this.isFolderExpanded(project.name, folder.path)));
 
     if (!wasUnfolded) {
       return;
@@ -691,6 +735,17 @@ export class Explorer {
 
     this.expandedModule = null;
     this.expandedModuleWorkbook = null;
+
+    // The folders fold with everything else, whatever the workbook count: folded folders still
+    // show the shape of the project, where a folded sole workbook shows nothing at all. The
+    // attention goes with them, so the next activation opens its path rather than reading "the
+    // attention has not moved" over a tree it just folded.
+    for (const project of this.projects) {
+      for (const folder of allFolders(this.folderTreeOf(project))) {
+        this.collapsedFolders.add(this.folderStateKey(project.name, folder.path));
+      }
+    }
+    this.attentionFolder = null;
 
     if (!soleWorkbook) {
       this.expandedWorkbooks.clear();
