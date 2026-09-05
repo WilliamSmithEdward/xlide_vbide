@@ -534,21 +534,32 @@ if ($Live) {
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw "Excel did not start on $fixture" }
 
-        # THE GATE NAMES ITS OWN SESSION. A bare open() refuses to guess between two live hosts,
-        # which is right for a hand-run script and fatal for a gate: the owner opened an Access
-        # database beside a -Deep run on 2026-09-05, its add-in opened a door, and four steps
-        # reported "several instances are live" with nothing wrong in any of them. The client
-        # honours XLIDE_PID when a caller names nothing, so every suite in the group is aimed
-        # at the Excel this launch started, whatever else is running on the machine.
-        $env:XLIDE_PID = $excel.Id
         return $excel
+    }
+
+    # THE GATE NAMES ITS OWN SESSION, for exactly as long as it drives it. A bare open() refuses
+    # to guess between two live hosts, which is right for a hand-run script and fatal for a
+    # gate: the owner opened an Access database beside a -Deep run on 2026-09-05, its add-in
+    # opened a door, and four steps reported "several instances are live" with nothing wrong in
+    # any of them. Both clients honour XLIDE_PID when a caller names nothing, so the suites of a
+    # group are aimed at the Excel the group launched. SCOPED to the work, never left in the
+    # environment: a step that launches its own Excel (the macros-disabled probe) and connects
+    # bare would otherwise be sent to the previous group's session, which is how the first
+    # attempt at this failed the very next step.
+    function Invoke-Aimed([int] $processId, [scriptblock] $work) {
+        $env:XLIDE_PID = $processId
+        try { & $work } finally { Remove-Item Env:XLIDE_PID -ErrorAction SilentlyContinue }
     }
 
     # One fixture group: a fresh launch, then each node suite, each held to the ONE verdict
     # spelling. A suite may name arguments after its file, which is how module-sync says which
     # planner a run is about and the walk names its step count.
     function Invoke-SuiteGroup([string] $fixture, [string[]] $suites) {
-        Use-Fixture $fixture | Out-Null
+        $excel = Use-Fixture $fixture
+        Invoke-Aimed $excel.Id { Invoke-SuiteList $suites }
+    }
+
+    function Invoke-SuiteList([string[]] $suites) {
         $ran = @()
         foreach ($suite in $suites) {
             $parts = $suite -split ' '
@@ -870,9 +881,8 @@ if ($Live) {
         # Whatever the suites left open is fine: the sweep brings its own state and puts it back.
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { $excel = Use-Fixture 'DebugFixture.xlsm' }
-        $env:XLIDE_PID = $excel.Id
 
-        $answer = node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1
+        $answer = Invoke-Aimed $excel.Id { node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1 }
         $answer | Out-Host
 
         $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
@@ -959,6 +969,10 @@ if ($Deep) {
         $answer | Where-Object { $_ -match 'FAIL|SKIPPED|passed' } | ForEach-Object { Write-Host "  $_" }
         if ($answer -match 'SKIPPED') { return 'skipped: VBA project object model trust is off' }
         if (($answer | Select-String '^PASS' | Select-Object -Last 1) -eq $null) {
+            # The tail of what it said, because a probe that dies before its first check prints
+            # no line the filter above keeps, and "did not pass" then hides the cause entirely
+            # (2026-09-05: nothing to read but the verdict).
+            $answer | Select-Object -Last 20 | ForEach-Object { Write-Host "  | $_" }
             throw 'Test-MacrosDisabled.ps1 did not pass'
         }
         'design mode Excel will not leave, and the product names why'
