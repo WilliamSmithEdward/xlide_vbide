@@ -1153,7 +1153,9 @@ public sealed record DebugSettingsReply(
     /// <summary>The grid's spacing in points.</summary>
     [property: JsonPropertyName("designerGridSize")] int DesignerGridSize,
     /// <summary>Which explorer layout is showing: "tree" or "folders".</summary>
-    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree");
+    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree",
+    /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
+    [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true);
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

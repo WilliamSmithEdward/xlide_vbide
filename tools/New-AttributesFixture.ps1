@@ -25,8 +25,9 @@
     Built through the xlide api, so "Trust access to the VBA project object model" does NOT have
     to be on. A Debug build must be registered and loading. Every module compiles.
 
-    The fixture is built with NO attributes applied; the suite applies them, saves, and takes them
-    away again at its start so a rerun begins from the same place.
+    The build's own save writes the annotations into the attributes (that is what a save does, by
+    default), so the file as built carries them. The suite takes them away at its start, with the
+    setting off, and again at its end, so every run begins from the same place.
 
 .EXAMPLE
     tools\New-AttributesFixture.ps1

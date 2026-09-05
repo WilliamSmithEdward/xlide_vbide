@@ -72,17 +72,30 @@ Applying writes what the annotations say and leaves every other attribute alone.
 attribute away is a separate act: the `attribute-not-annotated` finding offers it, beside the
 text edit that adds the annotation instead.
 
+## When it happens
+
+A save writes the annotations first. Every module of the workbook being saved whose annotations
+are not yet its attributes is re-imported with them, and then the save goes; a module with nothing
+to write is not touched. An import through the sync feature does the same for the modules it
+created or rewrote: the file said what the module should be. Both are under one setting,
+`attributes.applyOnSave`, on by default; off leaves the drift in the Problems pane with its quick
+fix for whoever wants to choose the moment. There is no menu item: the owner's call
+(2026-09-05) was that the save and the import are the moments, and a right-click for it would be
+a chore. The re-import keeps the surface still: the module's pane is reopened before the tree
+and the tab strip are republished, so the same tabs stay in the same order, the module stays
+active and unfolded, and the caret returns to where it was.
+
 ## Surfaces
 
-- The Problems pane, with quick fixes: apply the module's annotations (a host action, since no
-  text edit can re-import a module), add the missing annotation (a text edit), remove the
+- The Problems pane, with quick fixes: apply the module's annotations now (a host action, since
+  no text edit can re-import a module), add the missing annotation (a text edit), remove the
   attribute (a host action).
 - A hover on an annotation: what it writes, and what the module has now.
-- The module's context menu: Apply Annotations to Attributes, on standard and class modules.
 - The api: `attributes` GET for the annotations, the saved attributes and the drift; POST
-  `action=apply` and `action=remove`. `tools/harness/attributes.mjs` drives the whole loop against
-  `AttributesFixture.xlsm` (`tools/New-AttributesFixture.ps1`), saving the workbook on purpose to
-  prove the package reader, and putting the file back afterwards.
+  `action=apply` and `action=remove`; `settings` for `applyAttributesOnSave`.
+  `tools/harness/attributes.mjs` drives the whole loop against `AttributesFixture.xlsm`
+  (`tools/New-AttributesFixture.ps1`), saving the workbook on purpose to prove the package
+  reader and the save path, and putting the file back afterwards.
 
 ## Not done
 

@@ -27,6 +27,8 @@ export interface EditorSettings {
    * modules by their '@Folder("Parent.Child") annotation. The tabs at the top of the pane.
    */
   explorerView: "tree" | "folders";
+  /** A save first writes every module's attribute annotations into its attributes. */
+  applyAttributesOnSave: boolean;
   /** One indent level, in spaces. Governs typing, smart Enter, and Format Module alike. */
   formatIndentSize: number;
   /** Which planner decides what an import or export will do: "xlide" or "builtIn". */
@@ -50,6 +52,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   insertOptionExplicit: true,
   treeFollowsEditor: true,
   explorerView: "tree",
+  applyAttributesOnSave: true,
   formatIndentSize: 4,
   syncEngine: "xlide",
   designerSnap: "grid",
@@ -81,6 +84,7 @@ export function applySettings(next: IncomingSettings): void {
     insertOptionExplicit: next.insertOptionExplicit !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
     explorerView: next.explorerView === "folders" ? "folders" : "tree",
+    applyAttributesOnSave: next.applyAttributesOnSave !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
     designerSnap: next.designerSnap === "objects" ? "objects"

@@ -59,8 +59,6 @@ export interface ShellHandlers {
   activateModule(name: string, workbook?: string): void;
   /** The developer pressed the explorer's other layout tab: a settings change, echoed back. */
   changeView(view: ExplorerView): void;
-  /** The developer asked for a module's annotations to be written into its attributes. */
-  applyAttributes(name: string, workbook?: string): void;
   /** The developer asked for a form's designer tab - markup beside the visual form. */
   openDesigner(name: string, workbook?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
@@ -1584,14 +1582,6 @@ export class Shell {
     // menu is exactly where it belongs by this menu's own rule.
     if (kind === ComponentKind.Form) {
       items.unshift({ label: "Open Designer", run: () => this.handlers.openDesigner(name, workbook) }, {});
-    }
-
-    // ATTRIBUTES, for the modules the editor can re-import: a standard or class module's
-    // annotations ('@PredeclaredId, '@Description and the rest) are written into the hidden
-    // attributes the code pane cannot show. A document module cannot be imported and a form is
-    // not offered yet, so neither gets the item - left out, by this menu's own rule.
-    if (kind === ComponentKind.StandardModule || kind === ComponentKind.ClassModule) {
-      items.push({ label: "Apply Annotations to Attributes", run: () => this.handlers.applyAttributes(name, workbook) });
     }
 
     // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the workbook

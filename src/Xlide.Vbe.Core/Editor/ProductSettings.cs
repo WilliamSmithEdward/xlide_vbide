@@ -77,6 +77,16 @@ public sealed record ProductSettings
     public string ExplorerView { get; set; } = "tree";
 
     /// <summary>
+    /// Saving the workbook first writes every module's attribute annotations into its attributes
+    /// ('@PredeclaredId, '@Description and the rest), and so does importing a module. On by
+    /// default, because an annotation the developer typed is what they meant the module to be,
+    /// and the save is the moment the module is committed. Off leaves the drift in the Problems
+    /// pane with its quick fix, for whoever wants to choose the moment.
+    /// </summary>
+    [JsonPropertyName("attributes.applyOnSave")]
+    public bool ApplyAttributesOnSave { get; set; } = true;
+
+    /// <summary>
     /// One indent level, in spaces. Governs the EDITOR's own indentation, what smart Enter
     /// leaves behind, and Format Module - which used to be three different behaviours from one
     /// name (2026-08-08).

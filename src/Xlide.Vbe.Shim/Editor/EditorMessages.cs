@@ -266,7 +266,9 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("designerSnap")] string DesignerSnap,
     [property: JsonPropertyName("designerGridSize")] int DesignerGridSize,
     /// <summary>Which explorer layout is showing: "tree" or "folders".</summary>
-    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree");
+    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree",
+    /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
+    [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true);
 
 /// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>
 public sealed record SurfaceSearchMatch(

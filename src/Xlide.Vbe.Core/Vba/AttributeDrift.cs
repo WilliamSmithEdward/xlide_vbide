@@ -104,7 +104,7 @@ public static class AttributeDrift
             if (actual is null)
             {
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplied, annotation.Line,
-                    $"{spelled} is not known to be applied: the saved workbook does not carry {moduleName}'s attributes yet. Apply annotations writes it.",
+                    $"{spelled} is not known to be applied: the saved workbook does not carry {moduleName}'s attributes yet. It is written when you save, or now from the quick fix.",
                     annotation.Kind, annotation.Target, occurrence));
                 continue;
             }
@@ -115,7 +115,7 @@ public static class AttributeDrift
                 var attribute = AttributeName(annotation.Kind);
                 var where = annotation.Target is null ? moduleName : $"{moduleName}.{annotation.Target}";
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplied, annotation.Line,
-                    $"{spelled} is annotated, but {where}'s {attribute} is {has ?? "not set"}. Apply annotations to write it.",
+                    $"{spelled} is annotated, but {where}'s {attribute} is {has ?? "not set"}. It is written when you save, or now from the quick fix.",
                     annotation.Kind, annotation.Target, occurrence));
             }
         }

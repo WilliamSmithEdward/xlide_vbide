@@ -3372,6 +3372,7 @@ export function demoTransport(): HostTransport {
           designerSnap: message.designerSnap,
           designerGridSize: message.designerGridSize,
           explorerView: message.explorerView,
+          applyAttributesOnSave: message.applyAttributesOnSave !== false,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

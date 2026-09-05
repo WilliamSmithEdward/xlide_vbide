@@ -473,6 +473,10 @@ internal sealed partial class AddInSession : IDisposable
                     // are told, the way they are told when a component is added by hand.
                     PublishProjects();
                     _analysis?.Reanalyse();
+
+                    // An imported file's annotations are written into its attributes, the way a
+                    // save writes them: the file said what the module should be.
+                    ApplyAnnotationsAfterImport(syncProjectId, applied.Changed);
                 }
 
                 Log.Info($"sync: {(importing ? "import" : "export")} applied: "
@@ -2191,6 +2195,17 @@ internal sealed partial class AddInSession : IDisposable
         // calls back for the raw save ("saveOnly"). Ctrl+S is a HOST accelerator - the
         // page never sees the key at all, which is why a page-side binding alone read as
         // "CTRL+S still not working" from both halves (the owner, 2026-08-15).
+        // A SAVE WRITES THE ANNOTATIONS FIRST. An annotation the developer typed is what they
+        // meant the module to be, and the save is the moment the module is committed, so every
+        // module of the workbook being saved whose annotations are not yet its attributes is
+        // re-imported with them before the save goes (the owner, 2026-09-05: "apply it on save").
+        // Under the setting, and only for modules with drift - a save with nothing to apply
+        // touches nothing.
+        if (command == VbeCommands.Command.Save && _settings.ApplyAttributesOnSave)
+        {
+            ApplyAnnotationsBeforeSave();
+        }
+
         if (command == VbeCommands.Command.Save && !skipDesignerApply && _activeDesignerTab is { } saveTab)
         {
             _editorSurface?.RequestDesignerApplySave(saveTab.Module, DisplayFromProjectId(saveTab.ProjectId));

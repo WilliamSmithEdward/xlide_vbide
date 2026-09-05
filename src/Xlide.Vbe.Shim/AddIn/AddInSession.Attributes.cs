@@ -196,7 +196,7 @@ internal sealed partial class AddInSession
                 case DriftKind.AnnotationNotApplied when !offeredApply:
                     offeredApply = true;
                     actions.Add(new SurfaceCodeAction(
-                        $"Apply annotations to {module}'s attributes",
+                        $"Apply annotations to {module}'s attributes now",
                         IsPreferred: true, item.Code, lineStart, lineEnd, [],
                         "applyAttributes", [module, display]));
                     break;
@@ -470,7 +470,12 @@ internal sealed partial class AddInSession
             var wasOpen = _editorSurface?.TextOf(module, display) is not null;
             var wasShown = string.Equals(_editorSurface?.Module, module, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(_shownProject, owner, StringComparison.OrdinalIgnoreCase);
-            var caretLine = wasShown ? _editorSurface?.CaretLine ?? 1 : 1;
+            var shownBefore = _editorSurface?.Module;
+            var shownProjectBefore = DisplayFromProjectId(_shownProject);
+            var shownLineBefore = _editorSurface?.CaretLine ?? 1;
+            var shownColumnBefore = _editorSurface?.CaretColumn ?? 1;
+            var caretLine = wasShown ? shownLineBefore : 1;
+            var caretColumn = wasShown ? shownColumnBefore : 1;
             var breakpoints = BreakpointsFor(module, display).ToArray();
             foreach (var key in new[] { WrittenKey(module, display), WrittenKey(module, null) })
             {
@@ -499,27 +504,33 @@ internal sealed partial class AddInSession
             SavedModules.Assert(savedPath, module, applied);
             Log.Info($"attributes: {verb} on {module}: {string.Join("; ", result.Changes)}");
 
-            ComponentsChanged();
-
-            if (wasOpen)
+            // THE MODULE NEVER LEAVES THE SURFACE. Its pane went with the old component; it is
+            // opened again HERE, before the tree and the tab strip are republished, so both lists
+            // still hold the module when they are drawn and nothing flickers out and back in. The
+            // native breakpoints went too, and this session's record puts them back through the
+            // same toggle a click makes; then the caret returns to where the developer had it,
+            // and the module that was showing before shows again if this was not it.
+            if (wasOpen || breakpoints.Length > 0)
             {
-                GoTo(module, caretLine, 1, display);
-            }
-
-            // The native breakpoints went with the old component; this session's record puts
-            // them back, through the same toggle a click makes.
-            if (breakpoints.Length > 0)
-            {
-                GoTo(module, breakpoints[0], 1, display);
+                GoTo(module, breakpoints.Length > 0 ? breakpoints[0] : caretLine, 1, display);
                 foreach (var line in breakpoints)
                 {
                     ToggleBreakpoint(line);
                 }
-                if (wasOpen)
+
+                if (wasShown)
                 {
-                    GoTo(module, caretLine, 1, display);
+                    GoTo(module, caretLine, caretColumn, display);
+                }
+                else if (shownBefore is not null)
+                {
+                    // The developer was in another module; this one was open behind it, or only
+                    // carried breakpoints. Back to theirs, caret where it was.
+                    GoTo(shownBefore, shownLineBefore, shownColumnBefore, shownProjectBefore);
                 }
             }
+
+            ComponentsChanged();
 
             RefreshAttributeDriftFor(owner, module, type, roundTrip);
             _analysis?.Reanalyse();
@@ -544,6 +555,105 @@ internal sealed partial class AddInSession
             {
                 // A temp file that would not go is not worth failing the developer over.
             }
+        }
+    }
+
+    /// <summary>
+    /// Writes the annotations of every module of the shown workbook whose attributes do not yet
+    /// match, before a save. Only modules with drift of that kind are touched; a refusal is said
+    /// and the save goes on regardless, because a save the developer asked for is not something
+    /// an attribute may hold up.
+    /// </summary>
+    private void ApplyAnnotationsBeforeSave()
+    {
+        if (_shownProject is not { } projectId)
+        {
+            return;
+        }
+
+        List<string> pending;
+        lock (_attributeDrift)
+        {
+            var prefix = DriftKey(projectId, string.Empty);
+            pending = [.. _attributeDrift
+                .Where(pair => pair.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && pair.Value.Any(item => item.Kind == DriftKind.AnnotationNotApplied))
+                .Select(pair => pair.Key[prefix.Length..])];
+        }
+
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        ApplyAnnotationsTo(projectId, pending, "before saving");
+    }
+
+    /// <summary>The same, for modules a sync import just created or rewrote from files.</summary>
+    private void ApplyAnnotationsAfterImport(string? projectId, IReadOnlyList<string> modules)
+    {
+        if (projectId is null || modules.Count == 0 || !_settings.ApplyAttributesOnSave)
+        {
+            return;
+        }
+
+        // The drift cache may not have seen the imported text yet; each module is read now.
+        var saved = SavedModules.For(projectId);
+        var pending = new List<string>();
+        foreach (var module in modules)
+        {
+            using var component = FindComponent(module, projectId, out _);
+            if (component is null)
+            {
+                continue;
+            }
+            var type = component.GetInt32("Type");
+            if (type is not (StandardModuleType or ClassModuleType))
+            {
+                continue;
+            }
+            var source = ProjectReader.ReadSource(component) ?? string.Empty;
+            if (DriftFor(saved, module, ProjectReader.TypeName(type), source).Any(item => item.Kind == DriftKind.AnnotationNotApplied))
+            {
+                pending.Add(module);
+            }
+        }
+
+        ApplyAnnotationsTo(projectId, pending, "after the import");
+    }
+
+    private void ApplyAnnotationsTo(string projectId, List<string> modules, string when)
+    {
+        if (modules.Count == 0)
+        {
+            return;
+        }
+
+        var display = DisplayFromProjectId(projectId);
+        var written = new List<string>();
+        var refusals = new List<string>();
+        foreach (var module in modules)
+        {
+            var refused = ApplyAttributes(module, display, out var changes, out _);
+            if (refused is not null)
+            {
+                refusals.Add($"{module}: {refused}");
+            }
+            else if (changes.Count > 0)
+            {
+                written.Add($"{module} ({changes.Count})");
+            }
+        }
+
+        if (written.Count > 0)
+        {
+            Log.Info($"attributes: {when}, wrote annotations into {string.Join(", ", written)}");
+            _editorSurface?.Notify($"Annotations written into {string.Join(", ", written)} {when}.");
+        }
+        if (refusals.Count > 0)
+        {
+            Log.Warn($"attributes: {when}, refused: {string.Join(" | ", refusals)}");
+            _editorSurface?.Notify($"Annotations not written {when}: {string.Join(" ", refusals)}");
         }
     }
 

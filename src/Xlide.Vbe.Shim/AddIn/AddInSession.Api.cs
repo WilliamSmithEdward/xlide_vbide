@@ -4943,6 +4943,7 @@ internal sealed partial class AddInSession
                         ExplorerView = request.Query.TryGetValue("explorerView", out var view)
                             ? view
                             : settings.ExplorerView,
+                        ApplyAttributesOnSave = Flag("applyAttributesOnSave", settings.ApplyAttributesOnSave),
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4959,7 +4960,8 @@ internal sealed partial class AddInSession
                         settings.SyncEngine,
                         settings.DesignerSnap,
                         settings.DesignerGridSize,
-                        settings.ExplorerView),
+                        settings.ExplorerView,
+                        settings.ApplyAttributesOnSave),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

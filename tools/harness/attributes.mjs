@@ -70,6 +70,13 @@ async function resetToBuilt(label) {
 
 let registryText = null;
 
+// A save writes annotations by default, and this suite saves to prove other things, so the
+// setting is off for the run and put back at the end. The on-save behaviour gets its own section.
+const originalSettings = await api.settings();
+if (originalSettings.applyAttributesOnSave !== false) {
+  await api.settings({ applyAttributesOnSave: false });
+}
+
 try {
   await resetToBuilt("reset at start");
 
@@ -127,7 +134,7 @@ try {
   await wait(800);
   const fixes = await api.act("quickFixes", { line: 2, column: 1 });
   check("the annotation's line offers the apply as a quick fix",
-    (fixes.data ?? []).some((one) => one.title === "Apply annotations to Registry's attributes"),
+    (fixes.data ?? []).some((one) => one.title === "Apply annotations to Registry's attributes now"),
     JSON.stringify(fixes.data));
   const hover = await api.act("hover", { line: 2, column: 4 });
   const hoverText = JSON.stringify(hover.data ?? {});
@@ -136,6 +143,12 @@ try {
     hoverText.slice(0, 200));
 
   // ---- the write ----
+  // The surface as the developer left it, to hold the write to: the same tabs in the same order,
+  // the same module active and unfolded in the tree, the caret where it was. The first build
+  // republished the tree with the module gone and reopened it at the end of the strip (the owner,
+  // 2026-09-05: "it flickers the explorer, and doesn't put me back").
+  const uiBefore = await api.ui();
+  const tabsBefore = uiBefore.workspace.groups.flatMap((group) => group.tabs.map((tab) => tab.module));
   registryText = (await api.readModule("Registry", BOOK)).text;
   const applied = await api.attributesApply("Registry", at);
   check("applying writes every annotated attribute and names each change",
@@ -143,8 +156,15 @@ try {
       && applied.changes.some((one) => /VB_PredeclaredId False -> True/.test(one)),
     JSON.stringify(applied));
   check("the module's code is exactly what it was", (await api.readModule("Registry", BOOK)).text === registryText);
-  const tabs = (await api.ui()).workspace.groups.flatMap((group) => group.tabs.map((tab) => tab.module));
-  check("the module's tab is back after the re-import", tabs.includes("Registry"), tabs.join(","));
+  await wait(800);
+  const uiAfter = await api.ui();
+  const tabsAfter = uiAfter.workspace.groups.flatMap((group) => group.tabs.map((tab) => tab.module));
+  check("the tabs are the same tabs in the same order after the re-import", tabsAfter.join(",") === tabsBefore.join(","),
+    `${tabsBefore.join(",")} -> ${tabsAfter.join(",")}`);
+  check("the module is still the active one, unfolded in the tree, with the caret where it was",
+    uiAfter.explorer.active === "Registry" && uiAfter.explorer.unfolded?.module === "Registry"
+      && uiAfter.focus.line === uiBefore.focus.line,
+    JSON.stringify({ active: uiAfter.explorer.active, unfolded: uiAfter.explorer.unfolded, line: [uiBefore.focus.line, uiAfter.focus.line] }));
 
   const after = await describe("Registry");
   check("the route answers from the applied set until the file is saved",
@@ -205,6 +225,18 @@ try {
   await api.writeModule("Registry", registryText, BOOK);
   registryText = null;
 
+  // ---- a save writes the annotations, under the setting ----
+  // Registry's annotation is back and its attribute is off, so the drift is there to be written.
+  await settles("Registry's drift back", async () => (await describe("Registry")).drift.some((one) => one.code === "annotation-not-applied"), { budgetMs: 20000 });
+  await api.settings({ applyAttributesOnSave: true });
+  await api.command("save");
+  await wait(2500);
+  const afterSave = await describe("Registry");
+  check("saving writes the annotations first, and the saved file carries them with nothing left asserted",
+    afterSave.attributes?.predeclaredId === true && !afterSave.asserted && afterSave.drift.length === 0,
+    JSON.stringify({ asserted: afterSave.asserted, predeclared: afterSave.attributes?.predeclaredId, drift: afterSave.drift.map((one) => one.code) }));
+  await api.settings({ applyAttributesOnSave: false });
+
   // ---- refusals, in words ----
   const onSheet = await refusalOf(api.attributesApply("Sheet1", at));
   check("a document module is refused with the reason", /document module/.test(onSheet ?? ""), onSheet);
@@ -218,6 +250,7 @@ try {
     await api.writeModule("Registry", registryText, BOOK).catch(() => {});
   }
   await resetToBuilt("reset at end").catch((error) => console.log(`  reset at end failed: ${error.message}`));
+  await api.settings({ applyAttributesOnSave: originalSettings.applyAttributesOnSave !== false }).catch(() => {});
 }
 
 process.exitCode = done();

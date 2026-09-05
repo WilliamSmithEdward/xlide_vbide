@@ -56,7 +56,7 @@ native code, so Excel never loads a .NET runtime on its account.
 - The hidden attributes, through annotations: `'@PredeclaredId`, `'@Description("...")`,
   `'@DefaultMember`, `'@Enumerator`, `'@ExcelHotkey("D")` and the rest of the Rubberduck set are
   read from the code, the drift from what the saved module carries is filed in the Problems pane,
-  and a quick fix writes them - the one thing in the VBE nothing else can set.
+  and saving the workbook writes them - the one thing in the VBE nothing else can set.
 - A project explorer rooted at each open workbook, with project-qualified addressing, so two
   workbooks can both hold a Module1 and xlide knows which one you mean. A second layout groups
   modules into folders by the `'@Folder("Parent.Child")` comment at the top of each one, the

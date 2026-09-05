@@ -892,7 +892,6 @@ function boot(): void {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     // The layout is a setting: the same whole-object post the dialog makes, echoed back.
     changeView: (view) => bridge.updateSettings({ ...currentSettings(), explorerView: view }),
-    applyAttributes: (name, workbook) => bridge.hostAction("applyAttributes", [name, workbook ?? null]),
     openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),

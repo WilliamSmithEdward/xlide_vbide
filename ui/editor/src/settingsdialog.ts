@@ -65,6 +65,15 @@ const OPTIONS = [
       { value: "folders", label: "Folders" },
     ],
   },
+  {
+    key: "applyAttributesOnSave" as const,
+    kind: "toggle" as const,
+    label: "Apply annotations to attributes on save",
+    description:
+      "Saving the workbook first writes each module's '@PredeclaredId, '@Description and the other "
+      + "attribute annotations into the attributes the code pane cannot show; importing a module does "
+      + "the same. Off leaves the drift in the Problems pane with its quick fix.",
+  },
   // There is no "indent with tabs" here, and there cannot be a working one: VBA's code store
   // will not hold a tab, and expands any it is handed. Indentation is this many spaces, and
   // Backspace in a line's leading whitespace takes back a whole level of them.
