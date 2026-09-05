@@ -1997,3 +1997,25 @@ on them. The fix is to make the fixture faithful (the demo now sends the project
 closed module on activate, both as the host does), not to teach the product to tolerate the
 fixture's lie - tolerating it here would have meant matching documents by name alone, which is the
 exact defect the workbook identity was introduced to kill.
+
+## 71. Latin-1 reads every byte and is still the wrong code page
+
+The attribute drift compared a description read from the live module with one read from the
+saved package, and for a description holding a curly apostrophe the two never agreed: the
+finding stayed, and every save re-imported the module to write what it already carried. The
+export was read and written the same way, so a description typed in Greek went into the file
+as question marks.
+
+The saved stream and the exported file are bytes in a Windows code page - the one the dir
+stream's PROJECTCODEPAGE names, and the system's ANSI page for an export - and both were being
+decoded as Latin-1, on the reasoning that Latin-1 maps every byte to a character and so cannot
+fail. It cannot fail, and it cannot be right either, past 0x7F: on a Western machine 0x92 is a
+right single quotation mark in the page the editor wrote and a C1 control in Latin-1, and the
+whole 0x80 to 0x9F range is like that - the curly quotes and dashes a description pasted from a
+document is full of. On a Japanese machine every character past ASCII is two bytes and Latin-1
+reads each as a character of its own.
+
+Consequence: a byte-preserving decode is the right FALLBACK for a page the machine cannot name,
+because it carries unedited lines through unchanged, and the wrong DEFAULT for anything compared
+with text or written from it. The package says its page; the export is in the system's; both are
+used (`AnsiText`), and the tests hold the two ranges Latin-1 gets wrong.

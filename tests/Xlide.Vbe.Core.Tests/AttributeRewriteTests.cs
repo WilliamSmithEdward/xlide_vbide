@@ -215,6 +215,54 @@ public class AttributeRewriteTests
     }
 
     [Fact]
+    public void AContinuedDeclarationTakesItsDescriptionAfterItsLastLine()
+    {
+        // The attribute line under a declaration split with an underscore has to follow the
+        // whole statement; inserted after the first line it would sit inside it.
+        var export = Lines(
+            "Attribute VB_Name = \"Totals\"",
+            "Option Explicit",
+            "Private total _",
+            "    As Long",
+            "Public Sub Go()",
+            "End Sub",
+            "");
+        var annotations = new ModuleAnnotations(
+            [new Annotation(AnnotationKind.VariableDescription, 2, "The running total.", "total", 3)],
+            []);
+
+        var result = AttributeRewriter.Apply(export, annotations);
+
+        Assert.Equal(Lines(
+            "Attribute VB_Name = \"Totals\"",
+            "Option Explicit",
+            "Private total _",
+            "    As Long",
+            "Attribute total.VB_VarDescription = \"The running total.\"",
+            "Public Sub Go()",
+            "End Sub",
+            ""), result.Text);
+        Assert.Single(result.Changes);
+    }
+
+    [Fact]
+    public void AnArrayVariableTakesADescription()
+    {
+        var export = Lines(
+            "Attribute VB_Name = \"Store\"",
+            "Private items() As Variant",
+            "");
+        var annotations = new ModuleAnnotations(
+            [new Annotation(AnnotationKind.VariableDescription, 1, "Everything held.", "items", 1)],
+            []);
+
+        var result = AttributeRewriter.Apply(export, annotations);
+
+        Assert.Contains("Private items() As Variant" + Crlf + "Attribute items.VB_VarDescription = \"Everything held.\"", result.Text, System.StringComparison.Ordinal);
+        Assert.Empty(result.Skipped);
+    }
+
+    [Fact]
     public void AStandardModuleCannotTakePredeclaredIdAndSaysSo()
     {
         var code = Lines("'@PredeclaredId", "Option Explicit");

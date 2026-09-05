@@ -277,7 +277,10 @@ public sealed class SavedModules
                 && CompoundFile.TryRead(project) is { } cfb
                 && VbaCompression.Decompress(cfb.Read($"/VBA/{where.Stream}"), where.Offset, MostModuleBytes) is { } text)
             {
-                read = ModuleAttributes.Read(Encoding.Latin1.GetString(text));
+                // The stream is in the project's code page, and a description in it may be in
+                // any script that page can spell; Latin-1 here made every such description
+                // disagree with the live module for ever.
+                read = ModuleAttributes.Read(AnsiText.For(CodePage).GetString(text));
             }
         }
         catch
@@ -365,9 +368,11 @@ public sealed class SavedModules
             return null;
         }
 
+        var (constants, codePage) = InformationIn(dir);
         var read = new SavedModules(documentPath)
         {
-            ConditionalConstants = ConstantsIn(dir),
+            ConditionalConstants = constants,
+            CodePage = codePage,
         };
 
         foreach (var (name, stream, offset) in ModulesIn(dir))
@@ -425,8 +430,12 @@ public sealed class SavedModules
     /// </summary>
     public string? ConditionalConstants { get; private init; }
 
+    /// <summary>The code page the project's MBCS strings and module streams are in (PROJECTCODEPAGE), or 0 when the file did not say.</summary>
+    public int CodePage { get; private init; }
+
     /* ---- the module table, [MS-OVBA] 2.3.4.2 ----------------------------------------------- */
 
+    private const ushort ProjectCodePage = 0x0003;
     private const ushort ProjectVersion = 0x0009;
     private const ushort ProjectConstants = 0x000C;
     private const ushort ProjectConstantsUnicode = 0x003C;
@@ -450,13 +459,16 @@ public sealed class SavedModules
     ///
     /// The Unicode twin wins where both are present: it says the same text with no code page in
     /// the way, which matters for a constant named in a script the machine cannot spell.
+    ///
+    /// The same walk picks up PROJECTCODEPAGE on its way, the code page the module streams are in.
     /// </summary>
-    private static string? ConstantsIn(byte[] dir)
+    private static (string? Constants, int CodePage) InformationIn(byte[] dir)
     {
         // PROJECTINFORMATION is a dozen records. Anything past that is the references.
         const int MostRecords = 32;
 
         string? mbcs = null;
+        var codePage = 0;
         var at = 0;
 
         for (var seen = 0; seen < MostRecords && at + 6 <= dir.Length; seen++)
@@ -484,24 +496,28 @@ public sealed class SavedModules
             var data = dir.AsSpan(at + 6, size);
             switch (id)
             {
+                case ProjectCodePage when size >= 2:
+                    codePage = BinaryPrimitives.ReadUInt16LittleEndian(data);
+                    break;
+
                 case ProjectConstants:
-                    mbcs = size > 0 ? Encoding.Latin1.GetString(data) : null;
+                    mbcs = size > 0 ? AnsiText.For(codePage).GetString(data) : null;
                     break;
 
                 // The twin follows the MBCS record directly, so reading it ends the walk.
                 case ProjectConstantsUnicode:
-                    return size > 0 ? Encoding.Unicode.GetString(data) : mbcs;
+                    return (size > 0 ? Encoding.Unicode.GetString(data) : mbcs, codePage);
 
                 // The first reference record: past here the shape no longer holds, and the
                 // constants would have been seen already if the project had any.
                 case ReferenceName or ReferenceRegistered or ReferenceProject or ReferenceControl:
-                    return mbcs;
+                    return (mbcs, codePage);
             }
 
             at += 6 + size;
         }
 
-        return mbcs;
+        return (mbcs, codePage);
     }
 
     private const ushort ReferenceName = 0x0016;

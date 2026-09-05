@@ -345,6 +345,10 @@ internal static unsafe partial class Win32
     [LibraryImport("kernel32.dll")]
     public static partial uint GetCurrentProcessId();
 
+    /// <summary>The system's active ANSI code page: the one the editor exports a module in and reads an import in.</summary>
+    [LibraryImport("kernel32.dll")]
+    public static partial uint GetACP();
+
     /// <summary>
     /// Sets a window attribute the desktop compositor owns. Used here for the one that darkens a
     /// title bar, which is drawn by the system rather than by the application and so cannot be

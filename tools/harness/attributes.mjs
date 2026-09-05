@@ -44,6 +44,9 @@ const MANAGED = {
   Macros: [["ModuleDescription"], ["ExcelHotkey", "DoIt"], ["Description", "Hello"]],
 };
 
+/** Hello's description in the fixture, with its en dash and curly apostrophe: the two bytes Latin-1 read wrong. */
+const HELLO_DESCRIPTION = "Prints a greeting – the day’s first.";
+
 const carriesAny = (attributes) => attributes !== null && (
   attributes.predeclaredId === true || attributes.exposed === true || attributes.description !== null
   || attributes.members.length > 0 || attributes.variables.length > 0);
@@ -184,11 +187,18 @@ try {
 
   const bagApplied = await api.attributesApply("Bag", at);
   const macrosApplied = await api.attributesApply("Macros", at);
+  const macros = await describe("Macros");
   check("the default member, the enumerator, the hotkey and the descriptions all write",
     bagApplied.changes.length === 2 && macrosApplied.changes.length === 3
-      && (await describe("Bag")).drift.length === 0 && (await describe("Macros")).drift.length === 0
-      && (await describe("Macros")).attributes?.members.some((one) => one.member === "DoIt" && one.hotkey === "D"),
+      && (await describe("Bag")).drift.length === 0 && macros.drift.length === 0
+      && macros.attributes?.members.some((one) => one.member === "DoIt" && one.hotkey === "D"),
     JSON.stringify([bagApplied.changes, macrosApplied.changes]));
+  // Hello's description holds an en dash and a curly apostrophe: bytes 0x96 and 0x92 in the page
+  // the editor exports in, which a Latin-1 read turned into control characters, so the drift
+  // never cleared and every save re-imported the module.
+  check("a description past ASCII is written in the editor's code page and read back as the code spells it",
+    macros.attributes?.members.some((one) => one.member === "Hello" && one.description === HELLO_DESCRIPTION),
+    JSON.stringify(macros.attributes?.members));
 
   const again = await api.attributesApply("Registry", at);
   check("applying again changes nothing", again.ok && again.changes.length === 0, JSON.stringify(again));
@@ -202,6 +212,11 @@ try {
       && saved.attributes?.members.some((one) => one.member === "Lookup" && one.description === "Finds a thing by its name.")
       && saved.drift.length === 0,
     JSON.stringify({ asserted: saved.asserted, attributes: saved.attributes }));
+  const savedMacros = await describe("Macros");
+  check("the saved package's stream is read in the project's own code page, so the non-ASCII description agrees with the code",
+    !savedMacros.asserted && savedMacros.drift.length === 0
+      && savedMacros.attributes?.members.some((one) => one.member === "Hello" && one.description === HELLO_DESCRIPTION),
+    JSON.stringify({ asserted: savedMacros.asserted, members: savedMacros.attributes?.members, drift: savedMacros.drift }));
 
   // ---- the other direction: an attribute nothing annotates ----
   const withoutAnnotation = registryText.split(/\r?\n/).filter((line) => !/^'@PredeclaredId/.test(line)).join("\r\n");

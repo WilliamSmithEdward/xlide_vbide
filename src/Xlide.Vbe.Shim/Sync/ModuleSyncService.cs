@@ -1,5 +1,6 @@
 using System.Text;
 using Xlide.Vbe.Core.Sync;
+using Xlide.Vbe.Core.Vba;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
@@ -399,9 +400,9 @@ internal static class ModuleSyncService
     /// <summary>
     /// The header lines of a temporary export: everything before the first line that is code.
     ///
-    /// Read as Latin-1 so no code page can refuse a byte, and the name is rewritten from the one
-    /// the editor gave us, which is the only field in there that can carry a character the export's
-    /// code page could not spell.
+    /// Read in the code page the editor wrote it in, the system's ANSI page, so a description in
+    /// it comes back as the characters the developer typed; the name is rewritten from the one
+    /// the editor gave us.
     /// </summary>
     private static string ExportedHeader(DispatchObject component, string name)
     {
@@ -409,7 +410,7 @@ internal static class ModuleSyncService
         try
         {
             component.Invoke("Export", temporary);
-            var lines = File.ReadAllText(temporary, Encoding.Latin1)
+            var lines = File.ReadAllText(temporary, AnsiText.For((int)Interop.Win32.GetACP()))
                 .Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Split('\n');
 
@@ -557,7 +558,9 @@ internal static class ModuleSyncService
 
         try
         {
-            File.WriteAllText(temporary, $"{header}\r\n", Encoding.Latin1);
+            // The editor reads an import in the system's ANSI page; Latin-1 turned a description
+            // or a name outside it into question marks.
+            File.WriteAllText(temporary, $"{header}\r\n", AnsiText.For((int)Interop.Win32.GetACP()));
             components.Invoke("Import", temporary);
         }
         finally

@@ -85,16 +85,9 @@ public static class AttributeAnnotations
         @"^\s*'\s*@(?<name>[A-Za-z]+)(?=\s|\(|""|$)\s*(?:\(\s*(?:""(?<quoted>(?:[^""]|"""")*)""|(?<unquoted>[^)]*?))\s*\)|""(?<bare>(?:[^""]|"""")*)""|(?<word>\S+))?\s*$",
         Options);
 
-    private static readonly Regex ProcedureHeader = new(
-        @"^\s*(?:(?:public|private|friend)\s+)?(?:static\s+)?(?:sub|function|property\s+(?:get|let|set))\s+(?<name>\p{L}[\p{L}\p{N}_]*)",
-        Options);
+    private static readonly Regex ProcedureHeader = DeclarationSyntax.ProcedureHeader;
 
-    // A module-level variable: Dim/Private/Public/Global, optionally WithEvents, then the name.
-    // Const, Type, Enum, Declare, Event and Implements are declarations too, but none of them
-    // carries a VB_VarDescription.
-    private static readonly Regex VariableDeclaration = new(
-        @"^\s*(?:dim|private|public|global)\s+(?:withevents\s+)?(?<name>\p{L}[\p{L}\p{N}_]*)\b(?!\s*\()",
-        Options);
+    private static readonly Regex VariableDeclaration = DeclarationSyntax.VariableDeclaration;
 
     private static readonly Regex BlankOrComment = new(@"^\s*(?:'|Rem\b|$)", Options);
 

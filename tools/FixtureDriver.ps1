@@ -78,6 +78,7 @@ function Invoke-FixtureBuild {
     $harness = Join-Path $PSScriptRoot 'harness'
 
     Invoke-FixtureLaunch -Path $Path
+    $blankStamp = (Get-Item $Path).LastWriteTimeUtc
 
     # The module texts go to node as JSON, so that quoting, CRLFs and VBA's own doubled quotes
     # cross once rather than being escaped through two shells.
@@ -135,5 +136,21 @@ function Invoke-FixtureBuild {
     }
     finally {
         Remove-Item $planPath -ErrorAction SilentlyContinue
+    }
+
+    # THE SAVE IS NOT OVER WHEN THE SAVE COMMAND RETURNS. The api's `save` executes the editor's
+    # menu control and answers when the control has been told; Excel writes the file on its own
+    # message loop afterwards. A generator's -Quiet close stopped Excel the instant node returned,
+    # and on 2026-09-05 that was before the write: the file left behind was the blank workbook
+    # from phase 1, the build said "saved; 6 component(s) hold code" (true of the session, not
+    # the disk), and the suite that opened it next found no module named Registry. The file's
+    # own write time is the only witness to the save, so it is waited for here, where the path
+    # is known, before the caller gets to close anything.
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Item $Path).LastWriteTimeUtc -le $blankStamp) {
+        if ((Get-Date) -gt $deadline) {
+            throw "the editor's save did not reach $Path within 30 seconds; the file is still the blank workbook from phase 1"
+        }
+        Start-Sleep -Milliseconds 200
     }
 }

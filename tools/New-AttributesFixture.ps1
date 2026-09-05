@@ -123,7 +123,10 @@ Public Sub DoIt()
     Debug.Print "did it"
 End Sub
 
-'@Description("Prints a greeting.")
+' THE DESCRIPTION IS NOT ASCII ON PURPOSE. An en dash and a curly apostrophe are 0x96 and 0x92
+' in the page the editor exports in, and a control character each in Latin-1: the range a
+' Latin-1 read gets wrong, so the suite proves the write and the package read agree with the code.
+'@Description("Prints a greeting $([char]0x2013) the day$([char]0x2019)s first.")
 Public Sub Hello()
     Debug.Print "hello"
 End Sub
@@ -187,5 +190,7 @@ Write-Host '  node tools\harness\attributes.mjs'
 Write-Host ''
 
 if ($Quiet) {
-    Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
+    # ONLY THE BUILDER'S OWN SESSION, which Invoke-FixtureLaunch named in XLIDE_PID. This used
+    # to stop every Excel on the machine, the owner's open workbooks included (2026-09-05).
+    if ($env:XLIDE_PID) { Stop-Process -Id ([int] $env:XLIDE_PID) -Force -ErrorAction SilentlyContinue }
 }

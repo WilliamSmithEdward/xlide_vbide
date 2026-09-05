@@ -148,5 +148,7 @@ Write-Host 'The change log is held in memory for the life of the session: it wri
 Write-Host ''
 
 if ($Quiet) {
-    Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
+    # ONLY THE BUILDER'S OWN SESSION, which Invoke-FixtureLaunch named in XLIDE_PID. This used
+    # to stop every Excel on the machine, the owner's open workbooks included (2026-09-05).
+    if ($env:XLIDE_PID) { Stop-Process -Id ([int] $env:XLIDE_PID) -Force -ErrorAction SilentlyContinue }
 }

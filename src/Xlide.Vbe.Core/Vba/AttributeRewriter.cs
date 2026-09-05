@@ -30,13 +30,8 @@ public static class AttributeRewriter
 {
     private const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
-    private static readonly Regex ProcedureHeader = new(
-        @"^\s*(?:(?:public|private|friend)\s+)?(?:static\s+)?(?:sub|function|property\s+(?:get|let|set))\s+(?<name>\p{L}[\p{L}\p{N}_]*)",
-        Options);
-
-    private static readonly Regex VariableDeclaration = new(
-        @"^\s*(?:dim|private|public|global)\s+(?:withevents\s+)?(?<name>\p{L}[\p{L}\p{N}_]*)\b(?!\s*\()",
-        Options);
+    private static readonly Regex ProcedureHeader = DeclarationSyntax.ProcedureHeader;
+    private static readonly Regex VariableDeclaration = DeclarationSyntax.VariableDeclaration;
 
     private static readonly Regex OwnedAttribute = new(
         @"^\s*Attribute\s+(?<owner>\p{L}[\p{L}\p{N}_]*)\.(?<name>VB_[A-Za-z_]+(?:\.VB_[A-Za-z_]+)?)\s*=",
@@ -265,12 +260,7 @@ public static class AttributeRewriter
                 }
                 // The attributes follow the header's LAST line, which is the last one ending in a
                 // continuation character.
-                var last = at;
-                while (last < lines.Count - 1 && lines[last].TrimEnd().EndsWith('_'))
-                {
-                    last++;
-                }
-                return last;
+                return DeclarationSyntax.LastLineOf(lines, at);
             }
             return -1;
         }
@@ -287,7 +277,8 @@ public static class AttributeRewriter
                 var match = VariableDeclaration.Match(lines[at]);
                 if (match.Success && match.Groups["name"].Value.Equals(name, StringComparison.OrdinalIgnoreCase))
                 {
-                    return at;
+                    // A declaration continued onto more lines takes its attribute after the last.
+                    return DeclarationSyntax.LastLineOf(lines, at);
                 }
             }
             return -1;
@@ -399,9 +390,10 @@ public static class AttributeRewriter
             // line is a code line, in order.
             var codeLine = 0;
             var seen = 0;
+            var headerEnd = HeaderEnd();
             for (var at = 0; at < lines.Count; at++)
             {
-                if (ModuleSync.IsAttributeLine(lines[at]) || (at < HeaderEnd() && ModuleSync.IsHeaderPreamble(lines[at])))
+                if (ModuleSync.IsAttributeLine(lines[at]) || (at < headerEnd && ModuleSync.IsHeaderPreamble(lines[at])))
                 {
                     continue;
                 }

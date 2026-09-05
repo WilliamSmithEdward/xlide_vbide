@@ -1,4 +1,3 @@
-using System.Text;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Sync;
 using Xlide.Vbe.Core.Vba;
@@ -123,8 +122,21 @@ internal sealed partial class AddInSession
 
     private static int LineLength(string source, int line)
     {
-        var lines = source.Split('\n');
-        return line >= 1 && line <= lines.Length ? lines[line - 1].TrimEnd('\r').Length : 0;
+        if (line < 1)
+        {
+            return 0;
+        }
+        var start = OffsetOfLine(source, line);
+        var end = source.IndexOf('\n', start);
+        if (end < 0)
+        {
+            end = source.Length;
+        }
+        if (end > start && source[end - 1] == '\r')
+        {
+            end--;
+        }
+        return end - start;
     }
 
     /// <summary>The 1-based line a character offset of the source falls on.</summary>
@@ -245,6 +257,16 @@ internal sealed partial class AddInSession
     private static SurfaceHoverPayload? AttributeHover(string module, string? projectId, string source, int offset)
     {
         var line = LineOfOffset(source, offset);
+        var lineStart = OffsetOfLine(source, line);
+
+        // Only a comment holding an at-sign can be one of ours, and that is decided from the one
+        // line before the whole module is read for its annotations on every hover.
+        var lineText = source.AsSpan(lineStart, LineLength(source, line)).TrimStart();
+        if (lineText.Length == 0 || lineText[0] != '\'' || lineText.IndexOf('@') < 0)
+        {
+            return null;
+        }
+
         var annotations = AttributeAnnotations.Read(source);
         var annotation = annotations.Annotations.FirstOrDefault(one => one.Line == line);
         if (annotation is null)
@@ -299,7 +321,6 @@ internal sealed partial class AddInSession
             _ => "The description the Object Browser and IntelliSense show.",
         };
 
-        var lineStart = OffsetOfLine(source, line);
         return new SurfaceHoverPayload(
             annotation.Canonical,
             [$"Writes {writes}", now],
@@ -354,7 +375,7 @@ internal sealed partial class AddInSession
     /// Writes a module's annotations into its attributes. Answers the refusal, or null when the
     /// module was rewritten (or already matched). Host thread.
     /// </summary>
-    private string? ApplyAttributes(string module, string? projectDisplay, out IReadOnlyList<AttributeChange> changes, out IReadOnlyList<string> skipped)
+    private string? ApplyAttributes(string module, string? projectDisplay, out IReadOnlyList<AttributeChange> changes, out IReadOnlyList<string> skipped, bool settle = true)
     {
         changes = [];
         skipped = [];
@@ -368,7 +389,7 @@ internal sealed partial class AddInSession
                 }
                 return (AttributeRewriter.Apply(exported, annotations), null);
             },
-            out changes, out skipped);
+            out changes, out skipped, settle);
     }
 
     /// <summary>Takes one managed attribute off a module, a member or a variable. Host thread.</summary>
@@ -382,7 +403,9 @@ internal sealed partial class AddInSession
 
     /// <summary>
     /// The export, rewrite and import that every attribute write goes through. <paramref name="rewrite"/>
-    /// answers the rewritten export or a refusal. Answers the refusal, or null.
+    /// answers the rewritten export or a refusal. Answers the refusal, or null. With
+    /// <paramref name="settle"/> off the tree is not republished and the analyzer not re-run
+    /// afterwards; a caller writing several modules in a row does both once at the end.
     /// </summary>
     private string? Reimport(
         string module,
@@ -390,7 +413,8 @@ internal sealed partial class AddInSession
         string verb,
         Func<string, string, (RewriteResult? Result, string? Refused)> rewrite,
         out IReadOnlyList<AttributeChange> changes,
-        out IReadOnlyList<string> skipped)
+        out IReadOnlyList<string> skipped,
+        bool settle = true)
     {
         changes = [];
         skipped = [];
@@ -437,10 +461,20 @@ internal sealed partial class AddInSession
         var temporary = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(),
             $"xlide-attributes-{Guid.NewGuid():N}{(type == ClassModuleType ? ".cls" : ".bas")}");
+
+        // The editor writes and reads the file in the system's ANSI page. Read as Latin-1 a
+        // description past ASCII never matched the live module, and one written that way went in
+        // as question marks.
+        var ansi = AnsiText.For((int)Interop.Win32.GetACP());
+
+        // While the component is out and the file is its only copy, the file is not deleted
+        // whatever else goes wrong; it is named to the developer instead.
+        var removed = false;
+        var keep = false;
         try
         {
             component.Invoke("Export", temporary);
-            var exported = File.ReadAllText(temporary, Encoding.Latin1);
+            var exported = File.ReadAllText(temporary, ansi);
 
             var (result, refused) = rewrite(exported, source);
             if (refused is not null || result is null)
@@ -464,7 +498,7 @@ internal sealed partial class AddInSession
                 return null;
             }
 
-            File.WriteAllText(temporary, result.Text, Encoding.Latin1);
+            File.WriteAllText(temporary, result.Text, ansi);
 
             // What the module had on the surface, to put back once the new one is in.
             var wasOpen = _editorSurface?.TextOf(module, display) is not null;
@@ -485,11 +519,29 @@ internal sealed partial class AddInSession
 
             _editorSurface?.DiscardEdits(module, display);
             components.InvokeWithObject("Remove", component);
-            components.Invoke("Import", temporary);
+            removed = true;
+            try
+            {
+                components.Invoke("Import", temporary);
+            }
+            catch (Exception ex)
+            {
+                // THE MODULE IS OUT AND THE FILE IS ITS ONLY COPY. The export as it came goes
+                // back in before anything is said; if that fails too the outer catch keeps the
+                // file and names it.
+                Log.Warn($"attributes: the editor refused the rewritten {module} ({ex.GetType().Name}: {ex.Message}); putting the original back");
+                File.WriteAllText(temporary, exported, ansi);
+                components.Invoke("Import", temporary);
+                removed = false;
+                ComponentsChanged();
+                return $"{module} could not take its attributes ({ex.Message}). Its code was put back as it was.";
+            }
+            removed = false;
 
             using var imported = FindComponent(module, owner, out _);
             if (imported is null)
             {
+                keep = true;
                 Log.Warn($"attributes: the editor imported {module} but no module of that name came back");
                 ComponentsChanged();
                 return $"{module} was exported and removed, but the import did not bring it back under its name. Its text is in {temporary}.";
@@ -530,23 +582,34 @@ internal sealed partial class AddInSession
                 }
             }
 
-            ComponentsChanged();
+            if (settle)
+            {
+                ComponentsChanged();
+            }
 
             RefreshAttributeDriftFor(owner, module, type, roundTrip);
-            _analysis?.Reanalyse();
+            if (settle)
+            {
+                _analysis?.Reanalyse();
+            }
             return null;
         }
         catch (Exception ex)
         {
             Log.Warn($"attributes: {verb} on {module} failed ({ex.GetType().Name}: {ex.Message})");
             ComponentsChanged();
+            if (removed)
+            {
+                keep = true;
+                return $"{module} could not be rewritten ({ex.Message}), and the editor would not take it back. Its text is in {temporary}.";
+            }
             return $"{module} could not be rewritten: {ex.Message}";
         }
         finally
         {
             try
             {
-                if (File.Exists(temporary))
+                if (!keep && File.Exists(temporary))
                 {
                     File.Delete(temporary);
                 }
@@ -569,6 +632,29 @@ internal sealed partial class AddInSession
         if (_shownProject is not { } projectId)
         {
             return;
+        }
+
+        // THE DRIFT CACHE IS AS OLD AS THE LAST PASS, and a save can come inside the typing
+        // pause that defers the next one, so every document open on the surface is read again
+        // from the text it holds - the text the developer is looking at - before the pending
+        // set is drawn up. Closed modules cannot have moved since their pass.
+        if (_editorSurface is { } surface)
+        {
+            surface.FlushEdits();
+            var shownDisplay = DisplayFromProjectId(projectId);
+            foreach (var (module, project) in surface.OpenDocuments)
+            {
+                if (project is not null && !string.Equals(project, shownDisplay, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var text = surface.TextOf(module, project);
+                using var component = text is null ? null : FindComponent(module, projectId, out _);
+                if (component is not null)
+                {
+                    RefreshAttributeDriftFor(projectId, module, component.GetInt32("Type"), text!);
+                }
+            }
         }
 
         List<string> pending;
@@ -634,7 +720,7 @@ internal sealed partial class AddInSession
         var refusals = new List<string>();
         foreach (var module in modules)
         {
-            var refused = ApplyAttributes(module, display, out var changes, out _);
+            var refused = ApplyAttributes(module, display, out var changes, out _, settle: false);
             if (refused is not null)
             {
                 refusals.Add($"{module}: {refused}");
@@ -647,6 +733,9 @@ internal sealed partial class AddInSession
 
         if (written.Count > 0)
         {
+            // One republish and one pass for the lot, rather than one of each per module.
+            ComponentsChanged();
+            _analysis?.Reanalyse();
             Log.Info($"attributes: {when}, wrote annotations into {string.Join(", ", written)}");
             _editorSurface?.Notify($"Annotations written into {string.Join(", ", written)} {when}.");
         }

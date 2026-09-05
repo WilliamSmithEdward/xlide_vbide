@@ -93,6 +93,21 @@ public class SavedModulesTests
     }
 
     [Fact]
+    public void TheProjectCodePageIsRead()
+    {
+        var fixture = Fixture();
+        Assert.SkipWhen(fixture is null, "No LanguageFixture.xlsm; run tools\\New-Fixture.ps1.");
+
+        // PROJECTCODEPAGE is the page the module streams are in. The fixture was saved by the
+        // editor on this machine, so it names a real Windows page, and whatever page that is the
+        // encoding for it must exist here to decode the streams with.
+        var saved = SavedModules.For(fixture);
+        Assert.NotNull(saved);
+        Assert.InRange(saved!.CodePage, 1, ushort.MaxValue);
+        Assert.Equal(saved.CodePage, AnsiText.For(saved.CodePage).CodePage);
+    }
+
+    [Fact]
     public void ADocumentModuleIsPredeclared()
     {
         var fixture = Fixture();

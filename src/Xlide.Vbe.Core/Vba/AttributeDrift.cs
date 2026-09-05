@@ -50,13 +50,8 @@ public sealed record DriftItem(DriftKind Kind, int Line, string Message, Annotat
 /// </summary>
 public static class AttributeDrift
 {
-    private static readonly Regex ProcedureHeader = new(
-        @"^\s*(?:(?:public|private|friend)\s+)?(?:static\s+)?(?:sub|function|property\s+(?:get|let|set))\s+(?<name>\p{L}[\p{L}\p{N}_]*)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-    private static readonly Regex VariableDeclaration = new(
-        @"^\s*(?:dim|private|public|global)\s+(?:withevents\s+)?(?<name>\p{L}[\p{L}\p{N}_]*)\b(?!\s*\()",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex ProcedureHeader = DeclarationSyntax.ProcedureHeader;
+    private static readonly Regex VariableDeclaration = DeclarationSyntax.VariableDeclaration;
 
     /// <summary>
     /// The disagreements for one module. <paramref name="actual"/> is null when the saved

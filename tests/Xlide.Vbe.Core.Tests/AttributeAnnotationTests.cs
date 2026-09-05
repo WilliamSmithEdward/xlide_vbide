@@ -101,6 +101,48 @@ public class AttributeAnnotationTests
         Assert.Equal(3, one.TargetLine);
     }
 
+    [Theory]
+    [InlineData("Private Const Limit As Long = 9")]
+    [InlineData("Private Type Point")]
+    [InlineData("Public Enum Colour")]
+    [InlineData("Private Declare PtrSafe Function Beep Lib \"kernel32\" (ByVal f As Long) As Long")]
+    [InlineData("Public Event Changed()")]
+    public void AConstTypeEnumDeclareOrEventIsNotAVariable(string declaration)
+    {
+        // The same keywords open all five, and none of them carries a VB_VarDescription; the
+        // annotation above one used to bind to a variable called Const.
+        var read = AttributeAnnotations.Read(Lines(
+            "Option Explicit",
+            "'@VariableDescription(\"x\")",
+            declaration,
+            "Public Sub Go()",
+            "End Sub"));
+
+        Assert.Empty(read.Annotations);
+        var problem = Assert.Single(read.Problems);
+        Assert.Equal(2, problem.Line);
+        Assert.Contains("not a module-level variable", problem.Message);
+    }
+
+    [Theory]
+    [InlineData("Private items() As Variant", "items")]
+    [InlineData("Public WithEvents sheet As Worksheet", "sheet")]
+    [InlineData("Global counts(1 To 9) As Long", "counts")]
+    public void AnArrayOrWithEventsOrGlobalIsAVariable(string declaration, string name)
+    {
+        var read = AttributeAnnotations.Read(Lines(
+            "Option Explicit",
+            "'@VariableDescription(\"x\")",
+            declaration,
+            "Public Sub Go()",
+            "End Sub"));
+
+        Assert.Empty(read.Problems);
+        var one = Assert.Single(read.Annotations);
+        Assert.Equal(name, one.Target);
+        Assert.Equal(3, one.TargetLine);
+    }
+
     [Fact]
     public void AModuleAnnotationBelowTheFirstProcedureIsAProblem()
     {

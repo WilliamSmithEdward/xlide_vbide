@@ -37,6 +37,13 @@ decompresses the whole stream, once per save, for the module asked about
 (`ModuleAttributes.Read`). A module the saved file does not carry - added since the last save -
 has unknown attributes, and the drift says so rather than pretending.
 
+The stream is bytes in the project's code page, the one PROJECTCODEPAGE names in the `dir`
+stream, and the export the write goes through is bytes in the system's ANSI page; both are
+decoded and encoded with that page (`AnsiText`). Read as Latin-1, as the first build did, a
+description holding anything past ASCII - a curly quote, an accented name, a word in a non-Latin
+script - never matched the live module, so its drift never cleared and every save re-imported the
+module; and written as Latin-1 it went into the file as question marks.
+
 ## The drift
 
 `AttributeDrift.Between` compares the two and answers items in four kinds, each filed in the
@@ -63,7 +70,9 @@ this is the designed exception to the rule against files.
 
 What it costs, and what is put back: the module's undo history goes; its native breakpoints go
 and are re-set from the session's own record; its tab reopens where the caret was; its code is
-read back and compared with what went in. Until the workbook is saved the saved package does not
+read back and compared with what went in. Between the remove and the import the temporary file
+is the module's only copy, so if the editor refuses the rewritten file the export goes back in as
+it came, and if it refuses that too the file is kept and named in the notice rather than deleted. Until the workbook is saved the saved package does not
 carry what was written, so the applied set is asserted to `SavedModules`, which answers from it
 for the drift, for the api, and for the analyzer's predeclared-class seed - so `Registry.Lookup`
 stops being reported the moment `'@PredeclaredId` is applied, not at the next save.
@@ -76,7 +85,10 @@ text edit that adds the annotation instead.
 
 A save writes the annotations first. Every module of the workbook being saved whose annotations
 are not yet its attributes is re-imported with them, and then the save goes; a module with nothing
-to write is not touched. An import through the sync feature does the same for the modules it
+to write is not touched. The drift the save reads is recomputed for every document open on the
+surface from the text it holds, because the cache is as old as the last analysis pass and a save
+can come inside the typing pause that defers the next one; the tree is republished and the
+analyzer re-run once for the lot. An import through the sync feature does the same for the modules it
 created or rewrote: the file said what the module should be. Both are under one setting,
 `attributes.applyOnSave`, on by default; off leaves the drift in the Problems pane with its quick
 fix for whoever wants to choose the moment. There is no menu item: the owner's call
