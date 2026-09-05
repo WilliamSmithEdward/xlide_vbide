@@ -86,6 +86,7 @@ const settles = (what, predicate, options) => waitFor(what, predicate, options).
 
 const originalSettings = await api.settings();
 let looseText = null;
+let lateText = null;
 
 // Whether this session has already run this suite: the fresh-launch checks below are about the
 // order things arrive in at a session's start, which a rerun cannot reproduce, so a rerun asks
@@ -244,6 +245,31 @@ try {
   check("taking the annotation out puts it back at the root, and the empty folder goes", back);
   looseText = null;
 
+  // ---- an annotation TYPED into the shown module moves it on the typing pause ----
+  // Through the editor's own keyboard pipeline, with the caret left on the line: the full pass
+  // is deferred while a line is being typed, and the tree used to wait for it (2026-09-05).
+  lateText = (await api.readModule("Late", MAIN)).text;
+  await api.caret(2, { module: "Late", project: MAIN });
+  await settles("Late shown", async () => (await api.state()).shownModule === "Late");
+  await api.type("'@Folder(\"Typed.Here\")");
+  const typedAt = Date.now();
+  const typed = await settles("Late to move by typing", async () => {
+    const now = await api.ui();
+    return book(now, MAIN)?.modules.find((one) => one.name === "Late")?.folder === "Typed.Here";
+  }, { budgetMs: 15000 });
+  const afterTyping = await api.ui();
+  check("an annotation typed into the shown module moves it on the typing pause, caret still on the line",
+    typed && afterTyping.statusPosition.startsWith("Ln 2,"),
+    `${typed ? `${Date.now() - typedAt}ms` : "never"}; ${afterTyping.statusPosition}; ${JSON.stringify(book(afterTyping, MAIN)?.modules.find((one) => one.name === "Late"))}`);
+  check("and the typed folder is drawn", (await rowsOf(MAIN)).includes("folder:Typed.Here"));
+  await api.writeModule("Late", lateText, MAIN);
+  const lateBack = await settles("Late to come back", async () => {
+    const now = await api.ui();
+    return book(now, MAIN)?.modules.find((one) => one.name === "Late")?.folder === null;
+  }, { budgetMs: 30000 });
+  check("putting Late's text back returns it to the root", lateBack);
+  lateText = null;
+
   // ---- the current procedure, held to the editor's own answer on every line ----
   const procedures = (await api.readModule("Procedures", MAIN)).text ?? "";
   const lineCount = procedures.split(/\r\n|\r|\n/).length;
@@ -290,6 +316,9 @@ try {
   // was swallowed, and the next run started in the folder layout and failed its first check.
   if (looseText !== null) {
     await api.writeModule("Loose", looseText, MAIN).catch(() => {});
+  }
+  if (lateText !== null) {
+    await api.writeModule("Late", lateText, MAIN).catch(() => {});
   }
   await api.mark("folders.mjs: ran").catch(() => {});
   await settles("the layout put back", async () => {

@@ -833,8 +833,8 @@ function boot(): void {
       searchWidget.attachTo(editor.getContainerDomNode());
       searchWidget.onActiveEditorChanged();
       shell?.setActiveModule(id?.module ?? null, id?.project ?? null);
-      // The procedure readout follows the editor that now has the caret.
-      bridge.announceCaret();
+      // The procedure readout follows the editor that now has the caret, and so does the host.
+      bridge.announceCaret(true);
     },
     layoutChanged: () => {
       workspace?.editors().forEach((editor) => editor.layout());

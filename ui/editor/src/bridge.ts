@@ -822,9 +822,9 @@ export class EditorBridge {
     const hover = editor.createDecorationsCollection([]);
 
     this.disposables.push(
-      editor.onDidChangeCursorSelection((event) => {
+      editor.onDidChangeCursorSelection(() => {
         if (editor === this.ed()) {
-          this.onSelectionChanged(event.selection);
+          this.onSelectionChanged();
         }
       }),
       editor.onMouseDown((event) => {
@@ -2579,7 +2579,7 @@ export class EditorBridge {
    * caret (a Sub renamed above it), and the active editor itself. A designer face is a form's
    * markup and has no procedures, so it reports none.
    */
-  announceCaret(): void {
+  announceCaret(tellHost = false): void {
     const editor = this.ed();
     const model = editor?.getModel() ?? null;
     const position = editor?.getPosition() ?? null;
@@ -2591,18 +2591,29 @@ export class EditorBridge {
     const id = this.documents.idOf(model);
     const procedure = id && !id.face ? procedureAt(this.proceduresOf(model), position.lineNumber) : null;
     this.shell?.setCaret(id?.face ? null : id?.module ?? null, id?.project ?? null, position.lineNumber, procedure);
+
+    // THE HOST HEARS THE CARET ONLY FROM HERE, and a caret that did not move says nothing:
+    // switching to a module whose caret already sits at line 1 fires no selection event, so
+    // the host went on holding the previous module's line - and answered ProcOfLine for it on
+    // the new module (the folders suite, 2026-09-05, on the first line of a fresh launch). So
+    // the active editor's selection is announced whenever the active editor changes, as well
+    // as whenever it moves.
+    if (tellHost) {
+      const selection = editor.getSelection() ?? monaco.Selection.fromPositions(position, position);
+      this.shell?.setPosition(selection.positionLineNumber, selection.positionColumn);
+      this.transport.post({
+        type: "selectionChanged",
+        startLine: selection.startLineNumber,
+        startColumn: selection.startColumn,
+        endLine: selection.endLineNumber,
+        endColumn: selection.endColumn,
+      });
+    }
   }
 
-  private onSelectionChanged(selection: monaco.Selection): void {
-    this.shell?.setPosition(selection.positionLineNumber, selection.positionColumn);
-    this.announceCaret();
-    this.transport.post({
-      type: "selectionChanged",
-      startLine: selection.startLineNumber,
-      startColumn: selection.startColumn,
-      endLine: selection.endLineNumber,
-      endColumn: selection.endColumn,
-    });
+  /** The active editor's selection moved: the shell and the host both hear the new caret. */
+  private onSelectionChanged(): void {
+    this.announceCaret(true);
   }
 
   private onMouseDown(event: monaco.editor.IEditorMouseEvent): void {

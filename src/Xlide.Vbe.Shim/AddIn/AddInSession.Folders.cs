@@ -54,6 +54,39 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
+    /// The folder as the shown module's TYPED text names it, on the live-analysis cadence.
+    ///
+    /// Typing feeds the engine's live copy and the full pass that fills the cache above is
+    /// deferred until things go quiet, so an annotation typed into a module reached the tree
+    /// only with the next full pass - which, with the caret parked on the line, was never (the
+    /// owner, 2026-09-05, watching Late stay at the root under its new annotation). The live
+    /// handler runs once per typing pause with the text in hand, which is the cadence the
+    /// squiggles follow, so the tree follows it too. Host thread; republishes only on a change.
+    /// </summary>
+    private void NoteTypedFolder(string? projectId, string module, string source)
+    {
+        if (projectId is null)
+        {
+            return;
+        }
+
+        var folder = FolderAnnotation.Of(source);
+        var key = FolderKey(projectId, module);
+        lock (_folders)
+        {
+            if (_folders.TryGetValue(key, out var was) && string.Equals(was, folder, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _folders[key] = folder;
+        }
+
+        Log.Verbose($"folders: {module} typed its way to {folder ?? "the root"}, republishing the tree");
+        PublishProjects();
+    }
+
+    /// <summary>
     /// The folder of one component, for the tree: from the cache when a pass has described it,
     /// read from its declarations otherwise. Host thread, inside the tree's own walk.
     /// </summary>

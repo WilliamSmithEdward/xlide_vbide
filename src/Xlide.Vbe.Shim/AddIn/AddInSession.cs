@@ -2768,6 +2768,13 @@ internal sealed partial class AddInSession : IDisposable
                 // Sync only touches a document the surface actually holds, and leaves an
                 // unwritten one alone, so this cannot overwrite an edit in flight.
                 _editorSurface?.Sync(component, DisplayFromProjectId(foundOwner ?? owner), stored ?? text);
+
+                // AND THE FOLDER, from the same text (#23). Typing moves a module on the typing
+                // pause, from text that may not have reached the host yet; a rewrite that puts
+                // the host's own text back then finds nothing to write, so no pass follows and
+                // nothing else would read the annotation again - the tree kept the typed folder
+                // over a document that no longer carried it (2026-09-05).
+                NoteTypedFolder(foundOwner ?? owner, component, stored ?? text);
             }
 
             Log.Verbose($"write: {component} took {diffing.ElapsedMilliseconds}ms to compare"
@@ -8836,6 +8843,9 @@ internal sealed partial class AddInSession : IDisposable
         {
             return;
         }
+
+        // The folder the typed text names, on this same cadence (#23).
+        NoteTypedFolder(_shownProject, module, source);
 
         // A full pass skipped during the typing runs once things go quiet.
         var now = Environment.TickCount64;
