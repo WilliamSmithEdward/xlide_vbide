@@ -99,6 +99,13 @@ internal sealed partial class ImmediateEvaluator
     public readonly record struct Result(string Text, bool Failed);
 
     /// <summary>
+    /// The value and type the Locals window holds for a name in the stopped procedure, or null
+    /// when it holds no such row. Set by the session, which owns the Locals reader; without it
+    /// every line declines in break mode as it always did.
+    /// </summary>
+    public Func<string, (string Value, string Type)?>? LocalLookup { get; set; }
+
+    /// <summary>
     /// Runs one line.
     ///
     /// A line beginning with a question mark is an expression whose value is wanted, which is the
@@ -139,9 +146,30 @@ internal sealed partial class ImmediateEvaluator
 
         if (inBreakMode)
         {
+            // ONE SHAPE OF LINE IS ANSWERED WITHOUT EVALUATING: a print of a bare name, from the
+            // Locals window the debugger is already showing (#21). The value is what the Locals
+            // panel holds for the stopped procedure's own variables, which is what "? myVar" at
+            // a breakpoint is asking for nine times in ten. Everything else still needs a
+            // procedure to run, and still declines - but says what does work.
+            if (Xlide.Vbe.Core.Editor.ImmediateLine.NameToPrint(line) is { } name)
+            {
+                if (LocalLookup?.Invoke(name) is { } local)
+                {
+                    return new Result(Xlide.Vbe.Core.Editor.ImmediateLine.AsPrinted(local.Value, local.Type), Failed: false);
+                }
+
+                return new Result(
+                    $"Not available while execution is stopped: '{name}' is not a local of the stopped "
+                    + "procedure. While stopped, ? name prints a local from the Locals window; anything "
+                    + "else needs the editor's own Immediate window or a watch.",
+                    Failed: true);
+            }
+
             return new Result(
                 "Not available while execution is stopped: evaluating adds a procedure to the "
-                + "project, which would reset it and end the debugging session.",
+                + "project, which would reset it and end the debugging session. While stopped, "
+                + "? name prints a local from the Locals window; anything else needs the editor's "
+                + "own Immediate window or a watch.",
                 Failed: true);
         }
 

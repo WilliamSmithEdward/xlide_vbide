@@ -6756,6 +6756,31 @@ internal sealed partial class AddInSession : IDisposable
         {
             evaluator = _immediate = new ImmediateEvaluator(_editor);
 
+            // "? name" in break mode is answered from the Locals ghost (#21): the row the panel
+            // shows for that name, read the way the panel reads it. A fresh read is asked for so
+            // a value that moved on the last step is the one printed, and the latest landed
+            // reading answers - the reader is a tick or two behind at most, and the panel on
+            // screen is the same reading.
+            evaluator.LocalLookup = name =>
+            {
+                _ghostReaders?.RequestRead();
+                var snapshot = _ghostReaders?.Locals;
+                if (snapshot is null)
+                {
+                    return null;
+                }
+
+                foreach (var row in snapshot.Rows)
+                {
+                    if (string.Equals(row.Expression, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return (row.Value, row.Type);
+                    }
+                }
+
+                return null;
+            };
+
             // PUT THE PROJECT BACK when an evaluation leaves it stopped. A line that will not
             // compile raises the editor's own "Compile error" box, and behind it the project is
             // out of design mode: every evaluation after that answered "Not available while

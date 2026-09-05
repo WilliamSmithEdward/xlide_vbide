@@ -24,7 +24,7 @@
  *   node tools\harness\immediate-watch.mjs
  */
 
-import { open, wait, reporter } from "./xlide-api.mjs";
+import { open, wait, waitFor, reporter } from "./xlide-api.mjs";
 
 const api = await open({});
 /*
@@ -145,6 +145,57 @@ check("what the statement printed is in the window",
   `looked for ${printed} in ${JSON.stringify((window.text ?? "").slice(-160))}`);
 
 check("reading the window does not report a failure", !window.failed, JSON.stringify(window.failed));
+
+// ---------------------------------------------------------------------------------------------
+console.log("\n2b. at a breakpoint, ? name answers from the Locals window (#21)\n");
+
+// Evaluating adds a procedure to the project, which would reset the debugger, so break mode
+// declines it - but "? name" is what a developer types at a breakpoint, and the Locals window
+// already holds the answer. Walk is stopped on its fourth statement, where counter is 1, label is
+// "start" and ratio is 0.5, and each is asked for the way the editor's own window would be asked.
+const runnerText = (await api.readModule("Runner", project.projectId)).text ?? "";
+const runnerLines = runnerText.split(/\r?\n/);
+const stopLine = runnerLines.findIndex((l) => l.includes("counter = counter + 1")) + 1;
+const inBreak = async () => ((await api.breakpoints()).mode ?? (await api.state()).debugMode) === "break";
+
+await api.breakpoint("Runner", stopLine, { project: project.projectId, state: "on" });
+await wait(800);
+await api.caret(runnerLines.findIndex((l) => l.includes("Public Sub Walk")) + 1, { module: "Runner", project: project.projectId });
+await wait(600);
+await api.command("run");
+const reached = await waitFor("break mode", inBreak, { budgetMs: 25000 }).then(() => true, () => false);
+check("Walk stops at its breakpoint", reached, `stop line ${stopLine}`);
+
+if (reached) {
+  await waitFor("locals", async () => ((await api.locals()).rows ?? []).length > 0, { budgetMs: 10000 }).catch(() => null);
+
+  const counter = await api.immediate("? counter");
+  check("? counter prints the local's value while stopped",
+    counter.ran && !counter.failed && (counter.text ?? "").trim() === "1", JSON.stringify(counter));
+
+  const label = await api.immediate("?label");
+  check("a String local prints without the quotes the Locals window draws",
+    !label.failed && (label.text ?? "").trim() === "start", JSON.stringify(label));
+
+  const ratio = await api.immediate("Print ratio");
+  check("Print asks the same way", !ratio.failed && (ratio.text ?? "").trim() === "0.5", JSON.stringify(ratio));
+
+  const missing = await api.immediate("? nowhere");
+  check("a name the Locals window does not hold is declined, and says so",
+    missing.failed && /not a local/.test(missing.text ?? ""), JSON.stringify(missing));
+
+  const expression = await api.immediate("? counter + 1");
+  check("an expression is still declined, with what does work named",
+    expression.failed && /\? name/.test(expression.text ?? ""), JSON.stringify(expression));
+
+  check("and the debugger is still stopped after all of it", await inBreak());
+}
+
+await api.command("reset").catch(() => {});
+await wait(800);
+await api.breakpoint("Runner", stopLine, { project: project.projectId, state: "off" }).catch(() => {});
+check("the session is back in design mode with the breakpoint cleared",
+  !(await inBreak()) && !((await api.breakpoints()).breakpoints ?? []).some((r) => r.module.toLowerCase() === "runner"));
 
 // ---------------------------------------------------------------------------------------------
 console.log("\n3. the Watch panel\n");
