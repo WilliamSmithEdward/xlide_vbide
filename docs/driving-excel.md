@@ -280,6 +280,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
 | `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
+| `attributes` | `attributes(module, {project})` / `attributesApply(module, {project})` / `attributesRemove(module, kind, {project, target, occurrence})` | the attribute annotations, the saved module's hidden attributes, and the drift between them; apply re-imports the module with the annotated attributes written, remove takes one away |
 | `agent` | `agent()` / `agentRoutes()` / `agentRoute(name)` / `agentExamples()` | the api explaining itself: identity and HOST (excel/word/powerpoint), the route table as data, one route's detail, runnable recipes. The discovery file's `agent` URL points here, so an agent handed that file is one GET from the whole surface |
 | `model` | `model(type)` | what the language service knows about this host's object model: the type inventory bare, one type's members when named. `known:false` with a note in a host with no model yet |
 | `analyzer` | `analyzer()` | the analyzer's whole rule catalogue: codes, severities, categories, evidence kinds, and MS-VBAL authorities |
@@ -593,6 +594,13 @@ await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the
 ```js
 await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
+
+// THE HIDDEN ATTRIBUTES, through their annotations. What the code says, what the saved module
+// carries, and the drift the Problems pane files; then the write, which re-imports the module.
+const attributes = await api.attributes("Registry", { project: "AttributesFixture.xlsm" });
+attributes.drift;                                   // annotation-not-applied and friends, by line
+await api.attributesApply("Registry", { project: "AttributesFixture.xlsm" });
+await api.attributesRemove("Registry", "PredeclaredId", { project: "AttributesFixture.xlsm" });
 await api.act("explorerView", { view: "folders" });   // a settings change: poll ui.explorer.view
 await api.act("expandFolder", { workbook: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });

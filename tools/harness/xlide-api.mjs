@@ -881,6 +881,19 @@ function clientFor(entry) {
     outline: (module, project) => call(`outline${query({ module, project })}`),
 
     /**
+     * A module's attribute annotations ('@PredeclaredId, '@Description and the rest), the hidden
+     * attributes its saved copy carries, and the drift between them. `attributesApply` writes the
+     * annotations into the attributes - an export, a rewrite and an import, so the module's undo
+     * history goes and its breakpoints are put back from the session's record - and
+     * `attributesRemove` takes one attribute away by annotation kind and target.
+     */
+    attributes: (module, { project } = {}) => call(`attributes${query({ module, project })}`),
+    attributesApply: (module, { project } = {}) =>
+      call(`attributes${query({ module, project, action: "apply" })}`, { method: "POST", timeout: 30000 }),
+    attributesRemove: (module, kind, { project, target, occurrence } = {}) =>
+      call(`attributes${query({ module, project, action: "remove", kind, target, occurrence })}`, { method: "POST", timeout: 30000 }),
+
+    /**
      * Writes a labelled line into the shim log and answers the offset it landed at.
      *
      * Reading a log for what one step did means finding where that step began, and "scroll up

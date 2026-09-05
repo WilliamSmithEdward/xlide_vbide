@@ -42,6 +42,13 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 - **Break mode prints a local by name.** `? counter` answers from the Locals window; an
   expression still declines, because evaluating one adds a procedure and resets the debugger
   (#21).
+- **Annotations control the hidden attributes.** `'@PredeclaredId`, `'@ModuleDescription`,
+  `'@Exposed`, `'@Description`, `'@DefaultMember`, `'@Enumerator`, `'@ExcelHotkey` and
+  `'@VariableDescription` (the Rubberduck convention) are read from the code, compared with what
+  the saved module carries, and the drift is filed in the Problems pane with quick fixes: apply
+  the module's annotations, add the missing annotation, or take the attribute away. Applying
+  exports, rewrites only the attribute lines, and imports the module back (decision 17); the
+  analyzer hears about a predeclared class the moment it is applied. [attributes.md](attributes.md).
 
 ## What is not done
 

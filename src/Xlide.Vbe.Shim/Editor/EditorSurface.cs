@@ -237,6 +237,9 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public Action<string, string?>? ComponentRemoveRequested { get; set; }
 
+    /// <summary>A host-performed fix or menu action the page chose: the command and its string arguments.</summary>
+    public Action<string, string?[]>? HostActionRequested { get; set; }
+
     /// <summary>Raised when the editor wants completions: request identifier, caret offset.</summary>
     public Action<int, int>? CompletionRequested { get; set; }
 
@@ -2476,6 +2479,21 @@ internal sealed class EditorSurface : IDisposable
                         // Release log too, where there is no door to ask afterwards.
                         Log.Warn($"page: {said}");
                         FirstPageError ??= said;
+                    }
+
+                    break;
+
+                case "hostAction":
+                    // A quick fix or a menu item the host performs: `command` names it and
+                    // `arguments` carry what it acts on, as strings (a null is a missing one).
+                    if (document.RootElement.TryGetProperty("command", out var hostCommand)
+                        && hostCommand.GetString() is { Length: > 0 } hostCommandName)
+                    {
+                        var hostArguments = document.RootElement.TryGetProperty("arguments", out var argumentList)
+                            && argumentList.ValueKind == JsonValueKind.Array
+                            ? argumentList.EnumerateArray().Select(one => one.ValueKind == JsonValueKind.String ? one.GetString() : null).ToArray()
+                            : [];
+                        HostActionRequested?.Invoke(hostCommandName, hostArguments);
                     }
 
                     break;

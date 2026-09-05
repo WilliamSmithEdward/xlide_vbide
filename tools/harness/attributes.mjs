@@ -1,0 +1,223 @@
+/*
+ * THE HIDDEN ATTRIBUTES, THROUGH THEIR ANNOTATIONS, against real Excel.
+ *
+ * A module carries attributes the code pane cannot show, and the editor offers no way to set them.
+ * The annotations name them in the code; this proves the whole loop: the drift between annotation
+ * and saved attribute is reported where the developer looks, the quick fix and the route write the
+ * attribute by re-importing the module, the analyzer hears about a predeclared class the moment it
+ * is applied, the saved package carries it after a save and the reader reads it back, and the
+ * reverse direction - an attribute nothing annotates - is reported and removable.
+ *
+ * Runs against AttributesFixture.xlsm alone:
+ *
+ *   tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\AttributesFixture.xlsm
+ *   node tools\harness\attributes.mjs
+ *
+ * It saves the workbook on purpose - that is the half that proves the package reader - and puts
+ * the file back to the shape it was built in at the end, and at the start, so a rerun begins where
+ * the first run did.
+ */
+import { open, wait, waitFor, reporter } from "./xlide-api.mjs";
+
+const api = await open();
+const { check, done } = reporter();
+
+const BOOK = "AttributesFixture.xlsm";
+const at = { project: BOOK };
+
+const settles = (what, predicate, options) => waitFor(what, predicate, options).then(() => true, () => false);
+const describe = (module) => api.attributes(module, at);
+const codes = (drift) => drift.map((one) => one.code).sort().join(",");
+const refusalOf = async (promise) => {
+  try {
+    await promise;
+    return null;
+  } catch (error) {
+    return String(error.message ?? error);
+  }
+};
+
+/** Every managed attribute the three writable modules may carry, for the reset to take away. */
+const MANAGED = {
+  Registry: [["ModuleDescription"], ["PredeclaredId"], ["Description", "Lookup"], ["VariableDescription", "Count"]],
+  Bag: [["DefaultMember", "Item"], ["Enumerator", "NewEnum"]],
+  Macros: [["ModuleDescription"], ["ExcelHotkey", "DoIt"], ["Description", "Hello"]],
+};
+
+const carriesAny = (attributes) => attributes !== null && (
+  attributes.predeclaredId === true || attributes.exposed === true || attributes.description !== null
+  || attributes.members.length > 0 || attributes.variables.length > 0);
+
+/** Takes every managed attribute off the three modules and saves, so the file is as built. */
+async function resetToBuilt(label) {
+  let removed = 0;
+  for (const [module, removals] of Object.entries(MANAGED)) {
+    const before = await describe(module);
+    if (!carriesAny(before.attributes)) {
+      continue;
+    }
+    for (const [kind, target] of removals) {
+      const answer = await api.attributesRemove(module, kind, { ...at, target });
+      removed += answer.changes.length;
+    }
+  }
+  if (removed > 0) {
+    await api.command("save");
+    await wait(1500);
+  }
+  console.log(`  ${label}: ${removed} attribute(s) taken away`);
+}
+
+let registryText = null;
+
+try {
+  await resetToBuilt("reset at start");
+
+  // ---- what the code says, what the file carries, and the drift ----
+  const registry = await describe("Registry");
+  check("Registry is a class the editor can re-import, with its attributes known from the saved file",
+    registry.kind === "class" && registry.writable && registry.attributesKnown && !registry.asserted,
+    JSON.stringify({ kind: registry.kind, writable: registry.writable, known: registry.attributesKnown, asserted: registry.asserted }));
+  check("its four annotations are read, each bound to its target",
+    registry.annotations.map((one) => `${one.kind}:${one.target ?? "-"}`).sort().join(",")
+      === "Description:Lookup,ModuleDescription:-,PredeclaredId:-,VariableDescription:Count"
+      && registry.problems.length === 0,
+    JSON.stringify(registry.annotations));
+  check("the saved class is not predeclared yet, so every annotation reads as not applied",
+    registry.attributes?.predeclaredId === false && codes(registry.drift) === "annotation-not-applied,annotation-not-applied,annotation-not-applied,annotation-not-applied",
+    JSON.stringify(registry.drift.map((one) => [one.code, one.line])));
+
+  const bag = await describe("Bag");
+  check("Bag's default member and enumerator are annotations with drift",
+    bag.annotations.map((one) => one.kind).sort().join(",") === "DefaultMember,Enumerator" && bag.drift.length === 2,
+    JSON.stringify(bag.drift));
+
+  const misplaced = await describe("Misplaced");
+  check("a predeclared standard module and a description above a variable are reported, not written",
+    codes(misplaced.drift) === "annotation-not-applicable,annotation-problem"
+      && misplaced.drift.find((one) => one.code === "annotation-not-applicable")?.line === 1,
+    JSON.stringify(misplaced.drift.map((one) => [one.code, one.line, one.message.slice(0, 60)])));
+
+  const sheet = await describe("Sheet1");
+  check("a document module cannot take attributes, and its annotation says why",
+    !sheet.writable && codes(sheet.drift) === "annotation-not-applicable" && /cannot be imported/.test(sheet.drift[0].message),
+    JSON.stringify(sheet.drift));
+
+  // ---- the Problems pane files the drift ----
+  const filed = await settles("the drift in the problems list", async () => {
+    const problems = await api.problems();
+    const rows = problems.findings ?? problems.problems ?? [];
+    return rows.some((row) => row.module === "Registry" && row.code === "annotation-not-applied")
+      && rows.some((row) => row.module === "Sheet1" && row.code === "annotation-not-applicable")
+      && rows.some((row) => row.module === "Misplaced" && row.code === "annotation-problem");
+  }, { budgetMs: 20000 });
+  check("the Problems pane carries the drift for every module, alongside the analyzer's findings", filed);
+
+  // ---- what the analyzer is told before: the class is not predeclared ----
+  // The seed reads the flag through SavedModules.PredeclaredIdOf, the same call the project
+  // route answers with, and it logs what it told the engine. Both are read here, before and
+  // after, rather than a finding the analyzer's rules may or may not raise on the shape.
+  const predeclaredNow = async () =>
+    (await api.project(BOOK)).components.find((one) => one.name === "Registry")?.predeclaredId ?? null;
+  check("before applying, the seed's own source says the class is not predeclared", (await predeclaredNow()) === false);
+  const logFrom = (await api.log({ max: 1 })).next;
+
+  // ---- the quick fix and the hover, on the annotation's line ----
+  await api.caret(2, { module: "Registry", project: BOOK });
+  await wait(800);
+  const fixes = await api.act("quickFixes", { line: 2, column: 1 });
+  check("the annotation's line offers the apply as a quick fix",
+    (fixes.data ?? []).some((one) => one.title === "Apply annotations to Registry's attributes"),
+    JSON.stringify(fixes.data));
+  const hover = await api.act("hover", { line: 2, column: 4 });
+  const hoverText = JSON.stringify(hover.data ?? {});
+  check("hovering the annotation says what it writes and what the module has",
+    hover.did && /VB_PredeclaredId = True/.test(hoverText) && /no VB_PredeclaredId|VB_PredeclaredId = False/.test(hoverText),
+    hoverText.slice(0, 200));
+
+  // ---- the write ----
+  registryText = (await api.readModule("Registry", BOOK)).text;
+  const applied = await api.attributesApply("Registry", at);
+  check("applying writes every annotated attribute and names each change",
+    applied.ok && applied.changes.length === 4 && applied.skipped.length === 0
+      && applied.changes.some((one) => /VB_PredeclaredId False -> True/.test(one)),
+    JSON.stringify(applied));
+  check("the module's code is exactly what it was", (await api.readModule("Registry", BOOK)).text === registryText);
+  const tabs = (await api.ui()).workspace.groups.flatMap((group) => group.tabs.map((tab) => tab.module));
+  check("the module's tab is back after the re-import", tabs.includes("Registry"), tabs.join(","));
+
+  const after = await describe("Registry");
+  check("the route answers from the applied set until the file is saved",
+    after.asserted && after.attributes?.predeclaredId === true
+      && after.attributes?.description === "Where things are looked up."
+      && after.attributes?.members.some((one) => one.member === "Lookup" && one.description === "Finds a thing by its name.")
+      && after.attributes?.variables.some((one) => one.variable === "Count" && one.description === "How many lookups so far.")
+      && after.drift.length === 0,
+    JSON.stringify({ asserted: after.asserted, attributes: after.attributes, drift: after.drift }));
+
+  const seeded = await settles("the seed to tell the engine", async () => {
+    const log = await api.log({ since: logFrom, max: 400, match: "seed: class Registry" });
+    return (log.lines ?? []).some((line) => /seed: class Registry is predeclared/.test(line));
+  }, { budgetMs: 25000 });
+  check("the analyzer hears about the predeclared class before any save: the seed reads true and says so to the engine",
+    seeded && (await predeclaredNow()) === true, `predeclaredId now ${await predeclaredNow()}`);
+
+  const bagApplied = await api.attributesApply("Bag", at);
+  const macrosApplied = await api.attributesApply("Macros", at);
+  check("the default member, the enumerator, the hotkey and the descriptions all write",
+    bagApplied.changes.length === 2 && macrosApplied.changes.length === 3
+      && (await describe("Bag")).drift.length === 0 && (await describe("Macros")).drift.length === 0
+      && (await describe("Macros")).attributes?.members.some((one) => one.member === "DoIt" && one.hotkey === "D"),
+    JSON.stringify([bagApplied.changes, macrosApplied.changes]));
+
+  const again = await api.attributesApply("Registry", at);
+  check("applying again changes nothing", again.ok && again.changes.length === 0, JSON.stringify(again));
+
+  // ---- the save, and the package reader ----
+  await api.command("save");
+  await wait(2000);
+  const saved = await describe("Registry");
+  check("after a save the saved package carries the attributes, members included, and nothing is asserted",
+    !saved.asserted && saved.attributesKnown && saved.attributes?.predeclaredId === true
+      && saved.attributes?.members.some((one) => one.member === "Lookup" && one.description === "Finds a thing by its name.")
+      && saved.drift.length === 0,
+    JSON.stringify({ asserted: saved.asserted, attributes: saved.attributes }));
+
+  // ---- the other direction: an attribute nothing annotates ----
+  const withoutAnnotation = registryText.split(/\r?\n/).filter((line) => !/^'@PredeclaredId/.test(line)).join("\r\n");
+  await api.writeModule("Registry", withoutAnnotation, BOOK);
+  const reversed = await settles("the attribute without its annotation", async () =>
+    (await describe("Registry")).drift.some((one) => one.code === "attribute-not-annotated" && one.annotation === "PredeclaredId"),
+    { budgetMs: 20000 });
+  check("deleting the annotation leaves the attribute, and the drift says so on line 1", reversed
+    && (await describe("Registry")).drift.find((one) => one.code === "attribute-not-annotated")?.line === 1,
+    JSON.stringify((await describe("Registry")).drift));
+  await api.caret(1, { module: "Registry", project: BOOK });
+  await wait(1500);
+  const reverseFixes = await api.act("quickFixes", { line: 1, column: 1 });
+  const titles = (reverseFixes.data ?? []).map((one) => one.title);
+  check("its quick fixes are the annotation as a text edit and the removal",
+    titles.includes("Add '@PredeclaredId above") && titles.includes("Remove VB_PredeclaredId from Registry"), titles.join(" | "));
+
+  const removed = await api.attributesRemove("Registry", "PredeclaredId", at);
+  check("removing takes the attribute away", removed.changes.length === 1 && (await describe("Registry")).attributes?.predeclaredId === false,
+    JSON.stringify(removed));
+  await api.writeModule("Registry", registryText, BOOK);
+  registryText = null;
+
+  // ---- refusals, in words ----
+  const onSheet = await refusalOf(api.attributesApply("Sheet1", at));
+  check("a document module is refused with the reason", /document module/.test(onSheet ?? ""), onSheet);
+  const onUses = await refusalOf(api.attributesApply("Uses", at));
+  check("a module with no annotations is refused with what to do", /carries no attribute annotations/.test(onUses ?? ""), onUses);
+
+  const stats = await api.stats();
+  check("no COM wrapper was leaked by any of it", stats.comWrappersLive < 100, `${stats.comWrappersLive} live`);
+} finally {
+  if (registryText !== null) {
+    await api.writeModule("Registry", registryText, BOOK).catch(() => {});
+  }
+  await resetToBuilt("reset at end").catch((error) => console.log(`  reset at end failed: ${error.message}`));
+}
+
+process.exitCode = done();

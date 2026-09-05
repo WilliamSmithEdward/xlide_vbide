@@ -306,8 +306,10 @@ internal sealed partial class AddInSession
     internal void OnAnalysisSnapshot(string projectId, IReadOnlyList<Xlide.Vbe.Core.Engine.EngineModule> modules)
     {
         // The folder view rides the same snapshot, for the same reason: every module's text is
-        // in hand, and a folder is a comment at the top of it.
+        // in hand, and a folder is a comment at the top of it. So does the drift between the
+        // attribute annotations and the saved module's attributes.
         RememberFolders(projectId, modules);
+        RememberAttributeDrift(projectId, modules);
 
         var pairs = new List<(string Name, string Source)>();
         string? assertSource = null;

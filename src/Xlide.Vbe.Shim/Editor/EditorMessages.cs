@@ -699,7 +699,15 @@ public sealed record SurfaceCodeAction(
     [property: JsonPropertyName("code")] string? Code,
     [property: JsonPropertyName("start")] int Start,
     [property: JsonPropertyName("end")] int End,
-    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
+    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits,
+    /// <summary>
+    /// A fix the HOST performs rather than a text edit the page applies: the page posts
+    /// `hostAction` with this command and these arguments when the fix is chosen. Applying
+    /// annotations to a module's attributes is one - it re-imports the module, which no text
+    /// edit can do.
+    /// </summary>
+    [property: JsonPropertyName("command")] string? Command = null,
+    [property: JsonPropertyName("arguments")] string?[]? Arguments = null);
 
 /// <summary>
 /// One analyzer rule for the rules modal: its stable code, its words, its default severity, and

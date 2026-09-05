@@ -847,6 +847,11 @@ if ($Live) {
             # (2026-08-21).
             @{ Fixture = 'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm'
                Suites  = @('multi-file.mjs', 'tests-support.mjs') }
+            # THE ATTRIBUTE ANNOTATIONS GET A WORKBOOK OF THEIR OWN (tools\New-AttributesFixture.ps1),
+            # because the suite re-imports modules and saves the file to prove the saved package
+            # carries what was written, and no other fixture may be saved with attributes it did
+            # not start with. The suite puts the file back to the shape it was built in.
+            @{ Fixture = 'AttributesFixture.xlsm'; Suites = @('attributes.mjs') }
             # THE FOLDER LAYOUT (#23) GETS TWO WORKBOOKS OF ITS OWN (tools\New-FolderFixture.ps1
             # and tools\New-FolderTwinFixture.ps1), because a folder is a name and so is a
             # module, and the pair collides on both by construction: a Helpers in a different

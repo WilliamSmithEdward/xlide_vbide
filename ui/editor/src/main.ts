@@ -892,6 +892,7 @@ function boot(): void {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     // The layout is a setting: the same whole-object post the dialog makes, echoed back.
     changeView: (view) => bridge.updateSettings({ ...currentSettings(), explorerView: view }),
+    applyAttributes: (name, workbook) => bridge.hostAction("applyAttributes", [name, workbook ?? null]),
     openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
@@ -1500,6 +1501,8 @@ function boot(): void {
   const INLINE_VARIABLE_COMMAND = "xlide.refactor.inlineVariable";
   const MOVE_TO_MODULE_COMMAND = "xlide.refactor.moveToModule";
   const INTRODUCE_PARAMETER_COMMAND = "xlide.refactor.introduceParameter";
+  /** A fix the host performs: the action's `command` and `arguments`, posted back as `hostAction`. */
+  const HOST_ACTION_COMMAND = "xlide.hostAction";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1579,6 +1582,19 @@ function boot(): void {
           && marker.startColumn === start.column
           && marker.endLineNumber === end.lineNumber
           && marker.endColumn === end.column);
+
+        // A HOST-PERFORMED fix carries a command and no edits: choosing it posts the command
+        // back rather than editing the model. Applying annotations to a module's attributes is
+        // one - it re-imports the module, which is not a text edit anybody could apply here.
+        if (action.command) {
+          return {
+            title: action.title,
+            kind: "quickfix",
+            isPreferred: action.isPreferred,
+            ...(answered.length > 0 ? { diagnostics: answered } : {}),
+            command: { id: HOST_ACTION_COMMAND, title: action.title, arguments: [action.command, action.arguments ?? []] },
+          };
+        }
 
         return {
           title: action.title,
@@ -1744,6 +1760,9 @@ function boot(): void {
   // The command the lightbulb's machine-wide entry runs. Registered once, page-wide: Monaco
   // routes a code action's `command` through its command service, and an unregistered id is a
   // menu item that silently does nothing.
+  monaco.editor.registerCommand(HOST_ACTION_COMMAND, (_accessor, command: string, args: (string | null)[]) => {
+    bridge.hostAction(command, args ?? []);
+  });
   monaco.editor.registerCommand(TURN_OFF_RULE_COMMAND, (_accessor, code: string) => {
     bridge.setRuleSeverity(code, "off");
   });

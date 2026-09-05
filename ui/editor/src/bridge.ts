@@ -351,6 +351,13 @@ export interface HostCodeAction {
   start: number;
   end: number;
   edits: HostTextEdit[];
+  /**
+   * A fix the HOST performs when chosen, instead of edits the page applies: applying a module's
+   * annotations to its attributes re-imports the module, which no text edit can do. The page
+   * posts `hostAction` with the command and its arguments.
+   */
+  command?: string | null;
+  arguments?: (string | null)[] | null;
 }
 
 /**
@@ -548,6 +555,7 @@ export type ClientMessage =
   | { type: "designerSelection"; module: string; project?: string; control?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
+  | { type: "hostAction"; command: string; arguments: (string | null)[] }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
@@ -1175,6 +1183,15 @@ export class EditorBridge {
    */
   removeComponent(name: string, project?: string): void {
     this.transport.post({ type: "removeComponent", name, ...(project ? { project } : {}) });
+  }
+
+  /**
+   * Asks the host to perform an action of its own: a quick fix that is not a text edit, or a
+   * menu item that changes the project rather than the text. `applyAttributes` with a module and
+   * its workbook is the first; the host names the rest in its own table.
+   */
+  hostAction(command: string, args: (string | null | undefined)[]): void {
+    this.transport.post({ type: "hostAction", command, arguments: args.map((one) => one ?? null) });
   }
 
   /** Asks the host to toggle the breakpoint on a line, same as clicking the margin. */

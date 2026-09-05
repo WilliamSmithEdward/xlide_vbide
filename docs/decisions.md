@@ -448,3 +448,23 @@ does not expire.
   replacement exists, the native window stays reachable - shown through a punched hole in the
   surface, never by retreating the surface (the toolbar-revert bug, fixed 2026-08-02); the menu
   routing table in RouteMenuCommand is where "open ours instead" gets decided per window.
+
+## 17. Attributes are written through the editor's own import, and that is the one file exception
+
+A VBA module carries attributes the code pane never shows and the editor offers no way to set:
+`VB_PredeclaredId`, `VB_Description`, `VB_UserMemId`, the Excel hotkey, a variable's description.
+The Rubberduck convention names each in a comment (`'@PredeclaredId`, `'@Description("...")`),
+and xlide makes the module match. Decision 8 in SavedModules banned writing a file in order to
+read it back, and it stands: attributes are READ out of the saved package's own module streams.
+Writing one has exactly one path the editor accepts - an Import - so applying annotations exports
+the module to a temporary file, rewrites only the attribute lines the annotations name, removes
+the component and imports the file under the same name. The file is read by the editor, not by
+us, through the path the sync feature already creates modules by. The cost is the module's undo
+history and its native breakpoints; the breakpoints come back from the session's record and the
+tab reopens where it was. A document module cannot be imported, so its annotations are reported
+as inapplicable rather than ignored. Until the workbook is saved the saved package does not
+carry what was applied, so the applied set is asserted to SavedModules, which answers from it
+for the analyzer's predeclared-class seed, the drift findings and the api until the file is read
+again after a save. Alternatives weighed: the Procedure Attributes dialog is modal and would need
+synthetic input, which this product never does; editing vbaProject.bin in place while the
+workbook is open is not a thing a sane program does.

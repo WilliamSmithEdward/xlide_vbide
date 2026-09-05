@@ -75,6 +75,27 @@ public sealed class SavedModules
     private readonly Dictionary<string, string[]> attributes =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Module name to where its whole source sits in the package, for the on-demand read.</summary>
+    private readonly Dictionary<string, (string Stream, int Offset)> streams =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The whole attribute set of a module, read once per save and only when asked for.</summary>
+    private readonly Dictionary<string, AttributeSet?> full =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Per document, the attribute sets this product itself wrote into modules since the document
+    /// was saved. An applied attribute is true of the module the moment the import lands, and the
+    /// saved file will not say so until the next save; the assertion stands in for the file until
+    /// then, and is emptied when the file is read again, because the save is what makes the file
+    /// true. Guarded like the other statics, for the same reason.
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, AttributeSet>> Asserted =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The whole of a module stream may be decompressed for its member attributes.</summary>
+    private const int MostModuleBytes = 16 * 1024 * 1024;
+
     private readonly string path;
 
     private SavedModules(string path) => this.path = path;
@@ -147,10 +168,16 @@ public sealed class SavedModules
             }
 
             // The file has moved on, so whatever was doubted about it is settled: a save is what
-            // makes the file describe the project again.
+            // makes the file describe the project again. What was asserted about it is settled
+            // the same way - the file now carries what was applied, or the developer saved
+            // without it, and either way the file is the truth again.
             lock (Doubted)
             {
                 Doubted.Remove(documentPath);
+            }
+            lock (Asserted)
+            {
+                Asserted.Remove(documentPath);
             }
 
             // Walked OUTSIDE the lock, because it is the expensive half and two callers arriving
@@ -176,7 +203,94 @@ public sealed class SavedModules
     /// <summary>Whether the saved file carried this module at all. A module added since the last
     /// save is not in it, and that is different from one that is in it and says nothing.</summary>
     public bool Knows(string moduleName) =>
-        !IsDoubted(moduleName) && attributes.ContainsKey(moduleName);
+        AssertedOf(moduleName) is not null || (!IsDoubted(moduleName) && attributes.ContainsKey(moduleName));
+
+    /// <summary>
+    /// Says that this product wrote these attributes into a module of the document, so they are
+    /// true of the module now whatever the saved file says, until the file is saved and read again.
+    /// </summary>
+    public static void Assert(string? documentPath, string moduleName, AttributeSet attributes)
+    {
+        ArgumentNullException.ThrowIfNull(attributes);
+        if (string.IsNullOrWhiteSpace(documentPath) || string.IsNullOrWhiteSpace(moduleName))
+        {
+            return;
+        }
+        lock (Asserted)
+        {
+            if (!Asserted.TryGetValue(documentPath, out var byModule))
+            {
+                byModule = new Dictionary<string, AttributeSet>(StringComparer.OrdinalIgnoreCase);
+                Asserted[documentPath] = byModule;
+            }
+            byModule[moduleName] = attributes;
+        }
+    }
+
+    /// <summary>The attributes this product itself last wrote into the module, if the file has not been read since.</summary>
+    public static AttributeSet? AssertedFor(string? documentPath, string moduleName)
+    {
+        if (string.IsNullOrWhiteSpace(documentPath))
+        {
+            return null;
+        }
+        lock (Asserted)
+        {
+            return Asserted.TryGetValue(documentPath, out var byModule) && byModule.TryGetValue(moduleName, out var set)
+                ? set
+                : null;
+        }
+    }
+
+    private AttributeSet? AssertedOf(string moduleName) => AssertedFor(path, moduleName);
+
+    /// <summary>
+    /// Every attribute the module carries - module-level and per member - or null when the saved
+    /// file cannot answer for it. The whole stream is decompressed for this, once per save, and
+    /// only for the module asked about: member attributes sit beside their procedures, anywhere
+    /// in a module that may be a megabyte of code, where the header read above stops at eight
+    /// kilobytes on purpose.
+    /// </summary>
+    public AttributeSet? AttributesOf(string moduleName)
+    {
+        if (AssertedOf(moduleName) is { } asserted)
+        {
+            return asserted;
+        }
+        if (IsDoubted(moduleName))
+        {
+            return null;
+        }
+        lock (full)
+        {
+            if (full.TryGetValue(moduleName, out var held))
+            {
+                return held;
+            }
+        }
+
+        AttributeSet? read = null;
+        try
+        {
+            if (streams.TryGetValue(moduleName, out var where)
+                && OfficePackage.ProjectBytes(path) is { } project
+                && CompoundFile.TryRead(project) is { } cfb
+                && VbaCompression.Decompress(cfb.Read($"/VBA/{where.Stream}"), where.Offset, MostModuleBytes) is { } text)
+            {
+                read = ModuleAttributes.Read(Encoding.Latin1.GetString(text));
+            }
+        }
+        catch
+        {
+            // Unreadable is unknown, the same answer as a module the file never held.
+        }
+
+        lock (full)
+        {
+            full[moduleName] = read;
+        }
+        return read;
+    }
 
     /// <summary>
     /// Whether the module has a default instance: true, false, or null when the saved file does
@@ -186,7 +300,8 @@ public sealed class SavedModules
     /// `Variable not defined` under every use of a legitimately predeclared singleton.
     /// </summary>
     public bool? PredeclaredIdOf(string moduleName) =>
-        IsDoubted(moduleName) ? null : Flag(moduleName, "VB_PredeclaredId");
+        AssertedOf(moduleName) is { } asserted ? asserted.PredeclaredId
+            : IsDoubted(moduleName) ? null : Flag(moduleName, "VB_PredeclaredId");
 
     /// <summary>One boolean attribute of one module, or null when it is not there to read.</summary>
     private bool? Flag(string moduleName, string attribute)
@@ -264,6 +379,7 @@ public sealed class SavedModules
             }
 
             read.attributes[name] = HeaderLinesOf(text);
+            read.streams[name] = (stream, offset);
         }
 
         return read;

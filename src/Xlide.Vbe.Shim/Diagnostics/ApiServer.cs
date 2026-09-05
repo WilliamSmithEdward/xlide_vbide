@@ -1166,6 +1166,78 @@ public sealed record DebugProcedureRow(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("line")] int Line);
 
+/// <summary>One attribute annotation as read from a module's code.</summary>
+public sealed record DebugAnnotationRow(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("argument")] string? Argument,
+    /// <summary>The procedure or variable it binds to; null for a module annotation.</summary>
+    [property: JsonPropertyName("target")] string? Target,
+    [property: JsonPropertyName("targetLine")] int? TargetLine,
+    /// <summary>The spelling this product writes for it.</summary>
+    [property: JsonPropertyName("canonical")] string Canonical);
+
+/// <summary>An annotation that cannot mean what it says where it sits.</summary>
+public sealed record DebugAnnotationProblemRow(
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("message")] string Message);
+
+/// <summary>One procedure's hidden attributes.</summary>
+public sealed record DebugMemberAttributesRow(
+    [property: JsonPropertyName("member")] string Member,
+    [property: JsonPropertyName("description")] string? Description,
+    [property: JsonPropertyName("userMemId")] int? UserMemId,
+    [property: JsonPropertyName("hotkey")] string? Hotkey);
+
+/// <summary>One module-level variable's description attribute.</summary>
+public sealed record DebugVariableDescriptionRow(
+    [property: JsonPropertyName("variable")] string Variable,
+    [property: JsonPropertyName("description")] string Description);
+
+/// <summary>The attributes the saved module carries, module-level and per member.</summary>
+public sealed record DebugAttributeSetRow(
+    [property: JsonPropertyName("description")] string? Description,
+    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId,
+    [property: JsonPropertyName("exposed")] bool? Exposed,
+    [property: JsonPropertyName("members")] DebugMemberAttributesRow[] Members,
+    [property: JsonPropertyName("variables")] DebugVariableDescriptionRow[] Variables);
+
+/// <summary>One disagreement between an annotation and an attribute, as the Problems pane files it.</summary>
+public sealed record DebugDriftRow(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("annotation")] string? Annotation,
+    [property: JsonPropertyName("target")] string? Target,
+    [property: JsonPropertyName("occurrence")] int Occurrence);
+
+/// <summary>
+/// A module's attribute annotations, the attributes its saved copy carries, and the drift between
+/// them. `attributesKnown` false means the saved workbook cannot vouch for the module (never saved
+/// since it was added) and `attributes` is null; `asserted` true means this session wrote the
+/// attributes and the file has not been saved since, so `attributes` is what was written.
+/// </summary>
+public sealed record DebugAttributesReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("kind")] string Kind,
+    /// <summary>Whether attributes can be written to this module at all: a standard or class module.</summary>
+    [property: JsonPropertyName("writable")] bool Writable,
+    [property: JsonPropertyName("attributesKnown")] bool AttributesKnown,
+    [property: JsonPropertyName("asserted")] bool Asserted,
+    [property: JsonPropertyName("annotations")] DebugAnnotationRow[] Annotations,
+    [property: JsonPropertyName("problems")] DebugAnnotationProblemRow[] Problems,
+    [property: JsonPropertyName("attributes")] DebugAttributeSetRow? Attributes,
+    [property: JsonPropertyName("drift")] DebugDriftRow[] Drift);
+
+/// <summary>What an apply or a remove came to: each change in words, and what was skipped with its reason.</summary>
+public sealed record DebugAttributesAppliedReply(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("changes")] string[] Changes,
+    [property: JsonPropertyName("skipped")] string[] Skipped);
+
 /// <summary>A module's shape without reading its text and parsing it again in the caller.</summary>
 public sealed record DebugOutlineReply(
     [property: JsonPropertyName("module")] string Module,
@@ -1683,6 +1755,8 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugBreakpointsReply))]
 [JsonSerializable(typeof(DebugMarkReply))]
 [JsonSerializable(typeof(DebugOutlineReply))]
+[JsonSerializable(typeof(DebugAttributesReply))]
+[JsonSerializable(typeof(DebugAttributesAppliedReply))]
 [JsonSerializable(typeof(DebugCompileReply))]
 [JsonSerializable(typeof(DebugDocumentsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]

@@ -1909,8 +1909,9 @@ internal sealed partial class AddInSession
             case "problems":
             {
                 // The findings list is replaced whole, never mutated, so a reference read from
-                // this thread sees a complete edition.
-                var held = _findings;
+                // this thread sees a complete edition. The attribute annotations' own findings
+                // join it, as they do on the surface.
+                var held = _findings.Concat(AttributeFindings()).ToList();
                 request.Query.TryGetValue("module", out var onlyModule);
                 var rows = held
                     .Where(finding => onlyModule is null
@@ -4200,6 +4201,64 @@ internal sealed partial class AddInSession
                         _lastPublishedMode,
                         modeError),
                     DebugJsonContext.Default.DebugBarsReply);
+            }
+
+            /*
+             * THE ATTRIBUTE ANNOTATIONS OF ONE MODULE, and the drift between them and what the
+             * saved module carries - read through the object model now, so a caller need not wait
+             * for a pass. POST action=apply writes the annotations into the attributes through the
+             * export-rewrite-import the menu and the quick fix use; action=remove takes one
+             * attribute away (kind=<annotation> target=<member>? occurrence=<n>?). Both refuse in
+             * the debugger and on a document module, in words.
+             */
+            case "attributes" when request.Query.TryGetValue("module", out var attributesModule) && attributesModule.Length > 0:
+            {
+                request.Query.TryGetValue("project", out var attributesProject);
+                if (ResolveNamedProject(attributesProject, out var attributesUnknown) is null && attributesUnknown is not null)
+                {
+                    return HostError(attributesUnknown);
+                }
+
+                if (request.Query.TryGetValue("action", out var attributesAction))
+                {
+                    switch (attributesAction)
+                    {
+                        case "apply":
+                        {
+                            var refused = ApplyAttributes(attributesModule, attributesProject, out var changes, out var skipped);
+                            return refused is not null
+                                ? HostError(refused)
+                                : System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugAttributesAppliedReply(true, attributesModule, [.. changes.Select(one => one.ToString())], [.. skipped]),
+                                    DebugJsonContext.Default.DebugAttributesAppliedReply);
+                        }
+                        case "remove":
+                        {
+                            request.Query.TryGetValue("kind", out var kindText);
+                            if (!Enum.TryParse<Xlide.Vbe.Core.Vba.AnnotationKind>(kindText, ignoreCase: true, out var kind))
+                            {
+                                return HostError($"'{kindText}' is not an attribute annotation; pass kind=one of "
+                                    + string.Join(", ", Enum.GetNames<Xlide.Vbe.Core.Vba.AnnotationKind>()));
+                            }
+                            request.Query.TryGetValue("target", out var target);
+                            var occurrence = request.Query.TryGetValue("occurrence", out var occurrenceText)
+                                && int.TryParse(occurrenceText, out var parsedOccurrence) ? parsedOccurrence : 0;
+                            var refused = RemoveAttribute(attributesModule, attributesProject, kind, string.IsNullOrEmpty(target) ? null : target, occurrence, out var changes);
+                            return refused is not null
+                                ? HostError(refused)
+                                : System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugAttributesAppliedReply(true, attributesModule, [.. changes.Select(one => one.ToString())], []),
+                                    DebugJsonContext.Default.DebugAttributesAppliedReply);
+                        }
+                        default:
+                            return HostError($"'{attributesAction}' is not an attributes action; pass action=apply or action=remove");
+                    }
+                }
+
+                var described = DescribeAttributes(attributesModule, attributesProject, out var describeRefused);
+                return described is null
+                    ? HostError(describeRefused ?? $"'{attributesModule}' could not be described")
+                    : System.Text.Json.JsonSerializer.Serialize(described, DebugJsonContext.Default.DebugAttributesReply);
             }
 
             case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:

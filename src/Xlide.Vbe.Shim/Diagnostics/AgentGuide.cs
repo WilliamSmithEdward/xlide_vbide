@@ -163,6 +163,9 @@ internal static class AgentGuide
         new("outline", "GET", "module=<name> project=<display>?",
             "A module's procedures from the analyzer: name, kind, line.",
             "GET outline?module=Module1", true, DoorPolicy.Open),
+        new("attributes", "GET|POST", "module=<name> project=<display>? action=apply|remove? kind=<annotation>? target=<member>? occurrence=<n>?",
+            "A module's attribute annotations ('@PredeclaredId, '@Description and the rest), the hidden attributes its saved copy carries, and the drift between them. POST action=apply writes the annotations into the attributes by exporting, rewriting and importing the module; action=remove takes one attribute away.",
+            "GET attributes?module=Registry", true, DoorPolicy.Open),
         new("engine", "GET", "module=<name> text=1?",
             "The analysis engine's copy of a module's source, for comparing against the host's. "
             + "`text=1` returns both texts rather than only their shapes.",

@@ -1379,6 +1379,7 @@ internal sealed partial class AddInSession : IDisposable
             OnModuleCloseRequested(component, project, action);
         };
         _editorSurface.ComponentInsertRequested = InsertComponent;
+        _editorSurface.HostActionRequested = OnHostActionRequested;
         _editorSurface.ComponentRemoveRequested = (component, project) =>
         {
             if (RemoveComponent(component, project) is { } refused)
@@ -7113,7 +7114,17 @@ internal sealed partial class AddInSession : IDisposable
             items => $"{items.Length} item(s)");
 
     /// <summary>Answers a hover request from the surface, the same way a completion is.</summary>
-    private void OnHoverRequested(int requestId, int offset) =>
+    private void OnHoverRequested(int requestId, int offset)
+    {
+        // An attribute annotation under the caret is this session's to explain, not the engine's:
+        // what it writes, and what the module has now.
+        if (_editorSurface is { Module: { } hoveredModule, Text: { } hoveredText } surface
+            && AttributeHover(hoveredModule, _shownProject, hoveredText, offset) is { } ours)
+        {
+            surface.ShowHover(requestId, ours);
+            return;
+        }
+
         AnswerFromEngine<SurfaceHoverPayload?>(
             "hover",
             $"@{offset}",
@@ -7131,6 +7142,7 @@ internal sealed partial class AddInSession : IDisposable
             },
             (surface, payload) => surface.ShowHover(requestId, payload),
             payload => payload is null ? "nothing" : payload.Signature);
+    }
 
     /// <summary>Answers a call-tip request from the surface, the same way a hover is answered.</summary>
     private void OnSignatureHelpRequested(int requestId, int offset) =>
@@ -7229,12 +7241,16 @@ internal sealed partial class AddInSession : IDisposable
     /// reason - a lightbulb that does not appear is what the developer already sees when there is
     /// nothing to fix.
     /// </summary>
-    private void OnCodeActionsRequested(int requestId, int start, int end) =>
+    private void OnCodeActionsRequested(int requestId, int start, int end)
+    {
+        // Read on the host thread, where the shown project is decided, for the fixes this
+        // session offers itself alongside the engine's (#23's attributes).
+        var shownProject = _shownProject;
         AnswerFromEngine<SurfaceCodeAction[]>(
             "codeAction",
             $"@{start}..{end}",
             [],
-            async (analysis, module, _, token) =>
+            async (analysis, module, source, token) =>
             {
                 var answered = await analysis.CodeActionsAsync(module, start, end, token)
                     .ConfigureAwait(false);
@@ -7244,10 +7260,12 @@ internal sealed partial class AddInSession : IDisposable
                     action.Code,
                     action.Span.Start,
                     action.Span.End,
-                    [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))]))];
+                    [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))])),
+                    .. AttributeCodeActions(module, shownProject, source, start, end)];
             },
             (surface, actions) => surface.ShowCodeActions(requestId, actions),
             actions => $"{actions.Length} fix(es)");
+    }
 
     /// <summary>
     /// The analyzer's rule catalog, fetched once per session.
@@ -10424,7 +10442,9 @@ internal sealed partial class AddInSession : IDisposable
 
     private void PublishFindingsToSurface()
     {
-        _editorSurface?.ShowFindings([.. _findings
+        // The engine's findings and this session's own - the attribute annotations' drift -
+        // in one list, held to the same active-line rule.
+        _editorSurface?.ShowFindings([.. _findings.Concat(AttributeFindings())
             .Where(f => !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
             .Select(f => new SurfaceFinding(
                 f.Module,
@@ -11181,7 +11201,10 @@ internal sealed partial class AddInSession : IDisposable
                 continue;
             }
 
-            var markers = _findings
+            // The attribute annotations' drift squiggles too: a finding the Problems pane lists
+            // but the editor does not mark has no lightbulb, so its fixes cannot be reached from
+            // the line they are about (the attributes suite, 2026-09-05).
+            var markers = _findings.Concat(AttributeFindings())
                 .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
                     && (f.Project is null || project is null
                         || string.Equals(DisplayFromProjectId(f.Project), project, StringComparison.OrdinalIgnoreCase))
