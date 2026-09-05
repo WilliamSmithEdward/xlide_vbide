@@ -833,6 +833,8 @@ function boot(): void {
       searchWidget.attachTo(editor.getContainerDomNode());
       searchWidget.onActiveEditorChanged();
       shell?.setActiveModule(id?.module ?? null, id?.project ?? null);
+      // The procedure readout follows the editor that now has the caret.
+      bridge.announceCaret();
     },
     layoutChanged: () => {
       workspace?.editors().forEach((editor) => editor.layout());
@@ -888,6 +890,8 @@ function boot(): void {
 
   shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
+    // The layout is a setting: the same whole-object post the dialog makes, echoed back.
+    changeView: (view) => bridge.updateSettings({ ...currentSettings(), explorerView: view }),
     openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
@@ -2080,6 +2084,7 @@ function boot(): void {
     statusNotice: () => shell.currentNotice(),
     statusPosition: () => shell.currentPosition(),
     statusModule: () => shell.currentModule(),
+    statusProcedure: () => shell.currentProcedure(),
     pressToolbar: (id) => shell.pressToolbarCommand(id),
     toolbarCommands: () => shell.toolbarCommandsShown(),
     properties: () => shell.propertiesShown(),

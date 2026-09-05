@@ -368,12 +368,12 @@ Step 'page probes (headless)' {
     # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
     # which drives the same file as one of its three legs. Listing it here too would launch
     # Edge twice for the same answer.
-    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs', 'drop-page-probe.mjs'
+    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'folders-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs', 'drop-page-probe.mjs'
     foreach ($probe in $probes) {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1
         if ($answer -notmatch '"pass":true') { throw "$probe did not pass" }
     }
-    'object browser, tree rows, boot failure, sole workbook'
+    'object browser, tree rows, folder layout, boot failure, sole workbook'
 }
 
 # THE CLOSE-CONFIRM WRAPPER, which needs no Excel: seam greps across the page, the shim and the
@@ -834,6 +834,13 @@ if ($Live) {
             # suite - DebugFixture alone is read by nine. Its Untouched module is edited by
             # nobody, which is how "the log did not over-report" is a real question.
             @{ Fixture = 'ChangeFixture.xlsm'; Suites = @('change-log.mjs') }
+            # THE FOLDER LAYOUT (#23) GETS TWO WORKBOOKS OF ITS OWN (tools\New-FolderFixture.ps1
+            # and tools\New-FolderTwinFixture.ps1), because a folder is a name and so is a
+            # module, and the pair collides on both by construction: a Helpers in a different
+            # folder, a Ledger in no folder, and a Shared folder in each. The suite also holds
+            # the status bar's current procedure to the editor's own ProcOfLine on every line
+            # of a module built for it.
+            @{ Fixture = 'FolderFixture.xlsm + FolderTwinFixture.xlsm'; Suites = @('folders.mjs') }
         )
 
         foreach ($group in $plan) {

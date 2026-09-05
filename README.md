@@ -54,7 +54,11 @@ native code, so Excel never loads a .NET runtime on its account.
   type library, read directly from the type libraries themselves. Members of your own modules jump
   to their definition on a double click.
 - A project explorer rooted at each open workbook, with project-qualified addressing, so two
-  workbooks can both hold a Module1 and xlide knows which one you mean.
+  workbooks can both hold a Module1 and xlide knows which one you mean. A second layout groups
+  modules into folders by the `'@Folder("Parent.Child")` comment at the top of each one, the
+  Rubberduck convention, so a project organised there is organised here without editing a line.
+- The procedure the caret is in, on the status bar beside the module name and marked in the
+  explorer, so where you are reads off the screen without scrolling up.
 - An Immediate panel that mirrors the native window live, and a close-confirm on a dirty tab that
   reverts everywhere when you choose not to save.
 - A UserForm designer: drag, resize, nudge and reparent controls on a canvas, with a text view of

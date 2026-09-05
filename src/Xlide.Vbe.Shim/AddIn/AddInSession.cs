@@ -9732,9 +9732,13 @@ internal sealed partial class AddInSession : IDisposable
                     continue;
                 }
 
+                // The folder rides each component (#23): from the cache the analysis pass fills,
+                // or a one-time read of the declarations for a module no pass has described.
+                var identity = ProjectReader.Identity(project).Id;
                 var members = new List<SurfaceComponent>();
                 ForEachRealComponent(project, (component, name) =>
-                    members.Add(new SurfaceComponent(name, component.GetInt32("Type"))));
+                    members.Add(new SurfaceComponent(name, component.GetInt32("Type"), FolderOf(identity, component, name))));
+                PruneFolders(identity, members.Select(member => member.Name));
 
                 // The cased name against the id, so the title bar can name the workbook on a tab
                 // switch without a COM call. The id is a lowercased path and everything derived

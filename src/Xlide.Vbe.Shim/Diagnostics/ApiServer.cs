@@ -712,7 +712,15 @@ public sealed record DebugStateReply(
     [property: JsonPropertyName("paletteOpen")] bool PaletteOpen,
     [property: JsonPropertyName("paletteVisible")] bool PaletteVisible,
     [property: JsonPropertyName("surfaceReady")] bool SurfaceReady,
-    [property: JsonPropertyName("devtoolsPort")] int DevToolsPort);
+    [property: JsonPropertyName("devtoolsPort")] int DevToolsPort,
+    /// <summary>The page's caret line, as the host last heard it; 0 before any selection arrived.</summary>
+    [property: JsonPropertyName("caretLine")] int CaretLine = 0,
+    /// <summary>
+    /// The procedure that line is in, by the editor's own ProcOfLine on the shown module - the
+    /// native answer the page's status-bar readout is held to. Null in the declarations section,
+    /// and with nothing shown.
+    /// </summary>
+    [property: JsonPropertyName("procedureAtCaret")] string? ProcedureAtCaret = null);
 
 /// <summary>
 /// What a window action came to: whether the action itself TOOK, and what the window's
@@ -995,7 +1003,12 @@ public sealed record DebugComponentRow(
     /// added since the last save is not in it. Null here is what the analyzer is sent, and what
     /// keeps it silent - so this field is how a caller sees WHY a finding did or did not appear.
     /// </summary>
-    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null);
+    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null,
+    /// <summary>
+    /// The folder the module's <c>'@Folder("Parent.Child")</c> annotation names, normalized, or
+    /// null for a module carrying none. The same answer the explorer's folder view draws.
+    /// </summary>
+    [property: JsonPropertyName("folder")] string? Folder = null);
 
 /// <summary>
 /// What a workbook's VBA project actually contains, read from the object model.
@@ -1138,7 +1151,9 @@ public sealed record DebugSettingsReply(
     /// <summary>What the designer canvas snaps POINTER gestures to: grid, objects or off.</summary>
     [property: JsonPropertyName("designerSnap")] string DesignerSnap,
     /// <summary>The grid's spacing in points.</summary>
-    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize);
+    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize,
+    /// <summary>Which explorer layout is showing: "tree" or "folders".</summary>
+    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree");
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

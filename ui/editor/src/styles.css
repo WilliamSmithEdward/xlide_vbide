@@ -916,12 +916,49 @@ span.prop-value.readonly {
   outline-offset: 1px;
 }
 
+/* The explorer's two layout tabs, its own header row above the tree. */
+#explorer-views {
+  display: flex;
+  gap: 2px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.explorer-view {
+  padding: 2px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.explorer-view:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* The showing layout: full strength and underlined, so it reads without the colour. */
+.explorer-view.selected {
+  opacity: 1;
+  border-bottom-color: var(--vscode-focusBorder, #0078d4);
+}
+
+.explorer-view:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+/* One level of indent per folder, in the folder layout. The flat tree sets no depth. */
 .tree-item {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 3px 10px 3px 22px;
+  padding: 3px 10px 3px calc(22px + var(--tree-depth, 0) * 16px);
   border: 0;
   background: transparent;
   color: inherit;
@@ -980,7 +1017,58 @@ span.prop-value.readonly {
 
 /* A procedure under its unfolded module, one level deeper. */
 .tree-item.tree-proc {
-  padding-left: 44px;
+  padding-left: calc(44px + var(--tree-depth, 0) * 16px);
+}
+
+/* The procedure the caret is in: weight and a bar at its edge, so the mark survives without
+   its colour. aria-current carries it to a reader. */
+.tree-item.tree-proc.current {
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--vscode-focusBorder, #0078d4);
+}
+
+/* A folder in the folder layout: a treeitem that folds and unfolds, at the module rows' indent
+   and one level deeper per folder above it. */
+.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 10px 3px calc(22px + var(--tree-depth, 0) * 16px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tree-folder:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.tree-folder:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.tree-folder .codicon {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.tree-folder .tree-twisty {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.tree-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-folder .tree-kind {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.55;
 }
 
 /* A workbook's row: the twisty, the name, and the plus that adds to it. A treeitem rather than a

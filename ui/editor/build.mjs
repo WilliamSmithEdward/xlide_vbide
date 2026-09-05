@@ -183,6 +183,7 @@ const INDEX_HTML = `<!doctype html>
   <!-- The pane bodies. Parked here at load; the dock system moves each into the group its
        tab sits in, so their markup never has to know where they live. -->
   <div id="pane-bodies" hidden>
+    <div id="explorer-views" role="tablist" aria-label="Explorer layout"></div>
     <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
     <div id="properties-object" aria-label="Selected object"></div>
     <div id="properties-list" role="list" aria-label="Properties of the selected component"></div>
@@ -246,7 +247,7 @@ const INDEX_HTML = `<!doctype html>
       </div>
     </div>
   </div>
-  <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
+  <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-procedure"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
 </div>
 <script src="./editor.js"></script>
 </body>

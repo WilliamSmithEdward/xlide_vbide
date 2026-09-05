@@ -3707,7 +3707,9 @@ internal sealed partial class AddInSession
                         PaletteOpen: _browserPalette is not null,
                         PaletteVisible: _browserPalette is { } palette && Win32.IsWindowVisible(palette.Handle),
                         SurfaceReady: _surfaceShown,
-                        DevToolsPort: WebView.WebView2Surface.DevToolsPort),
+                        DevToolsPort: WebView.WebView2Surface.DevToolsPort,
+                        CaretLine: _editorSurface?.CaretLine ?? 0,
+                        ProcedureAtCaret: ProcedureAtPageCaret()),
                     DebugJsonContext.Default.DebugStateReply);
             }
 
@@ -4879,6 +4881,9 @@ internal sealed partial class AddInSession
                             : settings.DesignerSnap,
                         DesignerGridSize = request.Query.TryGetValue("designerGridSize", out var grid)
                             && int.TryParse(grid, out var gridAsked) ? gridAsked : settings.DesignerGridSize,
+                        ExplorerView = request.Query.TryGetValue("explorerView", out var view)
+                            ? view
+                            : settings.ExplorerView,
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4894,7 +4899,8 @@ internal sealed partial class AddInSession
                         settings.FormatIndentSize,
                         settings.SyncEngine,
                         settings.DesignerSnap,
-                        settings.DesignerGridSize),
+                        settings.DesignerGridSize,
+                        settings.ExplorerView),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 
@@ -5052,6 +5058,7 @@ internal sealed partial class AddInSession
                 // can see why the analyzer did or did not report a bare class name. Read once
                 // for the whole walk; null throughout for a project never saved.
                 var savedHeaders = Xlide.Vbe.Core.Vba.SavedModules.For(Engine.ProjectReader.SavedPathOf(project));
+                var projectIdentity = ProjectReader.Identity(project).Id;
 
                 ForEachRealComponent(project, (component, name) =>
                 {
@@ -5074,7 +5081,9 @@ internal sealed partial class AddInSession
                         // document and a form have a default instance by their kind and a
                         // standard module cannot have one, so the flag is only ever consulted
                         // here, and answering it for the others would invite reading it as one.
-                        type == 2 ? savedHeaders?.PredeclaredIdOf(name) : null));
+                        type == 2 ? savedHeaders?.PredeclaredIdOf(name) : null,
+                        // The folder its annotation names, the same answer the tree draws (#23).
+                        FolderOf(projectIdentity, component, name)));
                 });
 
                 // The identity of the project THIS REPLY DESCRIBES, read off that project.

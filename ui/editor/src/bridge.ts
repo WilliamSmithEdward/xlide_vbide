@@ -10,6 +10,7 @@ import type { ToolbarCommand } from "./toolbar.js";
 import type { Workspace } from "./workspace.js";
 import { takeFormattingMark } from "./format.js";
 import { applySettings, type EditorSettings, type IncomingSettings } from "./settings.js";
+import { procedureAt, scanProcedures, type ProcedureRange } from "./procedureat.js";
 import { widenIfEmpty } from "./markerspan.js";
 import { type XlideTheme } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
@@ -2516,6 +2517,11 @@ export class EditorBridge {
     const revision = (this.revisions.get(key) ?? 0) + 1;
     this.revisions.set(key, revision);
 
+    // The procedure under a still caret can change with the text above it.
+    if (model === this.ed()?.getModel()) {
+      this.announceCaret();
+    }
+
     // Monaco reports changes bottom-up so that earlier ranges stay valid; the order is
     // preserved here and the host must apply them in the same order.
     const changes: HostTextChange[] = event.changes.map((change) => ({
@@ -2549,8 +2555,47 @@ export class EditorBridge {
     });
   }
 
+  /**
+   * The procedures of a model's text, scanned once per version. A caret moves far more often
+   * than the text changes, and a 65,000-line module is not re-read for each arrow key.
+   */
+  private readonly procedureIndex = new WeakMap<monaco.editor.ITextModel, { version: number; ranges: ProcedureRange[] }>();
+
+  private proceduresOf(model: monaco.editor.ITextModel): ProcedureRange[] {
+    const version = model.getVersionId();
+    const held = this.procedureIndex.get(model);
+    if (held && held.version === version) {
+      return held.ranges;
+    }
+    const ranges = scanProcedures(model.getValue());
+    this.procedureIndex.set(model, { version, ranges });
+    return ranges;
+  }
+
+  /**
+   * Tells the shell where the caret is and which procedure that is in, from the active editor.
+   *
+   * Three things move the answer and all three come here: the caret, the text under a still
+   * caret (a Sub renamed above it), and the active editor itself. A designer face is a form's
+   * markup and has no procedures, so it reports none.
+   */
+  announceCaret(): void {
+    const editor = this.ed();
+    const model = editor?.getModel() ?? null;
+    const position = editor?.getPosition() ?? null;
+    if (!editor || !model || !position) {
+      this.shell?.setCaret(null, null, 1, null);
+      return;
+    }
+
+    const id = this.documents.idOf(model);
+    const procedure = id && !id.face ? procedureAt(this.proceduresOf(model), position.lineNumber) : null;
+    this.shell?.setCaret(id?.face ? null : id?.module ?? null, id?.project ?? null, position.lineNumber, procedure);
+  }
+
   private onSelectionChanged(selection: monaco.Selection): void {
     this.shell?.setPosition(selection.positionLineNumber, selection.positionColumn);
+    this.announceCaret();
     this.transport.post({
       type: "selectionChanged",
       startLine: selection.startLineNumber,
@@ -2951,14 +2996,16 @@ export function demoTransport(): HostTransport {
   // The demo's tree, held rather than sent once, so removing a component can take it out of both
   // lists and republish - which is what the host does, and what makes the removal exercisable
   // here at all. Two workbooks, and a name that lives in only one of them.
+  // Book1's modules carry folders, so the folder view has something to draw headless: a nested
+  // path, two spellings of one folder, and two rows at the root.
   const demoProjects: ExplorerProject[] = [
     {
       name: "Book1.xlsm",
       components: [
         { name: "Sheet1", kind: 100 },
         { name: "ThisWorkbook", kind: 100 },
-        { name: "Module1", kind: 1 },
-        { name: "SalesRow", kind: 2 },
+        { name: "Module1", kind: 1, folder: "Sales.Import" },
+        { name: "SalesRow", kind: 2, folder: "sales" },
       ],
     },
     {
@@ -3296,6 +3343,7 @@ export function demoTransport(): HostTransport {
           formatIndentSize: message.formatIndentSize,
           designerSnap: message.designerSnap,
           designerGridSize: message.designerGridSize,
+          explorerView: message.explorerView,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

@@ -66,6 +66,16 @@ public sealed record ProductSettings
     public bool TreeFollowsEditor { get; set; } = true;
 
     /// <summary>
+    /// How the explorer lays a workbook out: "tree" is the flat list of modules by kind, and
+    /// "folders" groups them by the <c>'@Folder("Parent.Child")</c> annotation each module
+    /// carries, the Rubberduck convention (#23). The two are tabs at the top of the pane; this is
+    /// which one is showing, and it persists because a developer who arranged their project
+    /// into folders wants to find it that way tomorrow.
+    /// </summary>
+    [JsonPropertyName("explorer.view")]
+    public string ExplorerView { get; set; } = "tree";
+
+    /// <summary>
     /// One indent level, in spaces. Governs the EDITOR's own indentation, what smart Enter
     /// leaves behind, and Format Module - which used to be three different behaviours from one
     /// name (2026-08-08).
@@ -200,6 +210,9 @@ public sealed record ProductSettings
         SyncEngine = string.Equals(SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase)
             ? "builtIn"
             : "xlide",
+        ExplorerView = string.Equals(ExplorerView, "folders", StringComparison.OrdinalIgnoreCase)
+            ? "folders"
+            : "tree",
     };
 
     /// <summary>

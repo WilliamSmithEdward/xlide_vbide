@@ -70,6 +70,19 @@ public class ProductSettingsTests
         Assert.Equal("comfy", settings.BlockLayout);
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.Equal("xlide", settings.SyncEngine);
+        Assert.Equal("tree", settings.ExplorerView);
+    }
+
+    [Theory]
+    [InlineData("folders", "folders")]
+    [InlineData("FOLDERS", "folders")]
+    [InlineData("tree", "tree")]
+    [InlineData("whatever", "tree")]
+    public void TheExplorerViewIsOneOfTwoAndAnythingElseIsTheTree(string asked, string kept)
+    {
+        var settings = ProductSettings.Parse($"{{ \"explorer.view\": \"{asked}\" }}");
+
+        Assert.Equal(kept, settings.ExplorerView);
     }
 
     /// <summary>

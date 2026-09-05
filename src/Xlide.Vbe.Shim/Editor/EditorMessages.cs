@@ -264,7 +264,9 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     [property: JsonPropertyName("syncEngine")] string SyncEngine,
     [property: JsonPropertyName("designerSnap")] string DesignerSnap,
-    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize);
+    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize,
+    /// <summary>Which explorer layout is showing: "tree" or "folders".</summary>
+    [property: JsonPropertyName("explorerView")] string ExplorerView = "tree");
 
 /// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>
 public sealed record SurfaceSearchMatch(
@@ -385,10 +387,15 @@ public sealed record SetFindingsMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("findings")] SurfaceFinding[] Findings);
 
-/// <summary>One component in a project, with the kind the editor reports for it.</summary>
+/// <summary>
+/// One component in a project, with the kind the editor reports for it, and the folder its
+/// <c>'@Folder("Parent.Child")</c> annotation names - null for a module that carries none, which
+/// the folder view draws at the workbook's root.
+/// </summary>
 public sealed record SurfaceComponent(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("kind")] int Kind);
+    [property: JsonPropertyName("kind")] int Kind,
+    [property: JsonPropertyName("folder")] string? Folder = null);
 
 /// <summary>One project and everything in it.</summary>
 public sealed record SurfaceProject(

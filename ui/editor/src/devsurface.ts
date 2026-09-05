@@ -95,6 +95,13 @@ export interface UiSnapshot {
   statusPosition: string;
   statusModule: string;
   /**
+   * The procedure the caret is in, as the bar reads it: "Sub Recalculate", "(Declarations)"
+   * above the first procedure, "" with no code module showing (#23). Computed on the page
+   * from the text; `state.procedureAtCaret` is the native editor's answer to the same question,
+   * and the folders suite holds the two to each other line by line.
+   */
+  statusProcedure: string;
+  /**
    * The line the current-statement marker is drawn on, or null when none is drawn.
    *
    * The one thing on screen that claims to say where execution is, and until this existed it
@@ -346,6 +353,8 @@ export interface DevSurfaceParts {
   statusPosition(): string;
   /** The status bar's module name, read the same way. */
   statusModule(): string;
+  /** The status bar's procedure readout, read the same way. */
+  statusProcedure(): string;
   /** Presses a toolbar command by id, through the button's own click. */
   pressToolbar(id: string): { did: boolean; detail: string };
   /** Every command the strip is currently drawing, and whether each is pressable. */
@@ -752,6 +761,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     statusNotice: parts.statusNotice(),
     statusPosition: parts.statusPosition(),
     statusModule: parts.statusModule(),
+    statusProcedure: parts.statusProcedure(),
     currentLine: bridge.currentLineDrawn(),
     sync: syncDialogProbe()?.state() ?? null,
     changes: changesPaneProbe()?.state() ?? null,
@@ -1672,6 +1682,35 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
       explorer.unfold(module, args.workbook === undefined ? undefined : String(args.workbook));
       return { did: true, detail: `toggled ${module}` };
+    },
+
+    /**
+     * Picks the explorer's layout the way its tabs do: `act("explorerView", { view: "folders" })`.
+     * A SETTINGS change, echoed by the host, so the tree has redrawn only once `ui.explorer.view`
+     * says so - poll it rather than the reply.
+     */
+    explorerView: (args) => {
+      const view = String(args.view ?? "");
+      if (view !== "tree" && view !== "folders") {
+        return { did: false, detail: `view must be tree or folders, not "${view}"` };
+      }
+      return parts.changeSetting("explorerView", view)
+        ? { did: true, detail: `asked for the ${view} layout; ui.explorer.view says when it landed` }
+        : { did: false, detail: "explorerView is not a setting this page knows" };
+    },
+
+    /**
+     * Opens or shuts a folder row the way a click does: `act("expandFolder", { workbook, path,
+     * open })`. The folder exists whether or not the folder layout is showing, so a script can
+     * arrange the folders and then switch to them.
+     */
+    expandFolder: (args) => {
+      const workbook = String(args.workbook ?? "");
+      const path = String(args.path ?? "");
+      const open = flag(args.open, true);
+      return explorer.setFolderExpanded(workbook, path, open)
+        ? { did: true, detail: `${workbook}: ${path} ${open ? "expanded" : "collapsed"}` }
+        : { did: false, detail: `no folder ${path} in ${workbook}` };
     },
 
     /**

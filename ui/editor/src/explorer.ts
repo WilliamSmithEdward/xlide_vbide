@@ -18,9 +18,21 @@
  * tree does nothing on its own: it unfolds what is clicked and stays as it was left, which is the
  * right answer for anyone who arranges the tree deliberately and does not want it rearranged
  * underneath them (the developer, 2026-08-07).
+ *
+ * TWO LAYOUTS, tabbed at the top of the pane (#23). "Tree" is the flat list above. "Folders"
+ * groups a workbook's modules by the '@Folder("Parent.Child") comment at the top of each one -
+ * the Rubberduck convention, so a project organised there is organised here without editing a
+ * line. A folder row unfolds and folds like a workbook; a module row is the same row it is in the
+ * flat list, one level deeper per folder, and the accordion, the selection and the following all
+ * work the same way. Modules with no annotation sit at the workbook's root. Which layout shows is
+ * a setting, so it survives the session; the tabs are the handle on it.
+ *
+ * And the CURRENT PROCEDURE: the row of the procedure the caret is in, under the unfolded module,
+ * wears a mark, so where the developer is reads off the tree as well as off the status bar.
  */
 
-import { currentSettings } from "./settings.js";
+import { currentSettings, onSettingsApplied, type EditorSettings } from "./settings.js";
+import { allFolders, ancestorPaths, buildFolderTree, folderKey, type FolderNode } from "./foldertree.js";
 
 /** Component kinds, as the host numbers them. */
 export const enum ComponentKind {
@@ -34,7 +46,12 @@ export const enum ComponentKind {
 export interface ExplorerComponent {
   name: string;
   kind: number;
+  /** The folder its '@Folder annotation names, dotted, or nothing: the host read it. */
+  folder?: string | null;
 }
+
+/** The two layouts the pane offers. */
+export type ExplorerView = EditorSettings["explorerView"];
 
 export interface ExplorerProject {
   name: string;
@@ -56,12 +73,20 @@ export interface ExplorerSnapshot {
   unfolded: { module: string; workbook: string | null } | null;
   /** Whether the "Explorer follows the editor" setting is on, since it gates every automatic move. */
   follows: boolean;
+  /** Which layout is showing. */
+  view: ExplorerView;
+  /** The procedure row wearing the caret's mark, or null when no row does. */
+  currentProcedure: { module: string; workbook: string | null; name: string; line: number } | null;
   workbooks: {
     name: string;
     expanded: boolean;
+    /** Every folder the workbook's annotations make, parents first, whether the folder view is showing or not. */
+    folders: { path: string; expanded: boolean; modules: number }[];
     modules: {
       name: string;
       kind: string;
+      /** The folder the module's annotation names, or null at the root. */
+      folder: string | null;
       problems: number;
       unfolded: boolean;
       procedures: ExplorerProcedure[];
@@ -121,6 +146,11 @@ export interface ExplorerHandlers {
    * the tree cannot leave a click eaten later.
    */
   dragRow(payload: { module: string; workbook?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
+  /**
+   * The developer pressed the other layout's tab. The layout is a SETTING, so this asks the host
+   * to change it the way the dialog does; the tree redraws when the echo lands, and not before.
+   */
+  changeView(view: ExplorerView): void;
   /** A line for the host's log, for the defects only the log's data cadence explains. */
   trace?(text: string): void;
 }
@@ -167,9 +197,55 @@ export class Explorer {
   /** True from a row drag until the click it would otherwise become has been swallowed. */
   private dragConsumedClick = false;
 
-  constructor(root: HTMLElement, handlers: ExplorerHandlers) {
+  /**
+   * Folders the developer folded, by workbook and path. Folders start OPEN: the view exists to
+   * show the structure, and a fresh tree hiding every module behind a click would show none of
+   * it. A folded folder stays folded until the developer opens it, or the module being edited
+   * turns out to be inside it and the tree is following.
+   */
+  private readonly collapsedFolders = new Set<string>();
+
+  /** The procedure row wearing the caret's mark. See setCaret. */
+  private currentProcedure: { module: string; workbook: string | null; name: string; line: number } | null = null;
+
+  /** The tab strip above the tree, when the shell gave it one. */
+  private readonly views: HTMLElement | null;
+
+  /** The layout last drawn, so a settings echo that changed something else redraws nothing. */
+  private drawnView: ExplorerView = currentSettings().explorerView;
+
+  constructor(root: HTMLElement, handlers: ExplorerHandlers, views: HTMLElement | null = null) {
     this.root = root;
     this.handlers = handlers;
+    this.views = views;
+
+    // The two layout tabs. They ASK for the layout rather than switching to it: the layout is a
+    // setting the host owns, and the tree redraws on the echo, the same road the dialog takes.
+    if (views) {
+      views.replaceChildren();
+      for (const [view, title] of [["tree", "Tree"], ["folders", "Folders"]] as const) {
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = "explorer-view";
+        tab.dataset.view = view;
+        tab.textContent = title;
+        tab.setAttribute("role", "tab");
+        tab.addEventListener("click", () => {
+          if (currentSettings().explorerView !== view) {
+            this.handlers.changeView(view);
+          }
+        });
+        views.appendChild(tab);
+      }
+      this.paintViewTabs();
+    }
+
+    onSettingsApplied((settings) => {
+      if (settings.explorerView !== this.drawnView) {
+        this.paintViewTabs();
+        this.render();
+      }
+    });
 
     // A row can be DRAGGED to the editor: a module row opens where it lands, a procedure row
     // opens and goes to its line. The press only becomes a drag past the movement threshold,
@@ -272,6 +348,13 @@ export class Explorer {
         return;
       }
 
+      // A folder row folds and unfolds, and nothing else: there is nothing to open.
+      const folder = this.folderAt(event);
+      if (folder) {
+        this.toggleFolder(folder.workbook, folder.path);
+        return;
+      }
+
       const workbook = this.workbookAt(event);
       if (workbook) {
         this.expandedWorkbooks.set(workbook, !(this.expandedWorkbooks.get(workbook) ?? false));
@@ -314,6 +397,16 @@ export class Explorer {
         // The rebuild threw away the element the keyboard was on, and focus went to the body with
         // it: the next Tab would start from the top of the page rather than from the tree.
         (this.root.querySelector(`[data-project="${CSS.escape(workbook)}"]`) as HTMLElement | null)?.focus();
+        return;
+      }
+
+      // A folder row is a treeitem the same way, and keeps the keyboard the same way.
+      if (row.classList?.contains("tree-folder") && row.dataset.folder !== undefined && row.dataset.folderWorkbook) {
+        event.preventDefault();
+        const { folder, folderWorkbook } = row.dataset;
+        this.toggleFolder(folderWorkbook, folder);
+        (this.root.querySelector(
+          `[data-folder-workbook="${CSS.escape(folderWorkbook)}"][data-folder="${CSS.escape(folder)}"]`) as HTMLElement | null)?.focus();
       }
     });
 
@@ -350,6 +443,14 @@ export class Explorer {
   private workbookAt(event: Event): string | null {
     const row = (event.target as HTMLElement).closest("[data-project]") as HTMLElement | null;
     return row?.dataset.project ?? null;
+  }
+
+  private folderAt(event: Event): { workbook: string; path: string } | null {
+    const row = (event.target as HTMLElement).closest("[data-folder]") as HTMLElement | null;
+    if (!row || row.dataset.folder === undefined || !row.dataset.folderWorkbook) {
+      return null;
+    }
+    return { workbook: row.dataset.folderWorkbook, path: row.dataset.folder };
   }
 
   private procedureAt(event: Event): { module: string; line: number; workbook?: string } | null {
@@ -533,6 +634,15 @@ export class Explorer {
     }
 
     if (owner) {
+      // The folders above the module open on the way to it, or the accordion would unfold a row
+      // the developer cannot see. Only those: a folder folded by hand elsewhere stays folded.
+      const folder = owner.components.find((component) => component.name === name)?.folder;
+      for (const path of ancestorPaths(folder)) {
+        this.collapsedFolders.delete(this.folderStateKey(owner.name, path));
+      }
+    }
+
+    if (owner) {
       if (this.attentionWorkbook !== owner.name) {
         if (this.attentionWorkbook !== null) {
           for (const project of this.projects) {
@@ -611,18 +721,103 @@ export class Explorer {
         workbook: this.unfoldedWorkbook(),
       },
       follows: currentSettings().treeFollowsEditor,
+      view: currentSettings().explorerView,
+      currentProcedure: this.currentProcedure === null ? null : { ...this.currentProcedure },
       workbooks: this.projects.map((project) => ({
         name: project.name,
         expanded: this.expandedWorkbooks.get(project.name) ?? false,
+        folders: allFolders(this.folderTreeOf(project)).map((folder) => ({
+          path: folder.path,
+          expanded: this.isFolderExpanded(project.name, folder.path),
+          modules: countModules(folder),
+        })),
         modules: project.components.map((component) => ({
           name: component.name,
           kind: kindMeta(component.kind).type,
+          folder: component.folder ?? null,
           problems: this.problemCounts.get(component.name) ?? 0,
           unfolded: this.isUnfolded(component.name, project.name),
           procedures: (this.outlines.get(component.name) ?? []).map((one) => ({ ...one })),
         })),
       })),
     };
+  }
+
+  /** Opens or shuts a folder the way its row does. False when no such folder is drawn. */
+  setFolderExpanded(workbook: string, path: string, open: boolean): boolean {
+    const project = this.projects.find((one) => one.name === workbook);
+    if (!project || !allFolders(this.folderTreeOf(project)).some((folder) => folderKey(folder.path) === folderKey(path))) {
+      return false;
+    }
+
+    const key = this.folderStateKey(workbook, path);
+    if (open) {
+      this.collapsedFolders.delete(key);
+    } else {
+      this.collapsedFolders.add(key);
+    }
+    this.render();
+    return true;
+  }
+
+  /**
+   * Where the caret is, so the tree can mark the procedure it is in.
+   *
+   * The NAME is decided by the page's own scan of the text, the same one the status bar shows;
+   * the line only picks between rows of one name, which is what a property's Get and Let are.
+   * Null clears the mark - the caret left every procedure, or the editor is empty.
+   */
+  setCaret(module: string | null, workbook: string | null, line: number, procedure: string | null): void {
+    const next = module !== null && procedure !== null ? { module, workbook, name: procedure, line } : null;
+    const same = (this.currentProcedure === null && next === null)
+      || (this.currentProcedure !== null && next !== null
+        && this.currentProcedure.module === next.module
+        && this.currentProcedure.workbook === next.workbook
+        && this.currentProcedure.name === next.name
+        && this.markedRow(this.currentProcedure) === this.markedRow(next));
+    this.currentProcedure = next;
+    if (!same) {
+      this.render();
+    }
+  }
+
+  /** The line of the outline row the mark sits on, resolved the same way the render resolves it. */
+  private markedRow(current: { module: string; workbook: string | null; name: string; line: number }): number | null {
+    const rows = (this.outlines.get(current.module) ?? []).filter((one) => one.name === current.name);
+    if (rows.length === 0) {
+      return null;
+    }
+    // The last row at or above the caret, or the first of the name when the caret is above them
+    // all (the leading comments of the first leg).
+    const below = rows.filter((one) => one.line <= current.line);
+    return (below[below.length - 1] ?? rows[0])!.line;
+  }
+
+  private folderStateKey(workbook: string, path: string): string {
+    return `${workbook.toLowerCase()}\0${folderKey(path)}`;
+  }
+
+  private isFolderExpanded(workbook: string, path: string): boolean {
+    return !this.collapsedFolders.has(this.folderStateKey(workbook, path));
+  }
+
+  private toggleFolder(workbook: string, path: string): void {
+    this.setFolderExpanded(workbook, path, !this.isFolderExpanded(workbook, path));
+  }
+
+  /** The workbook's modules arranged by their annotations, in the flat tree's own order within a folder. */
+  private folderTreeOf(project: ExplorerProject): FolderNode<ExplorerComponent> {
+    return buildFolderTree(project.components, componentOrder);
+  }
+
+  private paintViewTabs(): void {
+    const view = currentSettings().explorerView;
+    this.drawnView = view;
+    for (const tab of this.views?.querySelectorAll<HTMLElement>("[data-view]") ?? []) {
+      const selected = tab.dataset.view === view;
+      tab.classList.toggle("selected", selected);
+      tab.setAttribute("aria-selected", String(selected));
+    }
   }
 
   /** Opens or shuts a workbook the way its row does, for a script that would otherwise click. */
@@ -743,6 +938,9 @@ export class Explorer {
     const scrollTop = this.root.scrollTop;
     this.root.replaceChildren();
 
+    const view = currentSettings().explorerView;
+    this.drawnView = view;
+
     for (const project of this.projects) {
       const isOpen = this.expandedWorkbooks.get(project.name) ?? false;
       this.root.appendChild(this.workbookRow(project.name, isOpen));
@@ -751,39 +949,107 @@ export class Explorer {
         continue;
       }
 
-      const members = [...project.components].sort((a, b) => {
-        const left = kindMeta(a.kind);
-        const right = kindMeta(b.kind);
-        if (left.order !== right.order) {
-          return left.order - right.order;
-        }
-        return a.name.localeCompare(b.name);
-      });
+      if (view === "folders") {
+        this.renderFolder(this.folderTreeOf(project), project.name, 0);
+        continue;
+      }
 
-      for (const component of members) {
-        this.root.appendChild(this.item(component, project.name));
-
-        // The unfolded module is one (name, workbook) pair, so a shared name unfolds only in
-        // the workbook whose row was opened.
-        if (component.name === this.expandedModule
-          && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === project.name)) {
-          // A FORM'S DESIGNER, ALWAYS FIRST. It is the thing a developer opens a form for, and
-          // until now the only ways in were the tab's own menu and a keyboard command - neither
-          // of which announces itself (the owner, 2026-08-18). Its siblings are the handlers,
-          // so it sits above them: the design comes before the code that answers it, and a fixed
-          // position means the row never moves as procedures are added and renamed.
-          if (component.kind === ComponentKind.Form) {
-            this.root.appendChild(this.designerRow(component.name, project.name));
-          }
-
-          for (const procedure of this.outlines.get(component.name) ?? []) {
-            this.root.appendChild(this.procedureRow(component.name, procedure, project.name));
-          }
-        }
+      for (const component of [...project.components].sort(componentOrder)) {
+        this.renderModule(component, project.name, 0);
       }
     }
 
     this.root.scrollTop = scrollTop;
+  }
+
+  /** A folder's contents: its folders first, then its modules, each one level deeper. */
+  private renderFolder(node: FolderNode<ExplorerComponent>, workbook: string, depth: number): void {
+    for (const folder of node.folders) {
+      const isOpen = this.isFolderExpanded(workbook, folder.path);
+      this.root.appendChild(this.folderRow(folder, workbook, depth, isOpen));
+      if (isOpen) {
+        this.renderFolder(folder, workbook, depth + 1);
+      }
+    }
+
+    for (const component of node.modules) {
+      this.renderModule(component, workbook, depth);
+    }
+  }
+
+  /** A module's row, and the rows under it when it is the unfolded one. */
+  private renderModule(component: ExplorerComponent, workbook: string, depth: number): void {
+    this.root.appendChild(this.item(component, workbook, depth));
+
+    // The unfolded module is one (name, workbook) pair, so a shared name unfolds only in
+    // the workbook whose row was opened.
+    if (component.name !== this.expandedModule
+      || (this.expandedModuleWorkbook !== null && this.expandedModuleWorkbook !== workbook)) {
+      return;
+    }
+
+    // A FORM'S DESIGNER, ALWAYS FIRST. It is the thing a developer opens a form for, and
+    // until now the only ways in were the tab's own menu and a keyboard command - neither
+    // of which announces itself (the owner, 2026-08-18). Its siblings are the handlers,
+    // so it sits above them: the design comes before the code that answers it, and a fixed
+    // position means the row never moves as procedures are added and renamed.
+    if (component.kind === ComponentKind.Form) {
+      this.root.appendChild(this.designerRow(component.name, workbook, depth));
+    }
+
+    // The caret's mark, on one row: the one markedRow resolves for the module the caret is in.
+    const current = this.currentProcedure;
+    const marked = current !== null && current.module === component.name
+      && (current.workbook === null || current.workbook === workbook)
+      ? this.markedRow(current)
+      : null;
+
+    for (const procedure of this.outlines.get(component.name) ?? []) {
+      const isCurrent = marked !== null && procedure.line === marked && procedure.name === current!.name;
+      this.root.appendChild(this.procedureRow(component.name, procedure, workbook, depth, isCurrent));
+    }
+  }
+
+  /**
+   * A folder's row: a twisty, a folder glyph, the name, and - while it is folded - how many
+   * modules are inside, so a shut folder says what it hides. A treeitem that takes the keyboard
+   * the way the workbook row does. The tooltip is the annotation that makes the folder, which is
+   * what a developer types into a module to put it here.
+   */
+  private folderRow(folder: FolderNode<ExplorerComponent>, workbook: string, depth: number, isOpen: boolean): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "tree-folder";
+    row.dataset.folder = folder.path;
+    row.dataset.folderWorkbook = workbook;
+    row.tabIndex = 0;
+    row.title = `'@Folder("${folder.path}")`;
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-expanded", String(isOpen));
+    indent(row, depth);
+
+    const chevron = document.createElement("span");
+    chevron.className = `codicon codicon-chevron-${isOpen ? "down" : "right"} tree-twisty`;
+    chevron.setAttribute("aria-hidden", "true");
+
+    const glyph = document.createElement("span");
+    glyph.className = `codicon codicon-${isOpen ? "folder-opened" : "folder"}`;
+    glyph.setAttribute("aria-hidden", "true");
+
+    const label = document.createElement("span");
+    label.className = "tree-folder-name";
+    label.textContent = folder.name;
+
+    row.append(chevron, glyph, label);
+
+    if (!isOpen) {
+      const count = countModules(folder);
+      const badge = document.createElement("span");
+      badge.className = "tree-kind";
+      badge.textContent = `${count} module${count === 1 ? "" : "s"}`;
+      row.appendChild(badge);
+    }
+
+    return row;
   }
 
   /**
@@ -837,12 +1103,13 @@ export class Explorer {
     return row;
   }
 
-  private item(component: ExplorerComponent, workbook: string): HTMLElement {
+  private item(component: ExplorerComponent, workbook: string, depth = 0): HTMLElement {
     const meta = kindMeta(component.kind);
     const isUnfolded = this.isUnfolded(component.name, workbook);
 
     const button = document.createElement("button");
     button.type = "button";
+    indent(button, depth);
     // Name AND workbook. See activeWorkbook.
     const isActive = component.name === this.active && workbook === this.activeWorkbook;
     const isSelected = component.name === this.selected && workbook === this.selectedWorkbook;
@@ -890,10 +1157,11 @@ export class Explorer {
    * procedure's, because it is not a line in a file: clicking it opens the design FACE of the
    * form's document, where a procedure row navigates to a line of its code.
    */
-  private designerRow(module: string, workbook: string): HTMLElement {
+  private designerRow(module: string, workbook: string, depth = 0): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tree-item tree-proc tree-designer";
+    indent(button, depth);
     button.dataset.designerModule = module;
     button.dataset.designerWorkbook = workbook;
     button.title = `Open the designer for ${module}`;
@@ -907,14 +1175,19 @@ export class Explorer {
     return button;
   }
 
-  private procedureRow(module: string, procedure: ExplorerProcedure, workbook: string): HTMLElement {
+  private procedureRow(module: string, procedure: ExplorerProcedure, workbook: string, depth = 0, isCurrent = false): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "tree-item tree-proc";
+    button.className = "tree-item tree-proc" + (isCurrent ? " current" : "");
     button.dataset.procModule = module;
     button.dataset.procLine = String(procedure.line);
     button.dataset.procWorkbook = workbook;
     button.setAttribute("role", "treeitem");
+    if (isCurrent) {
+      // The mark is a colour, and a colour alone says nothing to a reader without one.
+      button.setAttribute("aria-current", "location");
+    }
+    indent(button, depth);
 
     const glyph = document.createElement("span");
     glyph.className = "codicon codicon-symbol-method";
@@ -922,6 +1195,31 @@ export class Explorer {
 
     button.append(glyph, document.createTextNode(`${procedure.kind} ${procedure.name}`));
     return button;
+  }
+}
+
+/** The flat tree's order: documents, forms, modules, classes, and by name within a kind. */
+function componentOrder(a: ExplorerComponent, b: ExplorerComponent): number {
+  const left = kindMeta(a.kind);
+  const right = kindMeta(b.kind);
+  if (left.order !== right.order) {
+    return left.order - right.order;
+  }
+  return a.name.localeCompare(b.name);
+}
+
+/** How many modules a folder holds, its subfolders included. */
+function countModules(folder: FolderNode<ExplorerComponent>): number {
+  return folder.modules.length + folder.folders.reduce((sum, child) => sum + countModules(child), 0);
+}
+
+/**
+ * One level of indent per folder, as a variable the stylesheet reads. Only set past the root, so
+ * the flat tree's rows carry exactly the attributes they always did.
+ */
+function indent(row: HTMLElement, depth: number): void {
+  if (depth > 0) {
+    row.style.setProperty("--tree-depth", String(depth));
   }
 }
 

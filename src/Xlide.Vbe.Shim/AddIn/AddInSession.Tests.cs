@@ -305,6 +305,10 @@ internal sealed partial class AddInSession
     /// </summary>
     internal void OnAnalysisSnapshot(string projectId, IReadOnlyList<Xlide.Vbe.Core.Engine.EngineModule> modules)
     {
+        // The folder view rides the same snapshot, for the same reason: every module's text is
+        // in hand, and a folder is a comment at the top of it.
+        RememberFolders(projectId, modules);
+
         var pairs = new List<(string Name, string Source)>();
         string? assertSource = null;
         foreach (var module in modules)

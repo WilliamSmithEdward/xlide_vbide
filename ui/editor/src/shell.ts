@@ -11,12 +11,13 @@
 
 import { closeColourPicker, colourPickerState, onColourPickerClosed, openColourPicker } from "./colourpicker.js";
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
-import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
+import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject, type ExplorerView } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { openModal } from "./modal.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
 import { ScopeSelect, type ScopeEntry } from "./scopeselect.js";
 import type { PaneVisibilityControl } from "./settingsdialog.js";
+import { describeProcedure, type ProcedureRange } from "./procedureat.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
 
 export type FindingSeverity = "error" | "warning" | "info" | "hint";
@@ -56,6 +57,8 @@ export interface ShellProperty {
 export interface ShellHandlers {
   /** The developer picked a module. The tree names the workbook; the tab strip cannot yet. */
   activateModule(name: string, workbook?: string): void;
+  /** The developer pressed the explorer's other layout tab: a settings change, echoed back. */
+  changeView(view: ExplorerView): void;
   /** The developer asked for a form's designer tab - markup beside the visual form. */
   openDesigner(name: string, workbook?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
@@ -218,6 +221,7 @@ export class Shell {
   };
   private readonly statusPosition: HTMLElement;
   private readonly statusModule: HTMLElement;
+  private readonly statusProcedure: HTMLElement;
   private readonly statusNotice: HTMLElement;
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly explorer: Explorer;
@@ -271,10 +275,12 @@ export class Shell {
     this.shell = root.querySelector("#shell") as HTMLElement;
     this.statusPosition = root.querySelector("#status-position") as HTMLElement;
     this.statusModule = root.querySelector("#status-module") as HTMLElement;
+    this.statusProcedure = root.querySelector("#status-procedure") as HTMLElement;
     this.statusNotice = root.querySelector("#status-notice") as HTMLElement;
 
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
+      changeView: (view) => handlers.changeView(view),
       open: (name, workbook) => handlers.activateModule(name, workbook),
       context: (name, kind, x, y, workbook) => this.componentMenu(name, kind, x, y, workbook),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
@@ -284,7 +290,7 @@ export class Shell {
       openDesigner: (module, workbook) => handlers.openDesigner(module, workbook),
       dragRow: (payload, start, became) => handlers.dragFromTree(payload, start, became),
       trace: (text) => handlers.trace(text),
-    });
+    }, root.querySelector("#explorer-views") as HTMLElement | null);
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
       request: (path) => handlers.menuRequest(path),
@@ -373,7 +379,11 @@ export class Shell {
     });
 
     const seats: PanelSeat[] = [
-      { ...seat("explorer", "Explorer", [root.querySelector("#sidebar-tree") as HTMLElement]), permanent: true },
+      // The layout tabs travel with the tree: they are the pane's own header row.
+      { ...seat("explorer", "Explorer", [
+        root.querySelector("#explorer-views") as HTMLElement,
+        root.querySelector("#sidebar-tree") as HTMLElement,
+      ]), permanent: true },
       seat("properties", "Properties", [
         root.querySelector("#properties-object") as HTMLElement,
         this.propertiesList,
@@ -605,6 +615,9 @@ export class Shell {
   setWorkspaceEmpty(empty: boolean): void {
     this.shell.classList.toggle("empty", empty);
     this.statusModule.textContent = empty ? "" : this.statusModule.textContent;
+    if (empty) {
+      this.setCaret(null, null, 1, null);
+    }
 
     // Nothing open means nothing is being worked on, so the tree stops claiming otherwise and
     // folds all the way back: procedures and workbooks both. Opening anything unfolds its
@@ -1506,6 +1519,21 @@ export class Shell {
   /** Shows where the caret is. */
   setPosition(line: number, column: number): void {
     this.statusPosition.textContent = `Ln ${line}, Col ${column}`;
+  }
+
+  /**
+   * Shows which procedure the caret is in, beside the module (#23): "Sub Recalculate", or
+   * "(Declarations)" above the first procedure, which is what the editor's own procedure box
+   * says there. Nothing at all when no code module is showing. The tree marks the same row.
+   */
+  setCaret(module: string | null, project: string | null, line: number, procedure: ProcedureRange | null): void {
+    this.statusProcedure.textContent = module === null ? "" : procedure === null ? "(Declarations)" : describeProcedure(procedure);
+    this.explorer.setCaret(module, project, line, procedure?.name ?? null);
+  }
+
+  /** The procedure readout as it stands, for the xlide api's `ui` route. */
+  currentProcedure(): string {
+    return this.statusProcedure.textContent ?? "";
   }
 
   /** Replaces the panel's contents. */

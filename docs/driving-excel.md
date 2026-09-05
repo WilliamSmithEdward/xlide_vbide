@@ -382,8 +382,12 @@ Two routes, and they replace almost every DOM script a probe used to carry.
 const ui = await api.ui();
 ui.workspace.groups[0].tabs;      // module, project, LABEL as drawn, active, dirty, problems
 ui.workspace.groups[0].recent;    // the MRU stack a close falls back through
-ui.explorer.workbooks;            // expanded, and each module's unfolded state and procedures
+ui.explorer.workbooks;            // expanded, and each module's unfolded state, folder and procedures
+ui.explorer.workbooks[0].folders; // every folder the '@Folder annotations make: path, expanded, modules
 ui.explorer.unfolded;             // the accordion's one open module, and its workbook
+ui.explorer.view;                 // "tree" or "folders": which layout the pane is showing
+ui.explorer.currentProcedure;     // the procedure row wearing the caret's mark, or null
+ui.statusProcedure;               // "Sub Recalculate", "(Declarations)", or "" - the bar's third readout
 ui.dialogs;                       // settings, help, sponsors, references, object browser
 ui.waiting.documents;             // text asked for and not yet arrived
 ui.focus;                         // model, line, column, and whether the editor has the keyboard
@@ -589,6 +593,8 @@ await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the
 ```js
 await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
+await api.act("explorerView", { view: "folders" });   // a settings change: poll ui.explorer.view
+await api.act("expandFolder", { workbook: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");
 

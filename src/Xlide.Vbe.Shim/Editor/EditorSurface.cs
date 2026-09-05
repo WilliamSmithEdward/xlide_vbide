@@ -1551,7 +1551,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.FormatIndentSize,
                 settings.SyncEngine,
                 settings.DesignerSnap,
-                settings.DesignerGridSize),
+                settings.DesignerGridSize,
+                settings.ExplorerView),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2418,6 +2419,10 @@ internal sealed class EditorSurface : IDisposable
                         && gridValue.TryGetInt32(out var gridAsked)
                         ? gridAsked
                         : held.DesignerGridSize;
+                    var explorerView = document.RootElement.TryGetProperty("explorerView", out var viewValue)
+                        && viewValue.ValueKind == JsonValueKind.String
+                            ? viewValue.GetString() ?? held.ExplorerView
+                            : held.ExplorerView;
 
                     // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
                     // names eight fields and zeroes the rest, so a page settings change silently
@@ -2436,6 +2441,7 @@ internal sealed class EditorSurface : IDisposable
                         SyncEngine = syncEngine,
                         DesignerSnap = snapMode,
                         DesignerGridSize = gridSize,
+                        ExplorerView = explorerView,
                     }).Normalized());
                     break;
                 }

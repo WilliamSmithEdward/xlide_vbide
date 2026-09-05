@@ -22,6 +22,11 @@ export interface EditorSettings {
    * it.
    */
   treeFollowsEditor: boolean;
+  /**
+   * How the explorer lays a workbook out: "tree" is the flat list by kind, "folders" groups
+   * modules by their '@Folder("Parent.Child") annotation. The tabs at the top of the pane.
+   */
+  explorerView: "tree" | "folders";
   /** One indent level, in spaces. Governs typing, smart Enter, and Format Module alike. */
   formatIndentSize: number;
   /** Which planner decides what an import or export will do: "xlide" or "builtIn". */
@@ -44,6 +49,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   mirrorCommentSpacing: true,
   insertOptionExplicit: true,
   treeFollowsEditor: true,
+  explorerView: "tree",
   formatIndentSize: 4,
   syncEngine: "xlide",
   designerSnap: "grid",
@@ -74,6 +80,7 @@ export function applySettings(next: IncomingSettings): void {
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
     insertOptionExplicit: next.insertOptionExplicit !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
+    explorerView: next.explorerView === "folders" ? "folders" : "tree",
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
     designerSnap: next.designerSnap === "objects" ? "objects"

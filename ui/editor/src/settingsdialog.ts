@@ -51,6 +51,19 @@ const OPTIONS = [
       "The module you are working on unfolds its procedures in the tree, and everything folds "
       + "away when the last tab closes. Off leaves the tree exactly as you left it.",
   },
+  {
+    key: "explorerView" as const,
+    kind: "choice" as const,
+    label: "Explorer layout",
+    description:
+      "'Folders' groups modules by the '@Folder(\"Parent.Child\") comment at the top of each one, "
+      + "the Rubberduck convention; 'tree' lists them flat by kind. The same two tabs sit at the "
+      + "top of the Explorer pane.",
+    choices: [
+      { value: "tree", label: "Tree" },
+      { value: "folders", label: "Folders" },
+    ],
+  },
   // There is no "indent with tabs" here, and there cannot be a working one: VBA's code store
   // will not hold a tab, and expands any it is handed. Indentation is this many spaces, and
   // Backspace in a line's leading whitespace takes back a whole level of them.
