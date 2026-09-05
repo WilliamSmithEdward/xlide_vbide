@@ -6446,3 +6446,11 @@ body.objbrowser-page #objbrowser-card {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: 2px;
 }
+
+/* The Problems tab's count: the rows the pane is listing, in the same red pill the tree badges
+   wear, set off from the title. It inherits the tab's dimming, so an inactive tab's number is as
+   quiet as its name and the active one's is as plain. */
+.panel-tab .tab-badge {
+  margin-left: 6px;
+  vertical-align: 1px;
+}

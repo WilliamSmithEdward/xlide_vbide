@@ -3135,6 +3135,22 @@ export function demoTransport(): HostTransport {
             },
           ],
         });
+        // The same finding as the Problems pane lists it: the host publishes both, so the demo
+        // does too, and the tab's count has something to count.
+        send({
+          type: "setFindings",
+          findings: [
+            {
+              module: "Module1",
+              project: "Book1.xlsm",
+              line: 11,
+              column: 9,
+              severity: "warning",
+              message: "Variable 'rowIndex' shadows an outer declaration.",
+              code: "XL0101",
+            },
+          ],
+        });
         send({ type: "setBreakpoints", lines: [17, 30] });
         send({ type: "setCurrentLine", line: 17 });
         send({ type: "revealLine", line: 17 });

@@ -565,6 +565,32 @@ export class Shell {
   }
 
   /**
+   * The count on the Problems tab: the findings the pane is listing, or nothing at all when it
+   * lists none. Looked up by name rather than held, because the docks move tabs between strips
+   * and the element they move is this one.
+   */
+  private setProblemsTabBadge(count: number): void {
+    const tab = document.querySelector<HTMLElement>('.panel-tab[data-panel="problems"]');
+    if (!tab) {
+      return;
+    }
+    let badge = tab.querySelector<HTMLElement>(".tab-badge");
+    if (count === 0) {
+      badge?.remove();
+      tab.setAttribute("aria-label", "Problems");
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "tab-badge";
+      badge.setAttribute("aria-hidden", "true");
+      tab.appendChild(badge);
+    }
+    badge.textContent = String(count);
+    tab.setAttribute("aria-label", `Problems, ${count} shown`);
+  }
+
+  /**
    * The active module changed, however it changed. The tabs themselves are the workspace's;
    * the shell keeps the status line and the explorer highlight honest.
    */
@@ -1887,6 +1913,11 @@ export class Shell {
         || a.module.localeCompare(b.module)
         || a.line - b.line
         || a.column - b.column);
+
+    // THE TAB WEARS THE NUMBER the list is showing: what the scope admits and the toggles let
+    // through, summed - so a pane folded away still says how much is waiting in it, and the
+    // number agrees with the rows a click would reveal (the owner, 2026-09-05).
+    this.setProblemsTabBadge(sorted.length);
 
     if (sorted.length === 0) {
       this.panelList.appendChild(this.emptyPanel(inScope.length));
