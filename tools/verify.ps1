@@ -847,19 +847,22 @@ if ($Live) {
             # (2026-08-21).
             @{ Fixture = 'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm'
                Suites  = @('multi-file.mjs', 'tests-support.mjs') }
+            # THE FOLDER LAYOUT (#23) GETS TWO WORKBOOKS OF ITS OWN (tools\New-FolderFixture.ps1
+            # and tools\New-FolderTwinFixture.ps1), because a folder is a name and so is a
+            # module, and the pair collides on both by construction: a Helpers in a different
+            # folder, a Ledger in no folder, and a Shared folder in each. The suite also holds
+            # the status bar's current procedure to the editor's own ProcOfLine on every line
+            # of a module built for it. BEFORE the change log's group, which stays last: the
+            # leak sweep runs on whatever session is standing after these and was written
+            # against that one - on the folder pair its LeakOwner's Post collides with the
+            # fixture's Ledger.Post and the project stops compiling under it (2026-09-05).
+            @{ Fixture = 'FolderFixture.xlsm + FolderTwinFixture.xlsm'; Suites = @('folders.mjs') }
             # THE CHANGE LOG GETS ITS OWN WORKBOOK (tools\New-ChangeFixture.ps1), because its
             # suite edits modules and then asserts on what the log says was edited. Any fixture
             # another suite reads would be either useless for that or a landmine for the other
             # suite - DebugFixture alone is read by nine. Its Untouched module is edited by
             # nobody, which is how "the log did not over-report" is a real question.
             @{ Fixture = 'ChangeFixture.xlsm'; Suites = @('change-log.mjs') }
-            # THE FOLDER LAYOUT (#23) GETS TWO WORKBOOKS OF ITS OWN (tools\New-FolderFixture.ps1
-            # and tools\New-FolderTwinFixture.ps1), because a folder is a name and so is a
-            # module, and the pair collides on both by construction: a Helpers in a different
-            # folder, a Ledger in no folder, and a Shared folder in each. The suite also holds
-            # the status bar's current procedure to the editor's own ProcOfLine on every line
-            # of a module built for it.
-            @{ Fixture = 'FolderFixture.xlsm + FolderTwinFixture.xlsm'; Suites = @('folders.mjs') }
         )
 
         foreach ($group in $plan) {
