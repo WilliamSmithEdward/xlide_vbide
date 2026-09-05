@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-05, at v0.13.0.
+Updated 2026-09-05, at v0.14.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -116,8 +116,8 @@ check that Release ships the api shut, and the native publish. `-Live` adds four
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
 release rather than before a commit. All 27 take about eight and a half minutes.
 
-Counts move, so they are given as of this line rather than as standing facts: 405 unit tests,
-66 api routes of which 64 are driven by one of the 54 suites the gate runs, 2 left out on
+Counts move, so they are given as of this line rather than as standing facts: 533 unit tests,
+67 api routes of which 65 are driven by one of the 64 suites the gate runs, 2 left out on
 purpose.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
