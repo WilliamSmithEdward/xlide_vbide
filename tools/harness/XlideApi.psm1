@@ -92,6 +92,13 @@ function Get-XlideApi {
         [int] $TimeoutSeconds = 0
     )
 
+    # XLIDE_PID fills in when the caller named nothing, the same rule the node client follows:
+    # the gate sets it to the Excel it launched, so another Office host of the owner's beside a
+    # run (an Access database, 2026-09-05) cannot make a bare call ambiguous.
+    if (-not $ProcessId -and $env:XLIDE_PID) {
+        $ProcessId = [int] $env:XLIDE_PID
+    }
+
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     do {

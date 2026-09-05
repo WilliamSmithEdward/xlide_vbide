@@ -533,6 +533,14 @@ if ($Live) {
 
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw "Excel did not start on $fixture" }
+
+        # THE GATE NAMES ITS OWN SESSION. A bare open() refuses to guess between two live hosts,
+        # which is right for a hand-run script and fatal for a gate: the owner opened an Access
+        # database beside a -Deep run on 2026-09-05, its add-in opened a door, and four steps
+        # reported "several instances are live" with nothing wrong in any of them. The client
+        # honours XLIDE_PID when a caller names nothing, so every suite in the group is aimed
+        # at the Excel this launch started, whatever else is running on the machine.
+        $env:XLIDE_PID = $excel.Id
         return $excel
     }
 
@@ -862,6 +870,7 @@ if ($Live) {
         # Whatever the suites left open is fine: the sweep brings its own state and puts it back.
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { $excel = Use-Fixture 'DebugFixture.xlsm' }
+        $env:XLIDE_PID = $excel.Id
 
         $answer = node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1
         $answer | Out-Host
