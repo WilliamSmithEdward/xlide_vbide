@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-31, at v0.11.0.
+Updated 2026-09-05, at v0.13.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -34,6 +34,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   asset against the local one.
 - **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
   put back when the add-in unloads.
+- **The explorer has two layouts.** Tree is the flat list by kind; Folders groups modules by the
+  `'@Folder("Parent.Child")` comment at the top of each one, the Rubberduck convention, read
+  from every module opened or not and moved on the typing pause. Both follow the editor under
+  the one setting. The status bar names the procedure the caret is in, held to the editor's own
+  ProcOfLine line by line, and the tree marks its row (#23).
+- **Break mode prints a local by name.** `? counter` answers from the Locals window; an
+  expression still declines, because evaluating one adds a procedure and resets the debugger
+  (#21).
 
 ## What is not done
 
