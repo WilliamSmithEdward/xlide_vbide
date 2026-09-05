@@ -268,7 +268,8 @@ internal sealed class EditorSurface : IDisposable
     public Action<int, IReadOnlyDictionary<string, string>>? ApiRequested { get; set; }
 
     /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
-    public Action<int, int, int>? CodeActionsRequested { get; set; }
+    /// <summary>Request id, start and end offsets, and the module and workbook when the asker names one (the Problems pane); null for the shown module.</summary>
+    public Action<int, int, int, string?, string?>? CodeActionsRequested { get; set; }
 
     /// <summary>The page asking for the analyzer rule catalog and the standing overrides.</summary>
     public Action<int>? AnalysisRulesRequested { get; set; }
@@ -2632,7 +2633,15 @@ internal sealed class EditorSurface : IDisposable
                         && fixStart >= 0
                         && fixEnd >= fixStart)
                     {
-                        CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd);
+                        var fixModule = document.RootElement.TryGetProperty("module", out var fixModuleElement)
+                            && fixModuleElement.ValueKind == JsonValueKind.String
+                            ? fixModuleElement.GetString()
+                            : null;
+                        var fixProject = document.RootElement.TryGetProperty("project", out var fixProjectElement)
+                            && fixProjectElement.ValueKind == JsonValueKind.String
+                            ? fixProjectElement.GetString()
+                            : null;
+                        CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd, fixModule, fixProject);
                     }
 
                     break;

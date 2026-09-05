@@ -7071,11 +7071,14 @@ internal sealed partial class AddInSession : IDisposable
         T empty,
         Func<AnalysisService, string, string, CancellationToken, Task<T>> ask,
         Action<EditorSurface, T> reply,
-        Func<T, string> describe)
+        Func<T, string> describe,
+        string? forModule = null,
+        string? forSource = null)
     {
+        // The shown module unless a caller names another, with that module's text in hand.
         var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
+        var module = forModule ?? surface?.Module;
+        var source = forModule is null ? surface?.Text : forSource;
 
         if (surface is null || module is null || source is null || _analysis is not { } analysis)
         {
@@ -7256,11 +7259,28 @@ internal sealed partial class AddInSession : IDisposable
     /// reason - a lightbulb that does not appear is what the developer already sees when there is
     /// nothing to fix.
     /// </summary>
-    private void OnCodeActionsRequested(int requestId, int start, int end)
+    private void OnCodeActionsRequested(int requestId, int start, int end, string? forModule, string? forProject)
     {
         // Read on the host thread, where the shown project is decided, for the fixes this
         // session offers itself alongside the engine's (#23's attributes).
+        //
+        // THE PROBLEMS PANE ASKS FOR A FINDING'S MODULE, which need not be the shown one: its
+        // right-click carries the finding's fixes (the owner, 2026-09-05). The module's text is
+        // the page's copy when the page holds one and the editor's otherwise, read here on the
+        // host thread before the engine is asked.
         var shownProject = _shownProject;
+        var projectId = forModule is null ? shownProject : ProjectIdFromDisplay(forProject) ?? shownProject;
+        string? forSource = null;
+        if (forModule is not null)
+        {
+            forSource = _editorSurface?.TextOf(forModule, forProject);
+            if (forSource is null)
+            {
+                using var component = FindComponent(forModule, projectId, out _);
+                forSource = component is null ? null : ProjectReader.ReadSource(component);
+            }
+        }
+
         AnswerFromEngine<SurfaceCodeAction[]>(
             "codeAction",
             $"@{start}..{end}",
@@ -7276,10 +7296,13 @@ internal sealed partial class AddInSession : IDisposable
                     action.Span.Start,
                     action.Span.End,
                     [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))])),
-                    .. AttributeCodeActions(module, shownProject, source, start, end)];
+                    .. AttributeCodeActions(module, projectId, source, start, end),
+                    .. PredeclareCodeActions(module, projectId, source, start, end)];
             },
             (surface, actions) => surface.ShowCodeActions(requestId, actions),
-            actions => $"{actions.Length} fix(es)");
+            actions => $"{actions.Length} fix(es)",
+            forModule,
+            forSource);
     }
 
     /// <summary>

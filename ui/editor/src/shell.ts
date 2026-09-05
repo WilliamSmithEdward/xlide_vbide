@@ -76,6 +76,14 @@ export interface ShellHandlers {
   commandAvailable(command: ToolbarCommand): boolean;
   /** The developer asked to suppress one finding inline, from the problems pane's menu. */
   suppressFinding(module: string, workbook: string | null, line: number, code: string): void;
+  /**
+   * The quick fixes a finding offers, each with the act of applying it - what the lightbulb shows
+   * at the squiggle, for the Problems pane's menu. Null when the page holds no text for the module,
+   * which is when there is nothing to compute offsets against.
+   */
+  quickFixesFor(module: string, workbook: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
+  /** Goes to the finding and opens the editor's own quick-fix menu there. */
+  quickFixAt(module: string, workbook: string | null, line: number, column: number): void;
   /** The developer asked to turn one analyzer rule off machine-wide, from the same menu. */
   turnOffRule(code: string): void;
   /** Whether the analyzer permits turning this rule off - the menu leaves the item out otherwise. */
@@ -445,38 +453,58 @@ export class Shell {
       const code = row.dataset.code ?? "";
       const module = row.dataset.moduleName ?? "";
       const line = Number(row.dataset.line ?? "0");
+      const column = Number(row.dataset.column ?? "1");
       const workbook = row.dataset.project || null;
+      const at = { x: event.clientX, y: event.clientY };
 
-      const items: ContextMenuItem[] = [
-        { label: "Go To", run: () => this.goTo(row) },
-        { label: "Copy Message", run: () => void navigator.clipboard.writeText(message) },
-      ];
+      void (async () => {
+        const items: ContextMenuItem[] = [
+          { label: "Go To", run: () => this.goTo(row) },
+          { label: "Copy Message", run: () => void navigator.clipboard.writeText(message) },
+        ];
 
-      if (code.length > 0 && module.length > 0 && line >= 1) {
-        items.push({});
+        if (code.length > 0 && module.length > 0 && line >= 1) {
+          items.push({});
 
-        // CURATED, the way every menu in this product is: an entry that can never apply to this
-        // finding is left out rather than shown disabled. The directive rule's own findings take
-        // no suppression comment, and a rule the analyzer will not allow off has no machine-wide
-        // switch to offer - the dialog's Always-on section is where that fact lives.
-        if (this.handlers.canSuppressRule(code)) {
-          items.push({
-            label: `Suppress '${code}' Here (inline comment)`,
-            run: () => this.handlers.suppressFinding(module, workbook, line, code),
-          });
+          // THE FINDING'S OWN FIXES, the ones the lightbulb offers at its squiggle, so the pane is
+          // a place to fix from and not only to look from (the owner, 2026-09-05: "missing on
+          // right click here too?"). Asked of the host for the finding's module, which need not
+          // be the shown one. A module the page holds no text for gets the one item that goes
+          // there and opens the editor's own menu, since there is nothing here to place a fix on.
+          const fixes = await this.handlers.quickFixesFor(module, workbook, line, column);
+          if (fixes === null) {
+            items.push({ label: "Quick Fix...", run: () => this.handlers.quickFixAt(module, workbook, line, column) });
+            items.push({});
+          } else if (fixes.length > 0) {
+            for (const fix of fixes) {
+              items.push({ label: fix.title, run: fix.run });
+            }
+            items.push({});
+          }
+
+          // CURATED, the way every menu in this product is: an entry that can never apply to this
+          // finding is left out rather than shown disabled. The directive rule's own findings take
+          // no suppression comment, and a rule the analyzer will not allow off has no machine-wide
+          // switch to offer - the dialog's Always-on section is where that fact lives.
+          if (this.handlers.canSuppressRule(code)) {
+            items.push({
+              label: `Suppress '${code}' Here (inline comment)`,
+              run: () => this.handlers.suppressFinding(module, workbook, line, code),
+            });
+          }
+
+          if (this.handlers.canTurnOffRule(code)) {
+            items.push({
+              label: `Turn Off '${code}' on This Machine`,
+              run: () => this.handlers.turnOffRule(code),
+            });
+          }
+
+          items.push({ label: "Analyzer Rules...", run: () => this.handlers.openAnalysisRules(code) });
         }
 
-        if (this.handlers.canTurnOffRule(code)) {
-          items.push({
-            label: `Turn Off '${code}' on This Machine`,
-            run: () => this.handlers.turnOffRule(code),
-          });
-        }
-
-        items.push({ label: "Analyzer Rules...", run: () => this.handlers.openAnalysisRules(code) });
-      }
-
-      showContextMenu(event.clientX, event.clientY, items);
+        showContextMenu(at.x, at.y, items);
+      })();
     });
 
     this.immediateLog.addEventListener("contextmenu", (event) => {

@@ -237,7 +237,38 @@ try {
   const removed = await api.attributesRemove("Registry", "PredeclaredId", at);
   check("removing takes the attribute away", removed.changes.length === 1 && (await describe("Registry")).attributes?.predeclaredId === false,
     JSON.stringify(removed));
+
+  // ---- the fix from where the symptom is: a class used as a value, in another module ----
+  // Registry says nothing about being predeclared now and its attribute is off, so Uses'
+  // Registry.Lookup is "Variable not defined" again. The cure is an annotation in Registry plus
+  // the write, and the finding in Uses offers it: on the lightbulb, and on the Problems pane's
+  // right-click.
+  const usesReported = await settles("Uses' undeclared Registry", async () =>
+    ((await api.problems("Uses")).findings ?? []).some((one) => one.code === "undeclared-variable" && /Registry/.test(one.message)),
+    { budgetMs: 25000 });
+  check("with the class neither annotated nor predeclared, Registry.Lookup is reported in Uses", usesReported,
+    JSON.stringify((await api.problems("Uses")).findings));
+  await api.caret(8, { module: "Uses", project: BOOK, column: 17 });
+  await wait(1500);
+  const predeclareTitle = "Make Registry a predeclared class: add '@PredeclaredId and apply it now";
+  const usesFixes = await api.act("quickFixes", { line: 8, column: 17 });
+  check("the finding's lightbulb offers to make the class predeclared",
+    (usesFixes.data ?? []).some((one) => one.title === predeclareTitle), (usesFixes.data ?? []).map((one) => one.title).join(" | "));
+  const menuFixes = await api.act("problemFixes", { module: "Uses", workbook: BOOK, line: 8, column: 17 });
+  check("the Problems pane's right-click carries the same fix", (menuFixes.data ?? []).includes(predeclareTitle), JSON.stringify(menuFixes));
+  const ranFix = await api.act("problemFixes", { module: "Uses", workbook: BOOK, line: 8, column: 17, title: predeclareTitle });
+  const predeclaredFromUses = await settles("Registry predeclared from Uses' fix", async () =>
+    (await describe("Registry")).attributes?.predeclaredId === true, { budgetMs: 25000 });
+  const registryNow = (await api.readModule("Registry", BOOK)).text ?? "";
+  const usesClean = await settles("Uses clean", async () =>
+    !((await api.problems("Uses")).findings ?? []).some((one) => one.code === "undeclared-variable"), { budgetMs: 25000 });
+  check("running it adds '@PredeclaredId to Registry, applies it, and the report in Uses goes",
+    ranFix.did && predeclaredFromUses && /^'@PredeclaredId/.test(registryNow) && usesClean,
+    JSON.stringify({ ran: ranFix.did, predeclared: predeclaredFromUses, head: registryNow.split(/\r?\n/)[0], usesClean }));
+
+  // Back to the built text, with the attribute off again, so the save below has drift to write.
   await api.writeModule("Registry", registryText, BOOK);
+  await api.attributesRemove("Registry", "PredeclaredId", at);
   registryText = null;
 
   // ---- a save writes the annotations, under the setting ----

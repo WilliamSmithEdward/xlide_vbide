@@ -101,7 +101,13 @@ active and unfolded, and the caret returns to where it was.
 
 - The Problems pane, with quick fixes: apply the module's annotations now (a host action, since
   no text edit can re-import a module), add the missing annotation (a text edit), remove the
-  attribute (a host action).
+  attribute (a host action). The pane's right-click on a finding carries the same fixes the
+  lightbulb offers at its squiggle, for any module whose text the page holds; for one it does not,
+  "Quick Fix..." goes there and opens the editor's menu.
+- The finding where the symptom is. A class used as a value - `Registry.Lookup` - is "Variable
+  not defined" until the class is predeclared, and the cure is in another module. The finding
+  offers it: apply the class's annotations when it already says `'@PredeclaredId`, or add the
+  annotation to the top of the class and apply it when it does not.
 - A hover on an annotation: what it writes, and what the module has now.
 - The api: `attributes` GET for the annotations, the saved attributes and the drift; POST
   `action=apply` and `action=remove`; `settings` for `applyAttributesOnSave`.

@@ -877,7 +877,11 @@ Public Function Twice(ByVal n As Long) As Long
 From the door, suppression is observable as the FINDINGS moving: `problems()` loses the row when a
 directive lands, keeps it (plus an `analysis-suppression-directive` row) when the directive is
 malformed or names an unknown code, and `act("quickFixes", { line, column })` offers
-`Suppress '<code>' on next line` at any finding. The docs ride the `documentation` field through
+`Suppress '<code>' on next line` at any finding.
+`act("problemFixes", { module, workbook, line, column })` is the Problems pane's right-click: the
+same fixes the lightbulb offers at that finding, by title, for a module the page holds text for;
+with `title` it runs the one named (attributes.mjs runs the predeclare fix from Uses' finding this
+way). The docs ride the `documentation` field through
 hover, completion and signature help - `act("hover", { line, column })` answers Monaco's own
 rendering, summary and `<param>` text included. Held by `engine/test/inline-comments.mjs`
 (headless, every scope and the applied fix) and `inline-comments-live.mjs` above.

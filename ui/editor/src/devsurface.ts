@@ -237,6 +237,8 @@ export interface DevSurfaceParts {
   workspace: Workspace;
   explorer: Explorer;
   bridge: EditorBridge;
+  /** The Problems pane's fixes for a finding, as its right-click lists them; null when the page holds no text for the module. */
+  problemFixes(module: string, workbook: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
   /** The designer tabs, for driving the markup-apply path a Ctrl+S takes. */
   designer: {
     viewFor(module: string, project: string | null): {
@@ -2517,6 +2519,30 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           sample: answer.rules.slice(0, 3).map((rule) => rule.code),
         },
       };
+    },
+
+    /**
+     * The fixes the Problems pane's right-click carries for a finding - the same list the menu
+     * builds, without the menu - and, with `title`, runs the one named. `module`, `workbook`,
+     * `line` and `column` name the finding as its row does.
+     */
+    problemFixes: async (args) => {
+      const module = String(args.module ?? "");
+      const workbook = args.workbook ? String(args.workbook) : null;
+      const fixes = await parts.problemFixes(module, workbook, Number(args.line ?? 0), Number(args.column ?? 1));
+      if (fixes === null) {
+        return { did: false, detail: `the page holds no text for ${module}` };
+      }
+      const titles = fixes.map((one) => one.title);
+      if (args.title) {
+        const fix = fixes.find((one) => one.title === String(args.title));
+        if (!fix) {
+          return { did: false, detail: `no fix titled ${String(args.title)}`, data: titles };
+        }
+        fix.run();
+        return { did: true, detail: `ran ${fix.title}`, data: titles };
+      }
+      return { did: fixes.length > 0, detail: `${fixes.length} fix(es)`, data: titles };
     },
 
     quickFixes: async (args) => {

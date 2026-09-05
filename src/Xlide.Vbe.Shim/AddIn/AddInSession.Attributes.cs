@@ -49,6 +49,13 @@ internal sealed partial class AddInSession
     /// <summary>The drift items behind those findings, by project and module, for the fixes and the api.</summary>
     private readonly Dictionary<string, IReadOnlyList<DriftItem>> _attributeDrift = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Per project, each module's kind and whether its code carries '@PredeclaredId, from the last
+    /// pass. For the fix a class used as a value offers (<see cref="PredeclareCodeActions"/>),
+    /// which has to know, off the worker thread, whether the name is a class and what it says.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<string, (string Kind, bool AnnotatedPredeclared)>> _annotationShapes = new(StringComparer.OrdinalIgnoreCase);
+
     private const int StandardModuleType = 1;
     private const int ClassModuleType = 2;
 
@@ -72,14 +79,21 @@ internal sealed partial class AddInSession
     {
         var findings = new List<Finding>();
         var saved = SavedModules.For(projectId);
+        var shapes = new Dictionary<string, (string Kind, bool AnnotatedPredeclared)>(StringComparer.OrdinalIgnoreCase);
         foreach (var module in modules)
         {
-            var drift = DriftFor(saved, module.ModuleName, module.Type, module.Source);
+            var annotations = AttributeAnnotations.Read(module.Source);
+            shapes[module.ModuleName] = (module.Type, annotations.Annotations.Any(one => one.Kind == AnnotationKind.PredeclaredId));
+            var drift = DriftFor(saved, module.ModuleName, module.Type, module.Source, annotations);
             lock (_attributeDrift)
             {
                 _attributeDrift[DriftKey(projectId, module.ModuleName)] = drift;
             }
             findings.AddRange(drift.Select(item => FindingOf(item, module.ModuleName, module.Source, projectId)));
+        }
+        lock (_annotationShapes)
+        {
+            _annotationShapes[projectId] = shapes;
         }
 
         bool changed;
@@ -102,9 +116,11 @@ internal sealed partial class AddInSession
         }
     }
 
-    private static IReadOnlyList<DriftItem> DriftFor(SavedModules? saved, string module, string kind, string source)
+    private static IReadOnlyList<DriftItem> DriftFor(SavedModules? saved, string module, string kind, string source) =>
+        DriftFor(saved, module, kind, source, AttributeAnnotations.Read(source));
+
+    private static IReadOnlyList<DriftItem> DriftFor(SavedModules? saved, string module, string kind, string source, ModuleAnnotations annotations)
     {
-        var annotations = AttributeAnnotations.Read(source);
         if (annotations.Annotations.Count == 0 && annotations.Problems.Count == 0 && saved?.Knows(module) != true)
         {
             return [];
@@ -233,6 +249,73 @@ internal sealed partial class AddInSession
         return [.. actions];
     }
 
+    /// <summary>
+    /// The fix a class used as a value offers, from the finding that reports it. `Registry.Lookup`
+    /// is "Variable not defined" until Registry is predeclared, and the cure is in ANOTHER module:
+    /// an annotation in the class, then the write. Offered when the engine reports an undeclared
+    /// name over the span and the name is a class of the project that is not predeclared - as
+    /// the apply when the class already says '@PredeclaredId, as add-and-apply when it does not.
+    /// Worker thread: it reads the caches the pass filled and the saved package, nothing of COM.
+    /// </summary>
+    private SurfaceCodeAction[] PredeclareCodeActions(string module, string? projectId, string source, int start, int end)
+    {
+        if (projectId is null)
+        {
+            return [];
+        }
+
+        var lineStarts = TextPositions.LineStarts(source);
+        var (fromLine, fromColumn) = TextPositions.ToLineColumn(lineStarts, start);
+        var (toLine, toColumn) = TextPositions.ToLineColumn(lineStarts, end);
+        var finding = _findings.FirstOrDefault(one =>
+            string.Equals(one.Code, "undeclared-variable", StringComparison.Ordinal)
+            && string.Equals(one.Module, module, StringComparison.OrdinalIgnoreCase)
+            && (one.Project is null || string.Equals(one.Project, projectId, StringComparison.OrdinalIgnoreCase))
+            && !(one.EndLine < fromLine || (one.EndLine == fromLine && one.EndColumn < fromColumn))
+            && !(one.StartLine > toLine || (one.StartLine == toLine && one.StartColumn > toColumn)));
+        if (finding is null)
+        {
+            return [];
+        }
+
+        var nameStart = TextPositions.ToOffset(lineStarts, finding.StartLine, finding.StartColumn);
+        var nameEnd = TextPositions.ToOffset(lineStarts, finding.EndLine, finding.EndColumn);
+        if (nameEnd <= nameStart || nameEnd > source.Length)
+        {
+            return [];
+        }
+        var name = source[nameStart..nameEnd].Trim();
+        if (name.Length == 0 || !name.All(c => char.IsLetterOrDigit(c) || c == '_'))
+        {
+            return [];
+        }
+
+        (string Kind, bool AnnotatedPredeclared) shape;
+        lock (_annotationShapes)
+        {
+            if (!_annotationShapes.TryGetValue(projectId, out var shapes) || !shapes.TryGetValue(name, out shape))
+            {
+                return [];
+            }
+        }
+        if (!string.Equals(shape.Kind, "class", StringComparison.OrdinalIgnoreCase)
+            || SavedModules.For(projectId)?.PredeclaredIdOf(name) == true)
+        {
+            return [];
+        }
+
+        var display = DisplayFromProjectId(projectId);
+        return shape.AnnotatedPredeclared
+            ? [new SurfaceCodeAction(
+                $"Apply {name}'s annotations to its attributes now (it says '@PredeclaredId)",
+                IsPreferred: true, finding.Code, nameStart, nameEnd, [],
+                "applyAttributes", [name, display])]
+            : [new SurfaceCodeAction(
+                $"Make {name} a predeclared class: add '@PredeclaredId and apply it now",
+                IsPreferred: true, finding.Code, nameStart, nameEnd, [],
+                "predeclareClass", [name, display])];
+    }
+
     /// <summary>The text the missing annotation should carry: the attribute's current value.</summary>
     private static string? ArgumentFor(DriftItem item, string projectId, string module)
     {
@@ -356,6 +439,13 @@ internal sealed partial class AddInSession
                     : $"Removed from {Arg(0)}: {string.Join("; ", changes)}. Save the workbook to keep it."));
                 break;
             }
+            case "predeclareClass":
+            {
+                var refused = PredeclareClass(Arg(0) ?? string.Empty, Arg(1));
+                _editorSurface?.Notify(refused
+                    ?? $"{Arg(0)} is a predeclared class now: '@PredeclaredId added and applied. Save the workbook to keep it.");
+                break;
+            }
             default:
                 Log.Warn($"hostAction: '{command}' is not an action this host performs");
                 _editorSurface?.Notify($"'{command}' is not something this editor can do.");
@@ -390,6 +480,46 @@ internal sealed partial class AddInSession
                 return (AttributeRewriter.Apply(exported, annotations), null);
             },
             out changes, out skipped, settle);
+    }
+
+    /// <summary>
+    /// Puts '@PredeclaredId at the top of a class's code and applies it, for the fix offered where
+    /// the class is used as a value. Host thread. Answers the refusal, or null.
+    /// </summary>
+    private string? PredeclareClass(string className, string? projectDisplay)
+    {
+        var projectId = ProjectIdFromDisplay(projectDisplay);
+        string? owner;
+        int type;
+        string source;
+        using (var component = FindComponent(className, projectId, out var foundIn))
+        {
+            if (component is null)
+            {
+                return $"There is no module named {className}" + (projectDisplay is null ? "." : $" in {projectDisplay}.");
+            }
+            type = component.GetInt32("Type");
+            owner = foundIn ?? projectId;
+            source = ProjectReader.ReadSource(component) ?? string.Empty;
+        }
+
+        if (type != ClassModuleType)
+        {
+            return $"{className} is not a class module, and only a class can be predeclared.";
+        }
+
+        if (!AttributeAnnotations.Read(source).Annotations.Any(one => one.Kind == AnnotationKind.PredeclaredId))
+        {
+            // The module's own line ending, so the one added line is like the rest.
+            var newline = source.Contains('\n') && !source.Contains("\r\n", StringComparison.Ordinal) ? "\n" : "\r\n";
+            var refusedWrite = WriteModule(className, "'@PredeclaredId" + newline + source, owner, hostRewrite: true);
+            if (refusedWrite is not null)
+            {
+                return refusedWrite;
+            }
+        }
+
+        return ApplyAttributes(className, projectDisplay ?? DisplayFromProjectId(owner), out _, out _);
     }
 
     /// <summary>Takes one managed attribute off a module, a member or a variable. Host thread.</summary>

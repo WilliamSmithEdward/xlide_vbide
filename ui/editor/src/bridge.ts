@@ -560,7 +560,7 @@ export type ClientMessage =
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
-  | { type: "codeAction"; id: number; start: number; end: number }
+  | { type: "codeAction"; id: number; start: number; end: number; module?: string; project?: string | null }
   | { type: "semanticTokens"; id: number; module: string; project?: string }
   | { type: "definition"; id: number; offset: number }
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
@@ -1259,9 +1259,16 @@ export class EditorBridge {
     this.transport.post({ type: "suppressFinding", module, project, line, code });
   }
 
-  requestCodeActions(start: number, end: number): Promise<HostCodeAction[]> {
+  /**
+   * The fixes the host offers over a span. Of the shown module by default; the Problems pane
+   * names a finding's module, which need not be the shown one.
+   */
+  requestCodeActions(start: number, end: number, target?: { module: string; project: string | null }): Promise<HostCodeAction[]> {
     return this.pendingCodeActions.ask(() => [], 2000, (id) =>
-      this.transport.post({ type: "codeAction", id, start, end }));
+      this.transport.post({
+        type: "codeAction", id, start, end,
+        ...(target ? { module: target.module, project: target.project } : {}),
+      }));
   }
 
   /**

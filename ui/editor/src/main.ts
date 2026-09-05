@@ -888,6 +888,40 @@ function boot(): void {
   const openAnalysisRules = (focusCode?: string): void =>
     openAnalysisRulesDialog(analysisRulesAccess, () => workspace.activeEditor().focus(), focusCode);
 
+  /**
+   * A finding's quick fixes, from the host, for a module whose text the page holds: what the
+   * lightbulb would show at the squiggle, each with the act of applying it. A host-performed fix
+   * posts its command; a text fix edits the module's model, the same road the lightbulb's edit
+   * takes, so the host hears it as typing. Null for a module the page has no model for.
+   */
+  const problemQuickFixes = async (module: string, workbook: string | null, line: number, column: number)
+    : Promise<{ title: string; run: () => void }[] | null> => {
+    const model = bridge.modelForLocation({ module, workbook, line, column, length: 0 });
+    if (!model) {
+      return null;
+    }
+    if (line < 1 || line > model.getLineCount()) {
+      return [];
+    }
+    const word = model.getWordAtPosition({ lineNumber: line, column });
+    const start = model.getOffsetAt({ lineNumber: line, column: word?.startColumn ?? column });
+    const end = model.getOffsetAt({ lineNumber: line, column: word?.endColumn ?? column });
+    const offered = await bridge.requestCodeActions(start, end, { module, project: workbook });
+    return offered.map((action) => ({
+      title: action.title,
+      run: () => {
+        if (action.command) {
+          bridge.hostAction(action.command, action.arguments ?? []);
+          return;
+        }
+        model.pushEditOperations([], action.edits.map((edit) => ({
+          range: monaco.Range.fromPositions(model.getPositionAt(edit.start), model.getPositionAt(edit.end)),
+          text: edit.text,
+        })), () => null);
+      },
+    }));
+  };
+
   shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     // The layout is a setting: the same whole-object post the dialog makes, echoed back.
@@ -912,6 +946,25 @@ function boot(): void {
     layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
     suppressFinding: (module, workbook, line, code) =>
       bridge.suppressFinding(module, workbook, line, code),
+    quickFixesFor: problemQuickFixes,
+    quickFixAt: (module, workbook, line, column) => {
+      // Go there, and once the editor is showing that line, open its own quick-fix menu.
+      bridge.navigate(module, line, column, false, workbook ?? undefined);
+      const until = Date.now() + 3000;
+      const tick = (): void => {
+        const editor = workspace.activeEditor();
+        const model = editor.getModel();
+        const wanted = bridge.modelForLocation({ module, workbook, line, column, length: 0 });
+        if (model && wanted && model === wanted && editor.getPosition()?.lineNumber === line) {
+          void editor.getAction("editor.action.quickFix")?.run();
+          return;
+        }
+        if (Date.now() < until) {
+          window.setTimeout(tick, 50);
+        }
+      };
+      window.setTimeout(tick, 50);
+    },
     turnOffRule: (code) => bridge.setRuleSeverity(code, "off"),
     canTurnOffRule: (code) => turnOffableCodes?.has(code) ?? false,
     canSuppressRule: (code) => code !== SUPPRESSION_DIRECTIVE_CODE,
@@ -2065,6 +2118,7 @@ function boot(): void {
     workspace,
     explorer: shell.explorerTree(),
     bridge,
+    problemFixes: problemQuickFixes,
     designer: {
       viewFor: (module, project) => {
         for (const view of designerViews.values()) {
