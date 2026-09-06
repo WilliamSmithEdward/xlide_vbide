@@ -116,8 +116,14 @@ check that Release ships the api shut, and the native publish. `-Live` adds four
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
 release rather than before a commit. All 27 take about eight and a half minutes.
 
+**The live tier is not all Excel any more.** Its first group opens an Access database
+(`tools\New-AccessFixture.ps1`) and runs `access.mjs` against it, because for a year every suite
+ran in Excel and the places this product asks which host it is in were only ever answered one
+way - which is how the test runner came to have never once run a test in Access
+([lessons.md](lessons.md) finding 72). Word has a launcher of its own and no group yet.
+
 Counts move, so they are given as of this line rather than as standing facts: 533 unit tests,
-67 api routes of which 65 are driven by one of the 64 suites the gate runs, 2 left out on
+67 api routes of which 65 are driven by one of the 67 suites the gate runs, 2 left out on
 purpose.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and

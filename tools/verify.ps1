@@ -554,7 +554,36 @@ if ($Live) {
     # One fixture group: a fresh launch, then each node suite, each held to the ONE verdict
     # spelling. A suite may name arguments after its file, which is how module-sync says which
     # planner a run is about and the walk names its step count.
-    function Invoke-SuiteGroup([string] $fixture, [string[]] $suites) {
+    # The Access database a group asks for, opened the way its own launcher opens one. Access is
+    # not a workbook: one database per process, no ' + ' joining, and its own -Fresh guard.
+    function Use-AccessFixture([string] $fixture) {
+        $database = Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())
+        & (Join-Path $repoRoot 'tools\harness\Start-Access.ps1') -Database $database -Fresh | Out-Host
+
+        $access = Get-Process MSACCESS -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $access) { throw "Access did not start on $fixture" }
+
+        return $access
+    }
+
+    function Invoke-SuiteGroup([string] $fixture, [string[]] $suites, [string] $hostName = 'excel') {
+        if ($hostName -eq 'access') {
+            # CLOSED WHEN THE GROUP ENDS, unlike the Excel groups, whose next -Fresh launch closes
+            # the last one. Nothing later in this plan closes an Access, so a session left running
+            # here would still be answering when a later step connects without naming a pid.
+            $access = Use-AccessFixture $fixture
+            try {
+                return Invoke-Aimed $access.Id { Invoke-SuiteList $suites }
+            }
+            finally {
+                Stop-Process -Id $access.Id -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+                $lock = [System.IO.Path]::ChangeExtension(
+                    (Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())), '.laccdb')
+                if (Test-Path $lock) { Remove-Item $lock -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
         $excel = Use-Fixture $fixture
         Invoke-Aimed $excel.Id { Invoke-SuiteList $suites }
     }
@@ -680,6 +709,22 @@ if ($Live) {
         # SAME fixture on purpose - write-rollback's own launch below is the case - and a key
         # cannot say that twice.
         $plan = @(
+            # ACCESS RUNS FIRST, AND ALONE, and it is the only group that is not Excel.
+            #
+            # Every other suite here runs in Excel, which for a year meant the three places this
+            # product asks which host it is in were only ever answered one way - and the test
+            # runner had therefore never once run a test in Access without anyone knowing
+            # (2026-09-06, finding 72). This group is the other answer, and its database is built
+            # by tools\New-AccessFixture.ps1 the way every other fixture here is built by its own.
+            #
+            # First, so that everything after it is Excel and the last session standing at the end
+            # of the plan - which the leak sweep and the deep steps connect to - is an Excel one.
+            # Its own launcher closes every Access rather than every Excel, so it disturbs nothing
+            # around it, and the group closes the session it opened: a live Access left beside the
+            # Excel ones is how four steps once reported "several instances are live" with nothing
+            # wrong in any of them (2026-09-05).
+            @{ Fixture = 'AccessFixture.accdb'; Host = 'access'; Suites = @('access.mjs') }
+
             # module-sync writes into a temporary folder of its own and takes back every module it
             # adds. Its last section is the one worth having: it applies the same import through
             # the DIALOG and through the route and compares the result byte for byte, which is the
@@ -871,7 +916,8 @@ if ($Live) {
         )
 
         foreach ($group in $plan) {
-          $ran += Invoke-SuiteGroup $group.Fixture $group.Suites
+          $inHost = if ($group.ContainsKey('Host')) { $group.Host } else { 'excel' }
+          $ran += Invoke-SuiteGroup $group.Fixture $group.Suites $inHost
         }
 
         $ran -join '; '

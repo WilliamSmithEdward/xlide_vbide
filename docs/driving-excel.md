@@ -126,6 +126,26 @@ script goes through it.
   termination as a crash: on the next start it offers document recovery and disables what it
   blames, both of which stand in front of the thing being tested.
 
+### Word and Access have their own launchers
+
+`Start-Word.ps1` and `Start-Access.ps1` are the same three rules for the other two hosts, and
+each carries the one thing its host does differently. Word's document pane is `_WwG` and sits a
+few levels under the frame. Access has no document window worth walking to at all - its MDI
+children are forms and reports - so its top-level `OMain` frame is asked instead, and what
+OBJID_NATIVEOM answers there is **the Application itself** rather than a Window. That one call
+lives in `AccessAttach.psm1` for the launcher and the fixture generator to share.
+
+```powershell
+tools\harness\Start-Access.ps1 -Database artifacts\fixtures\AccessFixture.accdb -Fresh
+node tools\harness\access.mjs
+```
+
+Access keeps one database per process, so there is no joining several on a command line, and its
+`-Fresh` closes every Access rather than every Excel. The database is built by
+`tools\New-AccessFixture.ps1`, which has to save each module by name through `DoCmd`: Access,
+alone among the hosts, does not write a module created through the object model into the file
+when the file is saved, so a session closed without that leaves the modules behind.
+
 ### The door must be found
 
 Each session writes `%LOCALAPPDATA%\xlide_vbide\xlide-api-<pid>.json` with its port, token and
