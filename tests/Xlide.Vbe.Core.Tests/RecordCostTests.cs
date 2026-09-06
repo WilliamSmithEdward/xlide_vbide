@@ -29,12 +29,36 @@ public sealed class RecordCostTests
     [Fact]
     public void RecordingACeilingSizedModuleStaysOffTheWritePath()
     {
-        // 64,802 lines is VBA's own per-module ceiling, so this is the worst case that exists.
-        var text = ModuleOf(64_802);
+        // A REFERENCE MEASURED ON THIS MACHINE, because the claim is about the SHAPE of the cost
+        // and a wall-clock ceiling measures the runner instead. The absolute bound was 25 ms for
+        // work that takes under three here, and CI answered 26.11 ms on a shared runner and went
+        // red over a change-log path nothing had touched in weeks (2026-09-06). The sibling test
+        // below had already learned this and bounds itself the same way.
+        var reference = PerWriteMilliseconds(ModuleOf(2_000));
+
+        // 64,802 lines is VBA's own per-module ceiling, so this is the worst case that exists,
+        // and about thirty-two times the reference text.
+        var each = PerWriteMilliseconds(ModuleOf(64_802));
+
+        // Linear in the text means about 32x the reference; the multiple allows three times that
+        // for a runner whose small measurement was mostly fixed overhead. What it refuses is the
+        // shape changing - anything quadratic in the text lands near a thousand times over.
+        //
+        // The floor is what decides on a machine fast enough that the reference rounds to
+        // nothing, and it is set where a shared runner cannot trip it: the figure here is under
+        // three milliseconds, CI has answered twenty-six, and a regression worth failing over is
+        // the whole-text operation landing somewhere that runs per keystroke, which is hundreds.
+        var bound = Math.Max(60, reference * 96);
+        Assert.True(each < bound,
+            $"recording a 3.8 MB module took {each:F2} ms per write against a bound of "
+            + $"{bound:F2} ms, from a 118 KB reference at {reference:F2} ms");
+    }
+
+    /// <summary>What one recorded write of this text costs, warmed first so the figure is the work.</summary>
+    private static double PerWriteMilliseconds(string text)
+    {
         var next = $"{text}\r\n    ' one more";
         var log = new ChangeLog();
-
-        // Warm, so the figure is the work rather than the first call through it.
         log.Record("Massive", ChangeKind.Written, text, next, "claude", Noon);
 
         var clock = Stopwatch.StartNew();
@@ -44,9 +68,7 @@ public sealed class RecordCostTests
         }
 
         clock.Stop();
-        var each = clock.Elapsed.TotalMilliseconds / 20;
-
-        Assert.True(each < 25, $"recording a 3.8 MB module took {each:F2} ms per write");
+        return clock.Elapsed.TotalMilliseconds / 20;
     }
 
     [Fact]
