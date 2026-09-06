@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-05, at v0.14.1.
+Updated 2026-09-06, at v0.14.2.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -50,6 +50,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   and a sync import apply on their own, under one setting. Applying exports, rewrites only the
   attribute lines, and imports the module back without the surface moving (decision 17); the
   analyzer hears about a predeclared class the moment it is applied. [attributes.md](attributes.md).
+
+- **Access is a host like the others now.** The editor always loaded there; the Immediate window,
+  the test runner and the test support module did not work, for three reasons that were only ever
+  Access's - its application object is reached off its own frame rather than a document window,
+  its `Application.Run` takes a bare procedure name where Excel wants the file and Word the
+  module, and it writes an `Option Compare` line into every module it creates, which collided
+  with one the generated runner declared and stopped the whole project compiling
+  ([lessons.md](lessons.md) finding 72). It has a fixture and a live suite in the gate.
 
 ## What is not done
 
