@@ -64,6 +64,14 @@ internal static class HostApplication
     {
         "excel" => FindExcelWorksheetWindow(),
         "word" => FindDescendantByClass(FindProcessFrame("OpusApp"), "_WwG", 0),
+
+        // ACCESS ANSWERS ON ITS FRAME, and answers with the Application ITSELF rather than with a
+        // window object - `Name` on it reads "Microsoft Access" (measured 2026-09-06 against a
+        // live database). The `Application` hop below still holds, because an Office Application
+        // answers that property with itself, so nothing above needs to know the difference.
+        // Access has no document window of its own worth walking to: its MDI children are forms
+        // and reports, and a database with none open would then have no object model at all.
+        "access" => FindProcessFrame("OMain"),
         _ => 0,
     };
 

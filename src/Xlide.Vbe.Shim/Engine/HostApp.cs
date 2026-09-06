@@ -35,6 +35,36 @@ internal static class HostApp
     /// </summary>
     public static bool CarriesMsForms => Name is not "access";
 
+    /// <summary>
+    /// The name this host's <c>Application.Run</c> understands for a procedure, given the file
+    /// the project belongs to (null when it has none yet).
+    ///
+    /// THREE HOSTS, THREE SPELLINGS, each measured against a live one rather than assumed:
+    ///
+    ///   Excel   <c>'Book1.xlsm'!Module.Proc</c>  Run resolves an unqualified name against the
+    ///           ACTIVE workbook, so once two are open the name has to say which file it means,
+    ///           or the host answers that the macro may not be available (2026-08-07).
+    ///   Word    <c>Module.Proc</c>               Word's Run resolves across the open projects
+    ///           and refuses Excel's form outright (2026-08-19, the day the Immediate window
+    ///           first ran in Word).
+    ///   Access  <c>Proc</c>                      Access has ONE database per application and
+    ///           reads a dotted prefix as a LIBRARY DATABASE rather than a module, so both of
+    ///           the other forms are refused. Measured 2026-09-06 against an open database:
+    ///           `DiscountRate` answered 0.1, while `Pricing.DiscountRate` and the bang form
+    ///           both came back "Microsoft Access cannot find the procedure". This is why the
+    ///           test runner and the Immediate window could not run anything at all there.
+    ///
+    /// A host nobody has run this in keeps Excel's form, which is where every host started.
+    /// The bare form is why a generated entry point has to carry a name of this product's own:
+    /// in Access there is no module to disambiguate it with.
+    /// </summary>
+    public static string RunTarget(string? file, string module, string procedure) => Name switch
+    {
+        "access" => procedure,
+        "word" => $"{module}.{procedure}",
+        _ => file is null ? $"{module}.{procedure}" : $"'{file}'!{module}.{procedure}",
+    };
+
     private static string FromProcess()
     {
         var image = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);

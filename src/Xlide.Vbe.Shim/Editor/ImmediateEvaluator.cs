@@ -252,29 +252,17 @@ internal sealed partial class ImmediateEvaluator
             }
 
             /*
-             * QUALIFIED BY WORKBOOK, because "current" means two different things here.
+             * NAMED THE WAY THIS HOST NAMES A PROCEDURE, and the hosts do not agree - see
+             * HostApp.RunTarget for the three spellings and what each was measured against.
              *
-             * The scratch module is added to the editor's ACTIVE VB PROJECT; `Application.Run`
-             * resolves an unqualified name against the host's ACTIVE WORKBOOK. With one workbook
-             * open those are always the same and the difference cannot be seen. With two they can
-             * differ, and the evaluation fails with the host's own words: "Cannot run the macro
-             * 'XlideImmediateScratch.XlideImmediateRun'. The macro may not be available in this
-             * workbook or all macros may be disabled." Which is true, and unhelpful: it exists, in
-             * the other workbook (2026-08-07).
-             *
-             * A project with no file yet has no name to qualify with, and there the unqualified
-             * form is all there is.
+             * Qualifying at all is Excel's doing: the scratch module is added to the editor's
+             * ACTIVE VB PROJECT while `Application.Run` resolves an unqualified name against the
+             * host's ACTIVE WORKBOOK. With one workbook open those are the same and the
+             * difference cannot be seen. With two they can differ, and the evaluation fails with
+             * the host's own words about a macro that may not be available in this workbook -
+             * true, and unhelpful, because it exists in the other one (2026-08-07).
              */
-            var file = SafeFileName(project);
-
-            // The `'file'!Module.Proc` bang form is EXCEL's Run spelling. Word's Run takes
-            // `Module.Proc` and resolves it across open projects - the scratch names are
-            // distinctive enough that a collision would need another XlideImmediateScratch -
-            // and handing it Excel's form fails outright (2026-08-19, the day the immediate
-            // window first ran in Word). Other hosts keep Excel's form until proven live.
-            var target = file is null || Engine.HostApp.Name == "word"
-                ? $"{ScratchModule}.{ScratchProcedure}"
-                : $"'{file}'!{ScratchModule}.{ScratchProcedure}";
+            var target = Engine.HostApp.RunTarget(SafeFileName(project), ScratchModule, ScratchProcedure);
 
             var value = application.CallToString("Run", target);
 

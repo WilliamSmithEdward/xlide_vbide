@@ -13,7 +13,7 @@ namespace Xlide.Vbe.Shim.Editor;
  *
  * The authoring surface is the one xlide_vscode ships - `' @xlide-test` directives over
  * zero-argument Subs in standard modules, the XlideAssert module's latched first-failure
- * protocol, a generated RunTest(testId) returning one JSON object per test - so a project's
+ * protocol, a generated entry point returning one JSON object per test - so a project's
  * tests move between the two products without an edit. The EXECUTION is this product's own:
  * no staged copy, no owned hidden host, no PowerShell bridge. The tests run in the live
  * project through the same Application.Run road the Immediate window takes, one test per
@@ -29,6 +29,14 @@ internal static partial class TestRunService
     internal const string AssertModuleName = "XlideAssert";
     internal const string DispatchModuleName = "XlideTestDispatch";
     internal const string RunnerModulePrefix = "XlideRun";
+
+    /// <summary>
+    /// The generated runner's entry point. IN THIS PRODUCT'S OWN NAME SPACE because Access's
+    /// `Application.Run` takes a bare procedure name - it has no module to qualify it with - so
+    /// a plainly named `RunTest` would be resolved against the developer's own procedures, and
+    /// `RunTest` is a name a project full of tests could very well already have.
+    /// </summary>
+    internal const string RunnerProcedureName = "XlideRunTest";
     private const int StandardModule = 1;
     private const int DesignMode = 2;
 
@@ -468,12 +476,12 @@ internal static partial class TestRunService
         return null;
     }
 
-    /// <summary>The per-run runner: RunTest(testId) answering one JSON object per call.</summary>
+    /// <summary>The per-run runner: one entry point answering one JSON object per call.</summary>
     internal static string BuildRunnerModule(IReadOnlyList<TestCase> tests)
     {
         var body = new StringBuilder();
         body.Append("Option Explicit\r\n\r\n");
-        body.Append("Public Function RunTest(ByVal testId As String) As String\r\n");
+        body.Append($"Public Function {RunnerProcedureName}(ByVal testId As String) As String\r\n");
         body.Append($"    {AssertModuleName}.ResetTestState\r\n");
         body.Append("    On Error GoTo Caught\r\n");
         body.Append("    Select Case testId\r\n");
@@ -484,14 +492,14 @@ internal static partial class TestRunService
         }
 
         body.Append("        Case Else\r\n");
-        body.Append("            RunTest = FailureJson(5, \"XLIDE.TestRunner\", \"Unknown XLIDE test: \" & testId)\r\n");
+        body.Append($"            {RunnerProcedureName} = FailureJson(5, \"XLIDE.TestRunner\", \"Unknown XLIDE test: \" & testId)\r\n");
         body.Append("            Exit Function\r\n");
         body.Append("    End Select\r\n");
         body.Append("    On Error GoTo 0\r\n");
         body.Append($"    If Len({AssertModuleName}.LastFailureMessage()) > 0 Then\r\n");
-        body.Append($"        RunTest = FailureJson({AssertModuleName}.AssertionErrorNumber(), \"XLIDE.Assert\", {AssertModuleName}.LastFailureMessage())\r\n");
+        body.Append($"        {RunnerProcedureName} = FailureJson({AssertModuleName}.AssertionErrorNumber(), \"XLIDE.Assert\", {AssertModuleName}.LastFailureMessage())\r\n");
         body.Append("    Else\r\n");
-        body.Append($"        RunTest = \"{{\"\"outcome\"\":\"\"passed\"\",\"\"output\"\":\" & {AssertModuleName}.OutputJson() & \"}}\"\r\n");
+        body.Append($"        {RunnerProcedureName} = \"{{\"\"outcome\"\":\"\"passed\"\",\"\"output\"\":\" & {AssertModuleName}.OutputJson() & \"}}\"\r\n");
         body.Append("    End If\r\n");
         body.Append("    Exit Function\r\n");
         body.Append("Caught:\r\n");
@@ -502,7 +510,7 @@ internal static partial class TestRunService
         body.Append("    actualSource = Err.Source\r\n");
         body.Append("    actualDescription = Err.Description\r\n");
         body.Append("    On Error GoTo 0\r\n");
-        body.Append("    RunTest = FailureJson(actualNumber, actualSource, actualDescription)\r\n");
+        body.Append($"    {RunnerProcedureName} = FailureJson(actualNumber, actualSource, actualDescription)\r\n");
         body.Append("End Function\r\n\r\n");
         body.Append("Private Function FailureJson(ByVal Number As Long, ByVal Source As String, ByVal Message As String) As String\r\n");
         body.Append($"    FailureJson = \"{{\"\"outcome\"\":\"\"failed\"\",\"\"number\"\":\" & CStr(Number) & \",\"\"source\"\":\"\"\" & JsonEscape(Source) & \"\"\",\"\"message\"\":\"\"\" & JsonEscape(Message) & \"\"\",\"\"output\"\":\" & {AssertModuleName}.OutputJson() & \"}}\"\r\n");
@@ -662,13 +670,18 @@ internal static partial class TestRunService
             AddModule(components, runnerName, BuildRunnerModule(runnable));
             AddModule(components, DispatchModuleName, BuildDispatchModule(modules));
 
+            // WHAT WAS STAGED, READ BACK, because the host's refusal names a PROCEDURE and so
+            // reads identically whether the module never took its code, the name did not stick,
+            // or the project will not compile. Access said "cannot find the procedure
+            // 'XlideRunTest'" for a module that was there, and the log could not tell which of
+            // the three it was (2026-09-06).
+            Log.Verbose($"tests: staged {runnerName} ({StagedLineCount(components, runnerName)} lines)"
+                + $" and {DispatchModuleName} ({StagedLineCount(components, DispatchModuleName)} lines)");
+
             using var application = HostApplication.Find()
                 ?? throw new InvalidOperationException("The host application could not be reached.");
 
-            var file = SafeFileName(project);
-            var target = file is null || Engine.HostApp.Name == "word"
-                ? $"{runnerName}.RunTest"
-                : $"'{file}'!{runnerName}.RunTest";
+            var target = Engine.HostApp.RunTarget(SafeFileName(project), runnerName, RunnerProcedureName);
 
             var stopped = false;
 
@@ -767,10 +780,10 @@ internal static partial class TestRunService
             return "the host application could not be reached";
         }
 
-        var file = SafeFileName(project);
-        var target = file is null || Engine.HostApp.Name == "word"
-            ? $"{test.Module}.{test.Procedure}"
-            : $"'{file}'!{test.Module}.{test.Procedure}";
+        // The developer's OWN procedure, so in Access - where Run takes a bare name and there is
+        // no module to qualify it with - two standard modules holding the same procedure name
+        // leave the host to pick, which is Access's own rule for every unqualified call in it.
+        var target = Engine.HostApp.RunTarget(SafeFileName(project), test.Module, test.Procedure);
         application.Invoke("Run", target);
         return $"ran {test.Id} under the debugger";
     }
@@ -890,6 +903,14 @@ internal static partial class TestRunService
         component.SetString("Name", name);
         using var code = component.GetObject("CodeModule");
         code?.Invoke("AddFromString", body);
+    }
+
+    /// <summary>A staged module's line count as the project holds it now, or -1 when it is not there.</summary>
+    private static int StagedLineCount(DispatchObject components, string name)
+    {
+        using var component = Find(components, name);
+        using var code = component?.GetObject("CodeModule");
+        return code?.GetInt32("CountOfLines") ?? -1;
     }
 
     private static void RemoveGeneratedRunModules(DispatchObject components)
