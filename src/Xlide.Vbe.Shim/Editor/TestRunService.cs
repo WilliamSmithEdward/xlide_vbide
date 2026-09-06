@@ -530,9 +530,10 @@ internal static partial class TestRunService
     /// <summary>
     /// The dispatcher Assert.Throws runs its target through: every public zero-argument Sub in
     /// every standard module, direct-called inside one execution context so an error crosses
-    /// back as recorded state rather than as a host modal. `Option Compare Text` with
-    /// original-cased keys keeps the matching on VBA's own case rule. Chunked at 100 targets a
-    /// procedure, under VBA's compiled-procedure cap.
+    /// back as recorded state rather than as a host modal. Keys and lookups are lower-cased in
+    /// the generated code so the matching does not depend on the module's Option Compare, which
+    /// is not this product's to choose in every host. Chunked at 100 targets a procedure, under
+    /// VBA's compiled-procedure cap.
     /// </summary>
     internal static string BuildDispatchModule(IReadOnlyList<(string Name, string Source)> modules)
     {
@@ -558,14 +559,26 @@ internal static partial class TestRunService
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
         var body = new StringBuilder();
-        body.Append("Option Explicit\r\n");
-        body.Append("Option Compare Text\r\n\r\n");
+        // NO OPTION COMPARE OF ITS OWN, and this is not tidying up.
+        //
+        // ACCESS WRITES ONE ALREADY: a module created through the object model there opens
+        // `Option Compare Database` before a line of this reaches it, and AddFromString appends
+        // after it. Declaring a second one put two Option Compare statements in one module, which
+        // does not compile - and a VBA project that does not compile resolves NOTHING, so
+        // `Application.Run` answered "cannot find the procedure" for every name in the database:
+        // the generated runner, and the developer's own untouched functions with it. That is what
+        // stopped the test runner from ever running a test in Access (2026-09-06), and it read as
+        // a fault in the injected module because the injected module was what had just changed.
+        //
+        // The case-insensitive matching Option Compare Text was here for is done in the code
+        // below instead, which holds whatever the host prepends.
+        body.Append("Option Explicit\r\n\r\n");
         body.Append("' Generated for one XLIDE test run; removed when the run ends.\r\n");
         body.Append("Public Sub XlideInvokeTarget(ByVal MacroName As String)\r\n");
         body.Append("    On Error GoTo Caught\r\n");
         body.Append($"    {AssertModuleName}.RecordTargetOutcome 0, \"\", \"\"\r\n");
         body.Append("    Dim targetKey As String\r\n");
-        body.Append("    targetKey = Trim$(MacroName)\r\n");
+        body.Append("    targetKey = LCase$(Trim$(MacroName))\r\n");
 
         const int chunkSize = 100;
         var chunks = (targets.Count + chunkSize - 1) / chunkSize;
@@ -587,10 +600,12 @@ internal static partial class TestRunService
             body.Append("    Select Case targetKey\r\n");
             foreach (var (module, procedure) in targets.Skip(chunk * chunkSize).Take(chunkSize))
             {
-                var keys = $"\"{module}.{procedure}\"";
+                // Lower case on both sides: the key is lower-cased before the comparison, so the
+                // labels have to be too, and neither depends on the module's Option Compare.
+                var keys = $"\"{module.ToLowerInvariant()}.{procedure.ToLowerInvariant()}\"";
                 if (bareCounts[procedure] == 1)
                 {
-                    keys += $", \"{procedure}\"";
+                    keys += $", \"{procedure.ToLowerInvariant()}\"";
                 }
 
                 body.Append($"        Case {keys}\r\n");
@@ -664,27 +679,35 @@ internal static partial class TestRunService
             return results;
         }
 
-        using var components = project.GetObject("VBComponents");
-        if (components is null)
-        {
-            throw new InvalidOperationException("The project would not answer its components.");
-        }
-
         var runnerName = $"{RunnerModulePrefix}{Environment.TickCount64.ToString("x", CultureInfo.InvariantCulture).PadLeft(8, '0')[^8..]}";
-        RemoveGeneratedRunModules(components);
 
         try
         {
-            AddModule(components, runnerName, BuildRunnerModule(runnable));
-            AddModule(components, DispatchModuleName, BuildDispatchModule(modules));
+            // THE PROJECT IS LET GO OF BEFORE ANYTHING IS CALLED. Staging used to hold a live
+            // VBComponents reference for the whole run, all the way through Application.Run, and
+            // in Access that is the difference between a module the host will run and one it
+            // insists it cannot find: staged through the api door, where every reference is
+            // released when the request ends, the byte-for-byte identical module runs. So the
+            // staging gets its own scope and the teardown asks the project again.
+            using (var staging = project.GetObject("VBComponents"))
+            {
+                if (staging is null)
+                {
+                    throw new InvalidOperationException("The project would not answer its components.");
+                }
+
+                RemoveGeneratedRunModules(staging);
+                AddModule(staging, runnerName, BuildRunnerModule(runnable));
+                AddModule(staging, DispatchModuleName, BuildDispatchModule(modules));
 
             // WHAT WAS STAGED, READ BACK, because the host's refusal names a PROCEDURE and so
             // reads identically whether the module never took its code, the name did not stick,
             // or the project will not compile. Access said "cannot find the procedure
             // 'XlideRunTest'" for a module that was there, and the log could not tell which of
             // the three it was (2026-09-06).
-            Log.Verbose($"tests: staged {runnerName} ({StagedLineCount(components, runnerName)} lines)"
-                + $" and {DispatchModuleName} ({StagedLineCount(components, DispatchModuleName)} lines)");
+                Log.Verbose($"tests: staged {runnerName} ({StagedLineCount(staging, runnerName)} lines)"
+                    + $" and {DispatchModuleName} ({StagedLineCount(staging, DispatchModuleName)} lines)");
+            }
 
             using var application = HostApplication.Find()
                 ?? throw new InvalidOperationException("The host application could not be reached.");
@@ -764,7 +787,11 @@ internal static partial class TestRunService
         {
             try
             {
-                RemoveGeneratedRunModules(components);
+                using var teardown = project.GetObject("VBComponents");
+                if (teardown is not null)
+                {
+                    RemoveGeneratedRunModules(teardown);
+                }
             }
             catch (Exception ex)
             {

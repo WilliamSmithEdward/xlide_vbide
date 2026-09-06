@@ -2020,42 +2020,56 @@ because it carries unedited lines through unchanged, and the wrong DEFAULT for a
 with text or written from it. The package says its page; the export is in the system's; both are
 used (`AnsiText`), and the tests hold the two ranges Latin-1 gets wrong.
 
-## 72. Access will not run a module the same call injected, and saving it makes things worse
+## 72. Two Option Compare lines, and every name in the database stopped resolving
 
-The test runner had never run a test in Access. Three causes were real and are
-fixed: the walk that finds a host's document window knew only Excel and Word,
-so the host could not be reached at all; Access's `Application.Run` takes a
-bare procedure name and refuses both Excel's `'file'!Module.Proc` and Word's
-`Module.Proc`; and Access writes `Option Compare Database` into every module it
-creates, which made the support module it had just installed compare unequal to
-the canonical source, so the pane said "outdated" for ever.
+The test runner had never once run a test in Access. Four things were wrong and
+the fourth hid behind the other three for most of a day.
 
-The fourth is not a spelling and is written down here because two plausible
-fixes were measured and both fail.
+The host could not be reached at all: the walk that finds a host's document
+window knew Excel's worksheet pane and Word's document pane and answered zero
+for everything else. Access answers OBJID_NATIVEOM on its top-level `OMain`
+frame, and answers with the Application itself rather than a window.
 
-Access will not resolve a procedure in a module that the same uninterrupted
-host-thread call injected. The byte-for-byte identical module staged through
-the api door - two requests, with the host's loop turning between them - runs
-and returns its JSON. Staged and called in one block, the host answers
-"Microsoft Access cannot find the procedure" about a module the same call can
-read back line by line, whose name and line count it will confirm.
+`Application.Run` is spelled differently in every host. Excel wants
+`'Book1.xlsm'!Module.Proc`, Word wants `Module.Proc`, and Access refuses both -
+it keeps one database per application and reads a dotted prefix as a library
+database. Measured against a live database: `DiscountRate` answered 0.1 while
+`Pricing.DiscountRate` and the bang form both came back "cannot find the
+procedure".
 
-`DoCmd.Save` looks like the answer and is not. Logged either side of the call,
-the module is absent from `CurrentProject.AllModules` before and present after,
-and the save reports success - so being a database object is genuinely not what
-makes a procedure resolvable. Worse, the run removes its generated modules when
-it ends, and a saved-then-removed module leaves Access holding a catalogue
-entry for something that is gone: the next open of that database raises "File
-not found" from VBA before anything else can run. One afternoon's experiment
-did that to a real test database. Nothing may save a transient module.
+Access writes `Option Compare Database` into every module it creates, before a
+line of ours reaches it. That made the support module Access had just installed
+compare unequal to the canonical source, so the pane called its own module
+outdated for ever.
 
-Pumping the host's message loop after staging fails too: a bounded pump
-dispatched thirty messages and the host still refused, so the registration is
-not a queued notification and nothing done inside the call substitutes for the
-call returning.
+And then the real one. The generated dispatch module declared
+`Option Compare Text`. Appended after the line Access had already written, that
+is TWO Option Compare statements in one module, which does not compile - and a
+VBA project that does not compile resolves NOTHING. `Application.Run` then
+answered "cannot find the procedure" for the generated runner, which looked
+exactly like a problem with injecting modules, because injecting a module was
+what had just happened.
 
-Consequence: the fix is a change to how a run is DRIVEN, not a step added to
-it - staging and calling have to be separate crossings into the host, which
-the door's one-crossing-per-route dispatch does not currently allow. Until
-then, everything else in Access works: the tree, the Immediate window,
-discovery, and the support module.
+WHAT FOUND IT was a control. Every experiment until then had probed the
+injected name, and each answer was consistent with a dozen theories. Probing a
+name that had nothing to do with the injection - a plain saved function that had
+been in the database all along, and that the Immediate window could call a
+second earlier - answered "cannot find the procedure" too. One line of output,
+and the question stopped being "why can Access not see the new module" and
+became "why can Access not see anything", which has one answer.
+
+Three theories were measured and killed on the way, all of them plausible and
+all of them wrong. `DoCmd.Save` does put the module in Access's own catalogue -
+logged either side of the call, absent before and present after - and changes
+nothing about resolution; worse, the run removes its generated modules when it
+ends, and a saved-then-removed module leaves Access holding a catalogue entry
+for something that is gone, so the next open of that database raises "File not
+found" from VBA before anything can run. That damaged a real test database
+before it was understood. Turning the host's message loop after staging failed
+too: thirty messages dispatched, same refusal. So did releasing every COM
+reference to the project before the call.
+
+Consequence, beyond the fix: a generated module must not declare an option the
+host may already have declared. The dispatcher now lower-cases its keys and its
+lookups in the generated code, so the matching it wanted Option Compare Text for
+holds under whatever any host prepends.
