@@ -431,7 +431,15 @@ internal static partial class TestRunService
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n')
             .Split('\n')
-            .Where(line => !line.TrimStart().StartsWith("Attribute ", StringComparison.OrdinalIgnoreCase)))
+            .Where(line => !line.TrimStart().StartsWith("Attribute ", StringComparison.OrdinalIgnoreCase)
+                // ACCESS WRITES A LINE OF ITS OWN into every module it creates: a new module
+                // there opens `Option Compare Database`, which this product never wrote and
+                // cannot remove. Compared verbatim, the support module Access itself had just
+                // installed read as somebody's edited copy, so the pane said "outdated" for ever
+                // and the runner refused to run against it (2026-09-06). No host's Option Compare
+                // is part of what this product generates, so dropping it from both sides compares
+                // what was actually written.
+                && !line.TrimStart().StartsWith("Option Compare", StringComparison.OrdinalIgnoreCase)))
         .Trim();
 
     private static DispatchObject? Find(DispatchObject? components, string name)
