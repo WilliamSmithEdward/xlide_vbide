@@ -119,17 +119,78 @@ installed from the release, you are done: start Excel and press Alt+F11.
 
 ## Building from source
 
-You need the .NET 10 SDK, the C++ build tools that ahead-of-time compilation links with, and Node
-for the language engine. Excel is needed only for the integration check.
+### What you need first
+
+- **Windows**, and 64-bit Microsoft 365. The add-in is a COM add-in for the VBE, so it can only be
+  built and run where that editor is.
+- **The .NET 10 SDK.** The shim targets `net10.0-windows`.
+- **The C++ build tools**, which is what ahead-of-time compilation links against. Install the
+  "Desktop development with C++" workload from the Visual Studio Installer; Build Tools alone is
+  enough, Visual Studio itself is not required.
+- **Node 20 or newer**, for the language engine and the editor page.
+- **The analyzer checkout, beside this one.** This is the part that is easy to miss. The engine
+  does not vendor the analyzer, it compiles it from
+  [xlide_vscode](https://github.com/WilliamSmithEdward/xlide_vscode)'s own source, so that both
+  products agree on what VBA means. Clone it as a sibling directory:
+
+  ```text
+  ...\xlide\
+      xlide_vbide\      this repository
+      xlide_vscode\     the analyzer, cloned beside it
+  ```
+
+  Without it the engine build stops and says so. The path is `engine/build.mjs` if you keep your
+  checkouts somewhere else.
+
+### The first build
 
 ```powershell
-tools\dev.ps1            # build, test, register, and verify inside a real editor
-tools\verify.ps1         # the whole local gate, about twenty seconds
-installer\build.ps1      # produce the installer
+npm install --prefix engine        # the language engine's dependencies
+npm install --prefix ui\editor     # the editor page's dependencies
+tools\dev.ps1                      # build everything, register, and open a real editor
 ```
 
-The development loop finishes in about a second and a half. `tools\page.ps1` rebuilds and reloads
-the editor surface in about a second without restarting Excel.
+`tools\dev.ps1` is the whole loop in one command: it builds and tests the engine and the page,
+publishes the shim ahead-of-time, registers it for the current user, then starts Excel and
+verifies the add-in actually loaded. It builds **Release** by default; pass
+`-Configuration Debug` for a build with the local api door in it, which is what the harness and
+every suite in `tools\harness` drive. `-KeepOpen` leaves Excel running to work in,
+`-NoRun` stops after registering, and `-Unregister` takes the registration off the machine again.
+
+### Building one part at a time
+
+```powershell
+tools\page.ps1                     # rebuild the editor surface and reload it live, ~1s
+npm run build --prefix engine      # bundle the engine
+npm run package --prefix engine    # bundle it and produce xlide-engine.exe
+dotnet build xlide_vbide.slnx      # the shim and its unit tests, without publishing
+```
+
+`tools\page.ps1` is the fast loop: it typechecks, builds, copies the bundle into the published
+shim and reloads the page in a running editor, without restarting Excel or republishing anything.
+
+### Checking it
+
+```powershell
+tools\verify.ps1                   # 19 headless steps, about ninety seconds
+tools\verify.ps1 -Live             # adds four steps that need an open editor
+tools\verify.ps1 -Deep             # four more; the tier to run before a release
+```
+
+The live tiers drive real hosts against fixtures in `artifacts\fixtures`, which are build output
+rather than checked in. Each has a generator in `tools` - `New-TestFixture.ps1`,
+`New-AccessFixture.ps1` and the rest - and they need a **Debug** build registered first, because
+they are built through the local api door rather than through the VBA project object model, which
+means "Trust access to the VBA project object model" does not have to be on.
+
+### The installer
+
+```powershell
+installer\build.ps1                # produces artifacts\xlide-setup.exe
+```
+
+It refuses to build without a packaged engine and a built page, so an incomplete build fails here
+rather than being discovered by whoever downloads it.
 
 ## Repository layout
 
