@@ -2019,3 +2019,43 @@ Consequence: a byte-preserving decode is the right FALLBACK for a page the machi
 because it carries unedited lines through unchanged, and the wrong DEFAULT for anything compared
 with text or written from it. The package says its page; the export is in the system's; both are
 used (`AnsiText`), and the tests hold the two ranges Latin-1 gets wrong.
+
+## 72. Access will not run a module the same call injected, and saving it makes things worse
+
+The test runner had never run a test in Access. Three causes were real and are
+fixed: the walk that finds a host's document window knew only Excel and Word,
+so the host could not be reached at all; Access's `Application.Run` takes a
+bare procedure name and refuses both Excel's `'file'!Module.Proc` and Word's
+`Module.Proc`; and Access writes `Option Compare Database` into every module it
+creates, which made the support module it had just installed compare unequal to
+the canonical source, so the pane said "outdated" for ever.
+
+The fourth is not a spelling and is written down here because two plausible
+fixes were measured and both fail.
+
+Access will not resolve a procedure in a module that the same uninterrupted
+host-thread call injected. The byte-for-byte identical module staged through
+the api door - two requests, with the host's loop turning between them - runs
+and returns its JSON. Staged and called in one block, the host answers
+"Microsoft Access cannot find the procedure" about a module the same call can
+read back line by line, whose name and line count it will confirm.
+
+`DoCmd.Save` looks like the answer and is not. Logged either side of the call,
+the module is absent from `CurrentProject.AllModules` before and present after,
+and the save reports success - so being a database object is genuinely not what
+makes a procedure resolvable. Worse, the run removes its generated modules when
+it ends, and a saved-then-removed module leaves Access holding a catalogue
+entry for something that is gone: the next open of that database raises "File
+not found" from VBA before anything else can run. One afternoon's experiment
+did that to a real test database. Nothing may save a transient module.
+
+Pumping the host's message loop after staging fails too: a bounded pump
+dispatched thirty messages and the host still refused, so the registration is
+not a queued notification and nothing done inside the call substitutes for the
+call returning.
+
+Consequence: the fix is a change to how a run is DRIVEN, not a step added to
+it - staging and calling have to be separate crossings into the host, which
+the door's one-crossing-per-route dispatch does not currently allow. Until
+then, everything else in Access works: the tree, the Immediate window,
+discovery, and the support module.
