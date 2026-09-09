@@ -49,6 +49,42 @@ public sealed class GitLocatorTests
         Assert.Equal([@"C:\Quoted Dir\git.exe", @"C:\Trailing\git.exe"], candidates);
     }
 
+    [Fact]
+    public void TheLauncherHandsOffToTheRealBinaryWhichIsStartedDirectly()
+    {
+        // The usual machine: PATH holds Git\cmd, whose git.exe is git-wrapper.exe.
+        var real = GitLocator.RealBinary(
+            @"C:\Program Files\Git\cmd\git.exe",
+            (path) => path == @"C:\Program Files\Git\mingw64\bin\git.exe");
+
+        Assert.Equal(@"C:\Program Files\Git\mingw64\bin\git.exe", real);
+        Assert.Equal(
+            [@"C:\Program Files\Git\mingw64\bin", @"C:\Program Files\Git\usr\bin"],
+            GitLocator.WrapperPath(real!));
+    }
+
+    [Fact]
+    public void AThirtyTwoBitInstallHandsOffToMingw32AndBinIsALauncherToo()
+    {
+        var real = GitLocator.RealBinary(
+            @"C:\Program Files (x86)\Git\bin\git.exe",
+            (path) => path == @"C:\Program Files (x86)\Git\mingw32\bin\git.exe");
+
+        Assert.Equal(@"C:\Program Files (x86)\Git\mingw32\bin\git.exe", real);
+    }
+
+    [Fact]
+    public void AGitThatIsNotALauncherIsUsedAsFound()
+    {
+        // A git.exe under some other folder name, and the real binary itself when it is what
+        // PATH names: neither is a launcher, and neither has a mingw folder above it to hand
+        // off to.
+        Assert.Null(GitLocator.RealBinary(@"C:\tools\git\git.exe", (_) => true));
+        Assert.Null(GitLocator.RealBinary(
+            @"C:\Program Files\Git\mingw64\bin\git.exe",
+            (path) => path == @"C:\Program Files\Git\mingw64\bin\git.exe"));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

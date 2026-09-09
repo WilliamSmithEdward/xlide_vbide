@@ -251,6 +251,16 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   logged with its arguments, exit code and elapsed time.
 - git.exe is found on PATH, then in Git for Windows' three standard locations. Absent, the state is
   `noGit` and the pane's empty state names the download; nothing else in the product changes.
+  Found as Git for Windows' `cmd\git.exe` (or `bin\git.exe`), which is a launcher that starts
+  the real `mingw64\bin\git.exe` as a second process on every call, the real binary is started
+  directly, with the launcher's PATH additions and `MSYSTEM` set the same way so ssh and the
+  credential manager are found exactly as before. The launcher was 7 of every 18 milliseconds a
+  git call cost (2026-09-09).
+- The repository root is remembered per folder once `rev-parse` has answered it, trusted while
+  its `.git` is still there and none has appeared in the folder itself; the identity is one
+  `config --get-regexp` read only by the actions that need it, the remotes are read only when
+  asked for, and a commit's parents ride the log format (`%P`), so the head's undo question costs
+  no process of its own.
 - Writes into the project go through `WriteModule` with the change log's restore bracket, so every
   checkout, import and restore is a round. Exports go through `ModuleSyncService.Apply` under the
   folder lock with the built-in planner, so the files are what the sync dialog writes.
@@ -293,6 +303,17 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   with the remote in front and checked out with an explicit `--track`, because a bare
   `git checkout origin/name` detaches and the bare name's do-what-I-mean fails as soon as two
   remotes hold it.
+- **A refresh is 121 ms of git, from 305** (the same day, [lessons.md](lessons.md) finding 76).
+  A status was ten processes and the history read after it five, four of them the same fixed
+  overhead; Git for Windows' launcher was a third of every one. The binary is started directly,
+  the root is remembered, the identity is one read for the actions that need it, the remotes are
+  read when asked for, the parents ride the log, and the gather reads one module for the actions
+  about one module. The suite holds the counts.
+- **The branch select acts on a pick, not on every keystroke.** A closed select fires change
+  on each arrow key and typed letter, and each was a checkout with an import; a walk now settles
+  on Enter or on the select losing focus, and Escape puts it back. A ref, name, email, URL or
+  remote beginning with a dash is refused before git could read it as an option, and an undone
+  commit's open comparison and unfolded state go with it.
 
 - **An import writes one line terminator fewer than the file carries.** The export appends a
   newline to a module's text, as a text file should, and the applier wrote the file's whole body

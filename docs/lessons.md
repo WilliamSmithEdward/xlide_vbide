@@ -2166,3 +2166,51 @@ start asks whether to start in safe mode, a modal the launcher could not see
 past; it is asked once, so the launcher stops that instance by id and starts
 again. And `release.ps1` runs the bare gate: the live half, which is what
 found both of these, has to be run by hand before the tag.
+
+## 76. A status was ten git processes, and a third of each was a launcher
+
+A hunt over the Source Control pane on 2026-09-09 started by measuring
+rather than reading. A probe pointed the fixture at a scratch repository and
+timed each request against the shim log, which records every git call with
+its elapsed time. A status was 205 ms: ten git processes at about 20 ms
+each, 194 ms of process spawns, and 11 ms of everything else - the COM walk
+over the modules, the parsing, the hop between threads. The history read the
+pane makes after every status was 100 ms and five processes, four of them
+the same fixed overhead the status paid: the repository root, the identity
+read twice, the remotes. A refresh of the pane was 300 ms of spawning git,
+and the work inside the processes was a rounding error.
+
+Where the time went, and what changed:
+
+- `cmd\git.exe`, the git on PATH on nearly every Windows machine, is
+  git-wrapper.exe: it sets up an environment and starts `mingw64\bin\git.exe`
+  as a second process. Timed twenty times each, the launcher took 18 ms per
+  call and the binary 11. The binary is started directly now, with the
+  launcher's PATH additions and `MSYSTEM` set the same way; the credential
+  manager resolves from the binary even with a bare PATH, which was checked
+  before the change rather than assumed.
+- The root (`rev-parse --show-toplevel`) is remembered per folder, trusted
+  while its `.git` is still there and none has appeared in the folder itself.
+- The identity was two `config --get` calls; `--get-regexp` is one, and it
+  runs only for the actions that need it - the status word and commit.
+- `remote -v` ran for every action; it is read when asked for.
+- The head's parents, which the undo question needs, ride the log format as
+  `%P` instead of a `rev-list` of their own.
+- The gather read every module's text through COM for every action; log,
+  diff, show, blame and restore are about one module at most, and now read
+  only that one - which was the whole cost of the history read after each
+  status for a large project.
+
+After: a status is 104 ms and seven processes, at 13 ms each; the history
+read is 17 ms and one process; diff 103 to 17, blame 142 to 45. The pane's
+refresh went from 305 ms to 121. The suite holds the counts - a status at
+most seven processes, a log exactly one, and git named as the binary rather
+than the launcher - because a count is what a regression here looks like.
+
+Two bugs from the same pass. A closed `<select>` fires change on every arrow
+key and every typed letter, and picking a branch is a checkout with an
+import, so a keyboard walk down the list was a checkout per keystroke; a
+change the keyboard walked to now waits for Enter or the select losing
+focus, and Escape puts it back. And a ref, name, email, url or remote that
+begins with a dash would have reached git as an option - `ref=--detach` was
+a detached head - so they are refused before git sees them.

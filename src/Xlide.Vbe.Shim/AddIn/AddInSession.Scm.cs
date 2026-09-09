@@ -524,9 +524,17 @@ internal sealed partial class AddInSession
         // The live modules, read AFTER anything above rewrote them, and after the typing has
         // reached them. The object model is apartment bound, so this walk is the reason the
         // gather runs here at all; everything after it is strings.
+        //
+        // THE WHOLE PROJECT ONLY WHEN THE ANSWER NEEDS IT. The status compares every module with
+        // the branch head, so every action that answers it - and commit, import and undo - reads
+        // them all. log, diff, show, blame and restore are about one module at most, and reading
+        // the rest through COM on the host thread for them made the pane's history read, which
+        // follows every status, cost as much as the status.
+        var oneModuleAtMost = action is "log" or "diff" or "show" or "blame" or "restore";
         var live = new List<ScmLiveModule>();
-        if (folder.Length > 0 && !unsaved)
+        if (folder.Length > 0 && !unsaved && !(oneModuleAtMost && string.IsNullOrEmpty(module)))
         {
+            var walkBegan = Stopwatch.GetTimestamp();
             using var project = FindProjectByDisplayName(projectId);
             if (project is null)
             {
@@ -541,7 +549,8 @@ internal sealed partial class AddInSession
             {
                 using var component = components!.GetItem(i);
                 var componentName = component?.GetString("Name");
-                if (component is null || string.IsNullOrEmpty(componentName))
+                if (component is null || string.IsNullOrEmpty(componentName)
+                    || (oneModuleAtMost && !string.Equals(componentName, module, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
@@ -551,6 +560,9 @@ internal sealed partial class AddInSession
                     ProjectReader.TypeName(component.GetInt32("Type")),
                     ProjectReader.ReadSource(component) ?? string.Empty));
             }
+
+            Log.Info($"scm: {action} gathered {live.Count} of {count} module(s) of {display} in "
+                + $"{(long)Stopwatch.GetElapsedTime(walkBegan).TotalMilliseconds}ms");
         }
 
         var log = ChangeLogFor(projectId);
@@ -654,10 +666,19 @@ internal sealed partial class AddInSession
 
     /// <summary>
     /// A git repository as one request sees it: where it is, how the folder sits inside it, and
-    /// who commits are signed by.
+    /// - read only when an action asks, because each is a process and most actions never do -
+    /// who commits are signed by and where pushes go.
     /// </summary>
     private sealed record ScmRepo(
-        GitClient Git, string Root, string Rel, ScmIdentityReply? Identity, IReadOnlyList<GitRemote> Remotes);
+        GitClient Git, string Root, string Rel, Lazy<ScmIdentityReply?> Identity, Lazy<IReadOnlyList<GitRemote>> Remotes);
+
+    /// <summary>
+    /// The repository root remembered per folder, because `rev-parse --show-toplevel` was a
+    /// process on every request and the answer moves only when a repository is made or unmade.
+    /// Both doors' pool threads read it.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _scmRoots =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private static GitResult Git(GitClient git, string directory, TimeSpan deadline, params string[] args) =>
         git.RunAsync(directory, args, deadline).GetAwaiter().GetResult();
@@ -669,9 +690,13 @@ internal sealed partial class AddInSession
     /// </summary>
     private ScmWork RunScm(ScmGather gathered)
     {
+        var began = Stopwatch.GetTimestamp();
         try
         {
-            return RunScmCore(gathered);
+            var work = RunScmCore(gathered);
+            Log.Info($"scm: {gathered.Action} for {gathered.Display} worked in "
+                + $"{(long)Stopwatch.GetElapsedTime(began).TotalMilliseconds}ms");
+            return work;
         }
         catch (Exception ex)
         {
@@ -685,6 +710,16 @@ internal sealed partial class AddInSession
 
     private ScmWork RunScmCore(ScmGather g)
     {
+        // A value that begins with a dash would reach git as an option rather than as a ref, a
+        // name or an address - `checkout --detach` from ref=--detach - so none is let through.
+        foreach (var (value, what) in new[] { (g.Ref, "ref"), (g.Name, "name"), (g.Email, "email"), (g.Url, "url"), (g.Remote, "remote") })
+        {
+            if (value?.TrimStart().StartsWith('-') == true)
+            {
+                return Answer(g, ScmError($"{what}= cannot begin with a dash; git would read it as an option"));
+            }
+        }
+
         var answersStatus = ActionAnswersStatus(g.Action);
         var git = GitNow();
         var version = git?.Version ?? string.Empty;
@@ -791,8 +826,9 @@ internal sealed partial class AddInSession
         }
 
         var repo = new ScmRepo(
-            git, root, rel, ReadIdentity(git, root),
-            GitRemotes.Parse(Git(git, root, GitDeadline, "remote", "-v").StdOut));
+            git, root, rel,
+            new Lazy<ScmIdentityReply?>(() => ReadIdentity(git, root)),
+            new Lazy<IReadOnlyList<GitRemote>>(() => GitRemotes.Parse(Git(git, root, GitDeadline, "remote", "-v").StdOut)));
 
         switch (g.Action)
         {
@@ -813,7 +849,7 @@ internal sealed partial class AddInSession
 
             case "fetch" or "pull" or "push":
             {
-                var primary = GitRemotes.Primary(repo.Remotes);
+                var primary = GitRemotes.Primary(repo.Remotes.Value);
                 if (primary is null)
                 {
                     return Answer(g, ScmError($"{g.Action} needs a remote, and {root} has none; attach one with the "
@@ -923,21 +959,38 @@ internal sealed partial class AddInSession
             string.Empty, string.Empty, string.Empty, 0, 0, g.Dirty, null, [], [], [], [], null, string.Empty,
             string.Empty, g.SuggestedFolder, ScmWords.Covers);
 
-    /// <summary>The repository root above a folder, or null when no repository holds it.</summary>
-    private static string? RootOf(GitClient git, string folder)
+    /// <summary>
+    /// The repository root above a folder, or null when no repository holds it. A root once
+    /// answered is trusted while its `.git` is still there and none has appeared in the folder
+    /// itself since - a repository unmade, or one made in the folder by this product's own
+    /// Initialize or by hand, is what changes the answer, and either shows in one of those two
+    /// places. A repository made by hand at a level BETWEEN the folder and its root would not,
+    /// which is a nesting nothing here makes and a case the next restart puts right.
+    /// </summary>
+    private string? RootOf(GitClient git, string folder)
     {
         if (!Directory.Exists(folder))
         {
             return null;
         }
 
+        if (_scmRoots.TryGetValue(folder, out var remembered)
+            && Path.Exists(Path.Combine(remembered, ".git"))
+            && (SamePath(remembered, folder) || !Path.Exists(Path.Combine(folder, ".git"))))
+        {
+            return remembered;
+        }
+
         var answered = Git(git, folder, GitDeadline, "rev-parse", "--show-toplevel");
         if (!answered.Ok || answered.StdOut.Trim().Length == 0)
         {
+            _scmRoots.TryRemove(folder, out _);
             return null;
         }
 
-        return Path.GetFullPath(answered.StdOut.Trim().Replace('/', '\\'));
+        var root = Path.GetFullPath(answered.StdOut.Trim().Replace('/', '\\'));
+        _scmRoots[folder] = root;
+        return root;
     }
 
     private static string Initialise(GitClient git, string folder)
@@ -984,11 +1037,34 @@ internal sealed partial class AddInSession
 
     private static ScmIdentityReply? ReadIdentity(GitClient git, string root)
     {
-        var name = Git(git, root, GitDeadline, "config", "--get", "user.name");
-        var email = Git(git, root, GitDeadline, "config", "--get", "user.email");
-        return name.Ok && email.Ok && name.StdOut.Trim().Length > 0 && email.StdOut.Trim().Length > 0
-            ? new ScmIdentityReply(name.StdOut.Trim(), email.StdOut.Trim())
-            : null;
+        // One process for both. `--get-regexp` prints every match in the order git reads its
+        // files - system, global, then the repository's own - so the last line for a key is the
+        // value in force, and exits 1 with neither key set.
+        var read = Git(git, root, GitDeadline, "config", "--get-regexp", "^user\\.(name|email)$");
+        string? name = null;
+        string? email = null;
+        foreach (var raw in read.StdOut.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            var cut = line.IndexOf(' ', StringComparison.Ordinal);
+            if (cut <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..cut];
+            var value = line[(cut + 1)..].Trim();
+            if (key == "user.name")
+            {
+                name = value;
+            }
+            else if (key == "user.email")
+            {
+                email = value;
+            }
+        }
+
+        return name is { Length: > 0 } && email is { Length: > 0 } ? new ScmIdentityReply(name, email) : null;
     }
 
     private static string RepoPath(string rel, string file) => rel == "." ? file : $"{rel}/{file}";
@@ -1057,7 +1133,8 @@ internal sealed partial class AddInSession
         return files;
     }
 
-    private static ScmLastCommitReply? LastCommit(ScmRepo repo)
+    /// <summary>The last commit that touched the folder, parents and all; null before the first.</summary>
+    private static GitCommit? LastCommit(ScmRepo repo)
     {
         var logged = Git(repo.Git, repo.Root, GitDeadline,
             "log", "-1", $"--format={GitArguments.LogFormat}", "--name-status", "-M", "--", repo.Rel);
@@ -1067,10 +1144,11 @@ internal sealed partial class AddInSession
         }
 
         var commits = GitLog.Parse(logged.StdOut);
-        return commits.Count == 0
-            ? null
-            : new ScmLastCommitReply(commits[0].Hash, ShortOf(commits[0].Hash), commits[0].Author, commits[0].When, commits[0].Subject);
+        return commits.Count == 0 ? null : commits[0];
     }
+
+    private static ScmLastCommitReply? LastCommitReply(GitCommit? last) =>
+        last is null ? null : new ScmLastCommitReply(last.Hash, ShortOf(last.Hash), last.Author, last.When, last.Subject);
 
     private static ScmRowReply RowOf(ScmRow row) => new(row.Module, row.Kind, row.File, row.Status, row.From);
 
@@ -1089,23 +1167,24 @@ internal sealed partial class AddInSession
         var outside = ScmRows.Outside(g.Live, FolderFiles(g.Folder));
         var conflicts = state.Conflicts.Select(path => Path.GetFileName(path)).ToArray();
 
-        var word = repo.Identity is null ? "noIdentity"
+        var identity = repo.Identity.Value;
+        var word = identity is null ? "noIdentity"
             : conflicts.Length > 0 ? "conflicted"
             : "ready";
-        var primary = GitRemotes.Primary(repo.Remotes);
+        var primary = GitRemotes.Primary(repo.Remotes.Value);
         var last = LastCommit(repo);
 
         return new ScmStatusReply(
             detail, g.Display, g.ProjectId, word, g.Folder, repo.Root, repo.Git.Version,
             state.Head, state.Oid ?? string.Empty, state.Upstream ?? string.Empty,
             primary?.Name ?? string.Empty, primary?.Url ?? string.Empty,
-            state.Ahead, state.Behind, g.Dirty, repo.Identity,
+            state.Ahead, state.Behind, g.Dirty, identity,
             [.. rows.Select(RowOf)],
             [.. outside.Select(RowOf)],
             [.. branches.Select(branch => new ScmBranchRow(branch.Name, branch.Current, branch.Upstream, branch.Remote ?? string.Empty))],
             conflicts,
-            last,
-            UndoBlocker(repo, state, last),
+            LastCommitReply(last),
+            UndoBlocker(state, last),
             CommitMessage.Suggest(g.Rounds),
             g.SuggestedFolder,
             ScmWords.Covers);
@@ -1119,7 +1198,7 @@ internal sealed partial class AddInSession
     /// make the branch diverge. Read with every status, so the pane's button can say why it is
     /// grey rather than refuse when pressed.
     /// </summary>
-    private static string UndoBlocker(ScmRepo repo, GitBranchState state, ScmLastCommitReply? last)
+    private static string UndoBlocker(GitBranchState state, GitCommit? last)
     {
         if (state.Oid is not { Length: > 0 } head)
         {
@@ -1132,15 +1211,13 @@ internal sealed partial class AddInSession
             return $"the branch head {shortHead} did not touch this folder; undo it with git";
         }
 
-        // "hash parent [parent]": the parents are what follows the hash.
-        var parents = Git(repo.Git, repo.Root, GitDeadline, "rev-list", "--parents", "-n", "1", "HEAD").StdOut.Trim()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries).Length - 1;
-        if (parents <= 0)
+        // The parents rode the log that read the commit, so this costs no process of its own.
+        if (last.Parents.Count == 0)
         {
             return $"{shortHead} is the first commit; there is nothing before it to go back to";
         }
 
-        if (parents > 1)
+        if (last.Parents.Count > 1)
         {
             return $"{shortHead} is a merge; undo it with git";
         }
@@ -1329,7 +1406,7 @@ internal sealed partial class AddInSession
 
     private static ScmWork CommitWork(ScmGather g, ScmRepo repo, ScmStatusReply status)
     {
-        if (repo.Identity is null)
+        if (repo.Identity.Value is null)
         {
             return Answer(g, ScmStatusJson(status with { Detail = "set the name and email commits are signed with first" }), repo.Root);
         }
@@ -1580,7 +1657,7 @@ internal sealed partial class AddInSession
             kind, hash, reference);
     }
 
-    private static ScmWork CheckoutWork(ScmGather g, ScmRepo repo)
+    private ScmWork CheckoutWork(ScmGather g, ScmRepo repo)
     {
         if (g.Ref is not { Length: > 0 })
         {

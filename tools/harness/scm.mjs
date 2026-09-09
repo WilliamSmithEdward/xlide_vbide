@@ -353,6 +353,28 @@ try {
   check("and keeps it for the next load", divider.kept, ceiling);
   await api.act("scmPane", { width: 300 });
 
+  // ---- what a read costs, in git processes -----------------------------------------------------
+  //
+  // Measured 2026-09-09: a status ran ten git processes at about 20ms each and the history read
+  // that follows it five, four of them the same fixed overhead - the root, the identity twice,
+  // the remotes - so the pane's refresh was 300ms of process spawns. The root is remembered, the
+  // identity is one read made only by the actions that need it, the remotes are read only when
+  // asked for, the parents ride the log, and Git for Windows' launcher is skipped for the binary
+  // it starts. These ceilings are what that bought; a regression shows as a count. Measured in a
+  // quiet moment, because the pane's own follow-up reads would count too.
+  const gitCalls = async (args) => {
+    const since = (await api.log({ max: 1 })).next;
+    await scm(args);
+    return ((await api.log({ since, match: "scm: git " })).lines ?? []).filter((line) => /-> exit/.test(line)).length;
+  };
+  await paneIdle();
+  await sleep(2000);
+  await gitCalls({});
+  check("a status is at most seven git processes", (await gitCalls({})) <= 7, true);
+  check("and a history read is one", await gitCalls({ action: "log" }), 1);
+  const located = ((await api.log({ match: "scm: git at " })).lines ?? []).at(-1) ?? "";
+  check("and git is started directly, not through Git for Windows' launcher", /\\cmd\\git\.exe \(/i.test(located), false);
+
   const tickedOn = await api.act("scmPane", { tick: "Ledger", on: true });
   const tickedOff = await api.act("scmPane", { tick: "Reports", on: false });
   check("rows tick and untick from the pane", [tickedOn.did, tickedOff.did], [true, true]);

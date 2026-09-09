@@ -17,16 +17,16 @@ public sealed class GitLogTests
     /// paragraphs and a trailing colon, and a root commit adding two files.
     /// </summary>
     private const string ThreeCommits = """
-        <RS>26b56c1d18902dafcc582ce7fde57d8c71d4635f<NUL>26b56c1<NUL>Ada Lovelace<NUL>ada@example.test<NUL>2026-09-03T11:30:00+02:00<NUL>Ledger is Books now<NUL><US>
+        <RS>26b56c1d18902dafcc582ce7fde57d8c71d4635f<NUL>26b56c1<NUL>Ada Lovelace<NUL>ada@example.test<NUL>2026-09-03T11:30:00+02:00<NUL>Ledger is Books now<NUL><NUL>92eb6bb31205a76e71dacb0a49eb8aefe2d9c319<US>
 
         R077<TAB>Ledger.bas<TAB>Books.bas
         <RS>92eb6bb31205a76e71dacb0a49eb8aefe2d9c319<NUL>92eb6bb<NUL>Ada Lovelace<NUL>ada@example.test<NUL>2026-09-02T10:00:00+01:00<NUL>Ledger posts and closes<NUL>The body has two paragraphs.
 
         This is the second, with a trailing colon:
-        <US>
+        <NUL>01571f56966ec45e571e2062667336765c0fdbf0<US>
 
         M<TAB>Ledger.bas
-        <RS>01571f56966ec45e571e2062667336765c0fdbf0<NUL>01571f5<NUL>Ada Lovelace<NUL>ada@example.test<NUL>2026-09-01T09:15:00+01:00<NUL>Ledger and Account arrive<NUL><US>
+        <RS>01571f56966ec45e571e2062667336765c0fdbf0<NUL>01571f5<NUL>Ada Lovelace<NUL>ada@example.test<NUL>2026-09-01T09:15:00+01:00<NUL>Ledger and Account arrive<NUL><NUL><US>
 
         A<TAB>Account.cls
         A<TAB>Ledger.bas
@@ -52,10 +52,10 @@ public sealed class GitLogTests
         is hundreds of milliseconds rather than tens.
 
         No product code changed, so v0.14.2 as released is unaffected.
-        <US>
+        <NUL>a3a4f516222e4b94a922baae5ed54079b469ae37<US>
 
         M<TAB>tests/Xlide.Vbe.Core.Tests/RecordCostTests.cs
-        <RS>a3a4f516222e4b94a922baae5ed54079b469ae37<NUL>a3a4f51<NUL>William Smith<NUL>williamsmithe@icloud.com<NUL>2026-09-06T13:58:43-07:00<NUL>Version 0.14.2<NUL><US>
+        <RS>a3a4f516222e4b94a922baae5ed54079b469ae37<NUL>a3a4f51<NUL>William Smith<NUL>williamsmithe@icloud.com<NUL>2026-09-06T13:58:43-07:00<NUL>Version 0.14.2<NUL><NUL>35866d03747204b0cc784aff72a62ff19f787d63<US>
 
         M<TAB>Directory.Build.props
         M<TAB>docs/status.md
@@ -67,7 +67,7 @@ public sealed class GitLogTests
         builds Release while the harness and every live suite need a Debug build for
         the api door, or that the fixtures the live tiers drive are build output with
         a generator each.
-        <US>
+        <NUL>76ea3fc6b29861abd855ea109459bad6c38c5224<US>
 
         M<TAB>README.md
 
@@ -83,7 +83,7 @@ public sealed class GitLogTests
     [Fact]
     public void TheFormatAndThePrefixAreWhatTheParserWasWrittenAgainst()
     {
-        Assert.Equal("%x1e%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b%x1f", GitArguments.LogFormat);
+        Assert.Equal("%x1e%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b%x00%P%x1f", GitArguments.LogFormat);
         Assert.Equal(
             ["--no-pager", "-c", "core.quotepath=false", "-c", "color.ui=never"],
             GitArguments.Prefix);
@@ -104,6 +104,32 @@ public sealed class GitLogTests
         Assert.Equal("Ledger is Books now", newest.Subject);
         Assert.Equal(string.Empty, newest.Body);
         Assert.Equal(["01571f5"], commits.Skip(2).Select(one => one.ShortHash));
+    }
+
+    [Fact]
+    public void ParentsRideTheLogAndARootCommitHasNone()
+    {
+        var commits = GitLog.Parse(Captured(ThreeCommits));
+
+        // After a body with a trailing newline and after none at all, the field is the same one.
+        Assert.Equal(["92eb6bb31205a76e71dacb0a49eb8aefe2d9c319"], commits[0].Parents);
+        Assert.Equal(["01571f56966ec45e571e2062667336765c0fdbf0"], commits[1].Parents);
+        Assert.Empty(commits[2].Parents);
+    }
+
+    [Fact]
+    public void AMergeCommitListsBothParents()
+    {
+        var output = Captured(
+            "<RS>0123456789abcdef0123456789abcdef01234567<NUL>0123456<NUL>Ada<NUL>ada@example.test"
+            + "<NUL>2026-09-01T09:15:00+01:00<NUL>Merge branch 'topic'<NUL><NUL>"
+            + "fedcba9876543210fedcba9876543210fedcba98 89abcdef0123456789abcdef0123456789abcdef<US>\n");
+
+        var merge = Assert.Single(GitLog.Parse(output));
+        Assert.Equal(
+            ["fedcba9876543210fedcba9876543210fedcba98", "89abcdef0123456789abcdef0123456789abcdef"],
+            merge.Parents);
+        Assert.Empty(merge.Files);
     }
 
     [Fact]
@@ -183,6 +209,7 @@ public sealed class GitLogTests
         var commit = Assert.Single(GitLog.Parse(output));
         Assert.Equal("Only a subject", commit.Subject);
         Assert.Equal(string.Empty, commit.Body);
+        Assert.Empty(commit.Parents);
         Assert.Equal("D", Assert.Single(commit.Files).Status);
     }
 
@@ -195,11 +222,12 @@ public sealed class GitLogTests
         var output = Captured(
             "<RS>0123456789abcdef0123456789abcdef01234567<NUL>0123456<NUL>Ada<NUL>ada@example.test"
             + "<NUL>2026-09-01T09:15:00+01:00<NUL>Control characters<NUL>before-us<US>after-us\n"
-            + "before-rs<RS>after-rs\n<US>\n\nM<TAB>Ledger.bas\n");
+            + "before-rs<RS>after-rs\n<NUL>fedcba9876543210fedcba9876543210fedcba98<US>\n\nM<TAB>Ledger.bas\n");
 
         var commit = Assert.Single(GitLog.Parse(output));
         Assert.Equal("Control characters", commit.Subject);
         Assert.Equal(Captured("before-us<US>after-us\nbefore-rs<RS>after-rs"), commit.Body);
+        Assert.Equal(["fedcba9876543210fedcba9876543210fedcba98"], commit.Parents);
         Assert.Equal("M", Assert.Single(commit.Files).Status);
     }
 }

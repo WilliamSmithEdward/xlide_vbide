@@ -15,11 +15,15 @@ public sealed record GitFileChange(string Status, string Path, string? FromPath)
 /// <param name="Body">
 /// The message below the subject, without its trailing newline; empty when there is none.
 /// </param>
+/// <param name="Parents">
+/// The parent hashes as git prints %P: none for a root commit, two for a merge. Read with the
+/// log so the head's undo question costs no process of its own.
+/// </param>
 public sealed record GitCommit(
     string Hash,
     string ShortHash,
     string Author, string Email, string When, string Subject,
-    string Body, IReadOnlyList<GitFileChange> Files);
+    string Body, IReadOnlyList<GitFileChange> Files, IReadOnlyList<string> Parents);
 
 /// <summary>Reads `git log --format=&lt;LogFormat&gt; --name-status -M` output.</summary>
 public static class GitLog
@@ -67,7 +71,8 @@ public static class GitLog
                 At(fields, 4).Trim(),
                 At(fields, 5),
                 At(fields, 6).TrimEnd('\n', '\r'),
-                ParseNameStatus(trailer)));
+                ParseNameStatus(trailer),
+                At(fields, 7).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
         }
 
         return commits;

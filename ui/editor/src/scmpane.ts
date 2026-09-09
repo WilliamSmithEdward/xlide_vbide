@@ -444,7 +444,16 @@ export class ScmPane {
     // so a refused checkout (a dirty workbook) leaves it showing the branch that is still current.
     // The last entry is not a branch: the select goes back to the one that is, and a card asks
     // for the new one's name.
-    this.branch.addEventListener("change", () => {
+    //
+    // NOT ON EVERY ARROW KEY. A closed select fires change for each arrow press and each typed
+    // letter, and each would have been a checkout and an import (a review, 2026-09-09). So a
+    // change the keyboard walked to waits until Enter, or the select losing focus, says the walk
+    // is over, and Escape puts the select back; a pick with the mouse, or from the opened list,
+    // acts at once.
+    let walking = false;
+    let pending = false;
+    const act = (): void => {
+      pending = false;
       const ref = this.branch.value;
       if (ref === NEW_BRANCH) {
         this.branch.value = this.state?.branch ?? "";
@@ -454,6 +463,40 @@ export class ScmPane {
 
       if (ref && ref !== this.state?.branch) {
         void this.run({ action: "checkout", ref });
+      }
+    };
+    this.branch.addEventListener("mousedown", () => {
+      walking = false;
+    });
+    this.branch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " " || (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowUp"))) {
+        // Enter settles a walk; Space and Alt+Arrow open the list, whose pick is deliberate.
+        walking = false;
+        if (event.key === "Enter" && pending) {
+          event.preventDefault();
+          act();
+        }
+      } else if (event.key === "Escape") {
+        if (pending) {
+          pending = false;
+          this.branch.value = this.state?.branch ?? "";
+        }
+      } else if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End"
+        || event.key === "PageUp" || event.key === "PageDown" || (event.key.length === 1 && !event.ctrlKey && !event.metaKey)) {
+        walking = true;
+      }
+    });
+    this.branch.addEventListener("change", () => {
+      if (walking) {
+        pending = true;
+        return;
+      }
+
+      act();
+    });
+    this.branch.addEventListener("blur", () => {
+      if (pending) {
+        act();
       }
     });
 
@@ -615,6 +658,15 @@ export class ScmPane {
         if (args.action === "undo" && typeof answer.message === "string") {
           this.fillMessage(answer.message);
           this.lastSuggested = "";
+
+          // A comparison of a file at the undone commit, and the commit's unfolded state, are
+          // about a commit the branch no longer has.
+          const gone = asString(answer.short);
+          this.opened.delete(gone);
+          if (this.showing?.kind === "file" && this.showing.short === gone) {
+            this.showing = null;
+            this.shownRows = null;
+          }
         }
 
         // An action's own words are worth showing; a bare read's "ready" is not.
@@ -1515,6 +1567,7 @@ export class ScmPane {
     }
 
     const from = this.state.branch || "the current commit";
+    const at = this.state.head ? "at the same commit" : "before any commit";
     const { card, dismiss } = openModal({
       backdropId: "scm-branch-backdrop",
       cardId: "scm-branch-card",
@@ -1529,7 +1582,7 @@ export class ScmPane {
     const said = document.createElement("div");
     said.id = "scm-branch-consequence";
     said.className = "modal-detail";
-    said.textContent = `Cut from ${from}, at the same commit: the modules stay as they are, only the branch under `
+    said.textContent = `Cut from ${from}, ${at}: the modules stay as they are, only the branch under `
       + "them is new. The first push sets its upstream.";
     card.setAttribute("aria-describedby", said.id);
 

@@ -40,16 +40,24 @@ internal sealed class GitClient
 {
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    private GitClient(string executablePath, string version)
+    private GitClient(string executablePath, string version, IReadOnlyList<string> pathPrefix)
     {
         ExecutablePath = executablePath;
         Version = version;
+        PathPrefix = pathPrefix;
     }
 
     public string ExecutablePath { get; }
 
     /// <summary>What `git --version` printed, e.g. "git version 2.55.0.windows.5".</summary>
     public string Version { get; }
+
+    /// <summary>
+    /// The folders put at the head of PATH for every call: what Git for Windows' launcher would
+    /// have done before starting the binary this client starts directly. Empty when the git
+    /// found is not that launcher.
+    /// </summary>
+    public IReadOnlyList<string> PathPrefix { get; }
 
     /// <summary>
     /// Finds git.exe once per session: every PATH entry, then Git for Windows' three standard
@@ -71,18 +79,28 @@ internal sealed class GitClient
             return null;
         }
 
-        var probe = new GitClient(found, string.Empty);
+        // THE BINARY, NOT THE LAUNCHER. Git for Windows' cmd\git.exe starts a process that
+        // starts git, and this product runs git ten times per status: the launcher's process was
+        // 7 of every 18 milliseconds (measured 2026-09-09). The real binary is started with the
+        // PATH the launcher would have given it, so ssh and the credential manager are found
+        // exactly as before.
+        var real = GitLocator.RealBinary(found, File.Exists);
+        var exe = real ?? found;
+        var prefix = real is null ? [] : GitLocator.WrapperPath(real);
+
+        var probe = new GitClient(exe, string.Empty, prefix);
         try
         {
             var version = probe.RunAsync(Path.GetTempPath(), ["--version"], TimeSpan.FromSeconds(20))
                 .GetAwaiter().GetResult();
             var words = version.StdOut.Trim();
-            Log.Info($"scm: git at {found} ({(words.Length > 0 ? words : "version unknown")})");
-            return new GitClient(found, words.Length > 0 ? words : "git");
+            Log.Info($"scm: git at {exe} ({(words.Length > 0 ? words : "version unknown")})"
+                + (real is null ? string.Empty : $", started directly rather than through {found}"));
+            return new GitClient(exe, words.Length > 0 ? words : "git", prefix);
         }
         catch (Exception ex)
         {
-            Log.Warn($"scm: git at {found} would not run ({ex.Message.Trim()})");
+            Log.Warn($"scm: git at {exe} would not run ({ex.Message.Trim()})");
             return null;
         }
     }
@@ -125,6 +143,16 @@ internal sealed class GitClient
         // the harness match.
         startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
         startInfo.Environment["LC_ALL"] = "C";
+
+        if (PathPrefix.Count > 0)
+        {
+            // What the launcher does before starting this binary: its bin folders first on PATH,
+            // for ssh and the other tools git may start, and the MSYS system name those read.
+            startInfo.Environment["PATH"] = string.Join(
+                Path.PathSeparator, [.. PathPrefix, Environment.GetEnvironmentVariable("PATH") ?? string.Empty]);
+            startInfo.Environment["MSYSTEM"] =
+                ExecutablePath.Contains("mingw32", StringComparison.OrdinalIgnoreCase) ? "MINGW32" : "MINGW64";
+        }
 
         var began = Stopwatch.GetTimestamp();
         using var process = Process.Start(startInfo)

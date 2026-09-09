@@ -20,5 +20,5 @@ public static class GitArguments
     /// a body can hold anything a developer types - blank lines, tabs, a line that looks like a
     /// name-status row - and only characters no commit message can contain make safe delimiters.
     /// </summary>
-    public const string LogFormat = "%x1e%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b%x1f";
+    public const string LogFormat = "%x1e%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b%x00%P%x1f";
 }
