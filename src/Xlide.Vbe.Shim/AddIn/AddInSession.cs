@@ -2650,6 +2650,20 @@ internal sealed partial class AddInSession : IDisposable
                     + "code. Break the line yourself and it will write.";
             }
 
+            // A MODULE PAST VBA'S LINE CEILING IS NOT WRITTEN AT ALL. The editor holds 65,534
+            // lines in one module and does not refuse a 65,535th: an InsertLines that carried a
+            // 64,803-line module to 65,803 faulted its C runtime and took Excel with it
+            // (2026-09-09, PerfFixture). Nothing this product could do with the text would make
+            // it fit, so the count is said and the module is left as it is.
+            var lineCount = Core.Editor.LineDiff.CountLines(text);
+            if (lineCount > Core.Editor.ModuleText.MostLines)
+            {
+                Log.Warn($"write: {component} would be {lineCount} lines, past the editor's {Core.Editor.ModuleText.MostLines}; nothing written");
+                return $"{component} was not written: {lineCount:N0} lines is past the "
+                    + $"{Core.Editor.ModuleText.MostLines:N0} the editor holds in one module, and it faults rather "
+                    + "than refuses. Split the module and it will write.";
+            }
+
             // What the module holds before any of this, when a caller has said the write is all or
             // nothing. One read, on the import path only, which is already the slow one.
             var wasHoldingBefore = keepEveryCharacter ? ProjectReader.ReadSource(found) : null;
@@ -2982,7 +2996,13 @@ internal sealed partial class AddInSession : IDisposable
 
     private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out IReadOnlyList<LineWindow>? wrote)
     {
-        const int LargestDiffLines = 400;
+        // The most lines one window may hold before the module is replaced instead. It was 400,
+        // on the belief that a replacement is no slower than a large insert; measured on
+        // 2026-09-09, the editor takes a window of 400 lines in 57ms at 11,000 lines and 242ms
+        // at 65,000, and a window of 1,000 that went wholesale instead cost 1.5 seconds and a
+        // full minute. What the editor charges for is every line it is handed, so a window is
+        // never dearer than the replacement, and the cap is where a paste stops being an edit.
+        const int LargestDiffLines = 5000;
 
         // How many windows one write may be before it is a replacement after all. Each is two
         // calls into the editor; a replacement of a large module is seconds (lessons 77), so
@@ -3074,6 +3094,19 @@ internal sealed partial class AddInSession : IDisposable
 
                 throw;
             }
+        }
+
+        // THE LINE THE EDITOR ADDS. A whole-module write learned on 2026-08-21 that InsertLines
+        // leaves a blank line after a text holding a `Declare` broken over a continuation, and
+        // trims it (FillEmptyModule). A window that runs to the end of the module gets the same
+        // blank line, which the fidelity suite found the day the cap rose past its 480-line
+        // module (2026-09-09): anything past the count that was handed over was added by the
+        // editor, and none of it was asked for.
+        var expected = windows[0].TotalLines;
+        var holding = module.GetInt32("CountOfLines");
+        if (holding > expected)
+        {
+            module.Invoke("DeleteLines", expected + 1, holding - expected);
         }
 
         // Where each window stands NOW, for the read-back: the ones above it moved it by what

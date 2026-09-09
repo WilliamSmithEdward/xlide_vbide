@@ -2269,3 +2269,42 @@ over - answers "ask again" and its git half never runs, while the pane's
 own door has no budget at all. Asking again commits. It is noted here
 rather than changed: the budget is the door's whole promise about the host
 thread.
+
+## 78. The window cap was a claim, and past the line ceiling the editor faults
+
+The write path's cap on a window was 400 lines, and the comment on it said a
+replacement was "both simpler and no slower". Measured on 2026-09-09, a
+block inserted into the middle of a module and deleted again:
+
+| Module | 100 lines | 400 lines | 1,000 lines | 3,000 lines |
+| --- | --- | --- | --- | --- |
+| 11,252 lines | 45 ms | 57 ms | 1,498 ms | 1,892 ms |
+| 64,803 lines | 212 ms | 242 ms | 61,051 ms | 62,482 ms |
+
+Under the cap the cost barely moves with the window; past it the write went
+wholesale, and the same 1,000 lines cost twenty-five times more at 11,000
+lines and a full minute at the ceiling, more than the two-edit case of
+finding 77 because the module was larger by the block when the editor took
+it back. The editor charges for every line it is handed, so a window is
+never dearer than the replacement. The cap is 5,000 now, where a paste
+stops being an edit; the 1,000 and 3,000-line blocks are 92 and 227 ms
+into the 11,000-line module, and a 5,000-line one 445.
+
+**Past 65,534 lines the editor does not refuse, it faults.** Re-measuring
+the largest module with the new cap, a 1,000-line window into its 64,803
+lines faulted the editor's C runtime (MSVCR100.dll, 0xc0000005) and Excel
+died; the same window into the module left at 65,303 lines took 308 ms. The
+day before, a whole-module write past the ceiling had been accepted and
+re-parsed for a minute instead, so the fault is the windowed insert's. The
+ceiling is VBA's and documented; that a write past it kills the host is
+not. The write path refuses a text past it before the editor sees it, with
+the count, and the fidelity suite holds the refusal. The launcher's answer
+to Excel's "start in safe mode?" question, from finding 75, is what let the
+run continue without a hand on the keyboard.
+
+Two smaller things landed with it. A commit read the whole status before
+acting and again after; the first read is the merge state and the rows now,
+and an import's is the merge state and the Folder section, which runs no
+git at all. And the repository watcher named HEAD and refs/ but not
+packed-refs, where `git gc` and a busy fetch put branches, so a branch moved
+that way was a checkout the pane never heard about.

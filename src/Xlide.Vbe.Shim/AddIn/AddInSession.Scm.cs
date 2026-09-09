@@ -925,18 +925,24 @@ internal sealed partial class AddInSession
                 return CheckoutWork(g, repo);
         }
 
+        // Commit and import read only what they act on - the rows, or the Folder section - and
+        // answer the status once they have acted; the full read here was a second one they never
+        // used, at seven git processes a time.
+        switch (g.Action)
+        {
+            case "commit":
+                return CommitWork(g, repo);
+
+            case "import":
+                return ImportWork(g, repo);
+        }
+
         var status = ReadStatus(g, repo, detail);
 
         switch (g.Action)
         {
-            case "commit":
-                return CommitWork(g, repo, status);
-
             case "undo":
                 return UndoWork(g, repo, status);
-
-            case "import":
-                return ImportWork(g, repo, status);
 
             case "open":
                 return OpenWork(g, repo, status);
@@ -1455,19 +1461,23 @@ internal sealed partial class AddInSession
 
     // ---------------------------------------------------------------- the writes' pool halves
 
-    private static ScmWork CommitWork(ScmGather g, ScmRepo repo, ScmStatusReply status)
+    private static ScmWork CommitWork(ScmGather g, ScmRepo repo)
     {
         if (repo.Identity.Value is null)
         {
-            return Answer(g, ScmStatusJson(status with { Detail = "set the name and email commits are signed with first" }), repo.Root);
+            return Answer(g, ScmStatusJson(ReadStatus(g, repo, "set the name and email commits are signed with first")), repo.Root);
         }
 
-        if (status.Conflicts.Length > 0)
+        // Only what the commit needs before it acts: the merge state, and the rows. The status
+        // it answers afterwards reads everything else once.
+        var state = GitStatus.Parse(
+            Git(repo.Git, repo.Root, GitDeadline, "status", "--porcelain=v2", "--branch", "-z", "--", repo.Rel).StdOut);
+        if (state.Conflicts.Count > 0)
         {
             return Answer(g, ScmError("the folder has unresolved conflicts; resolve them, or Abort the merge, then commit"), repo.Root);
         }
 
-        var rows = status.Rows;
+        var rows = ScmRows.Compute(g.Live, HeadFiles(repo), g.Renames).Select(RowOf).ToArray();
         var chosen = new List<ScmRowReply>();
         var skipped = new List<ScmSkippedReply>();
         if (g.Named.Count == 0)
@@ -1603,19 +1613,23 @@ internal sealed partial class AddInSession
         return new ScmWork(g, json, ScmFollowUp.Undone, repo.Root, [], [], [], null, null, head, after.Detail);
     }
 
-    private static ScmWork ImportWork(ScmGather g, ScmRepo repo, ScmStatusReply status)
+    private static ScmWork ImportWork(ScmGather g, ScmRepo repo)
     {
         if (!g.InDesignMode)
         {
             return Answer(g, ScmError("the project is stopped in the debugger; importing now would reset it. Press Reset, then import again"), repo.Root);
         }
 
-        if (status.Conflicts.Length > 0)
+        var state = GitStatus.Parse(
+            Git(repo.Git, repo.Root, GitDeadline, "status", "--porcelain=v2", "--branch", "-z", "--", repo.Rel).StdOut);
+        if (state.Conflicts.Count > 0)
         {
             return Answer(g, ScmError("the folder has unresolved conflicts; resolve them, or Abort the merge, then import"), repo.Root);
         }
 
-        var candidates = status.Outside.Where(row => row.Status is "folderNewer" or "missingInProject").ToList();
+        // The Folder section alone: the folder against the live modules, and no git at all.
+        var outside = ScmRows.Outside(g.Live, FolderFiles(g.Folder)).Select(RowOf).ToArray();
+        var candidates = outside.Where(row => row.Status is "folderNewer" or "missingInProject").ToList();
         var files = new List<string>();
         var skipped = new List<ScmSkippedReply>();
         if (g.Named.Count == 0)
@@ -1630,7 +1644,7 @@ internal sealed partial class AddInSession
                 if (row is null)
                 {
                     skipped.Add(new ScmSkippedReply(name,
-                        status.Outside.Any(one => string.Equals(one.Module, name, StringComparison.OrdinalIgnoreCase))
+                        outside.Any(one => string.Equals(one.Module, name, StringComparison.OrdinalIgnoreCase))
                             ? "the folder has no file for it"
                             : "the folder holds the same text"));
                 }

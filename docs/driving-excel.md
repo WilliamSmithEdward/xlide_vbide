@@ -1396,6 +1396,13 @@ the developer's expression, and inside a string literal that means splitting the
 concatenating it, which is rewriting their code to make it fit. `ModuleText.LongestLine`
 carries the number and `Xlide.Vbe.Core.Tests` pins both sides of the boundary.
 
+**Past 65,534 lines the editor faults.** That ceiling is VBA's own and documented; what is not
+documented is that the editor does not refuse a 65,535th line. An insert that carried a
+64,803-line module to 65,803 faulted its C runtime and took Excel with it (2026-09-09,
+[lessons.md](lessons.md) finding 78). A text past the ceiling is refused before the editor sees
+it, with the count; `ModuleText.MostLines` carries the number and `write-fidelity.mjs` holds
+the refusal.
+
 So a write can be refused at any size, for a reason no line count predicts, and the refusal
 arrives partway: **the delete has landed and the add has not.** A module of 2,002 working lines
 asked to take a body the editor would not have came back holding 31,956 lines of it, neither

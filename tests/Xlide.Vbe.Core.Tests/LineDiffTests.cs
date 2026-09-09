@@ -258,6 +258,30 @@ public class LineDiffTests
     }
 
     [Fact]
+    public void APasteOfThousandsOfLinesIsOneWindowUnderTheShimsCap()
+    {
+        // The shim's cap is 5,000 lines (2026-09-09): a 3,000-line paste into the middle of a
+        // large module is one insert, where at 400 it was the module replaced.
+        var lines = Enumerable.Range(0, 20_000).Select(one => $"    x = {one}").ToList();
+        var was = Module([.. lines]);
+        lines.InsertRange(10_000, Enumerable.Range(0, 3_000).Select(one => $"    ' pasted {one}"));
+        var now = Module([.. lines]);
+
+        var diff = LineDiff.Between(was, now, 5_000);
+
+        // One line wider than the least window, at most: the character scan's head and tail
+        // overlap inside the baseline when the paste lands between two similar lines, and the
+        // line the tail could not claim is rewritten with itself. Correct end to end, and one
+        // line is nothing to the editor.
+        Assert.Equal(LineChange.Window, diff.Change);
+        Assert.Equal(10_001, diff.At);
+        Assert.InRange(diff.Removing, 0, 1);
+        Assert.Equal(3_000 + diff.Removing, diff.Inserting);
+        Assert.Equal(now, Apply(was, diff));
+        Assert.Equal(LineChange.Wholesale, LineDiff.Between(was, now, 400).Change);
+    }
+
+    [Fact]
     public void AnEditDeepInALargeModuleIsStillOneLine()
     {
         // The shape this exists for: 64,802 lines, one of them changed.

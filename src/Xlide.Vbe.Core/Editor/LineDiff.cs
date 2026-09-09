@@ -59,8 +59,10 @@ public readonly record struct LineDiff(
     /// Compares two versions of a module's text without splitting either.
     /// </summary>
     /// <param name="largestWindow">
-    /// Past this many lines on either side the change is not an edit any more, and replacing the
-    /// module outright is both simpler and no slower.
+    /// Past this many lines on either side the change is not an edit any more and the caller
+    /// replaces the module outright. NOT because that is no slower: the editor charges for every
+    /// line it is handed, so a window is never dearer than the replacement (measured 2026-09-09,
+    /// lessons 78), and the cap is only where a paste stops being an edit.
     /// </param>
     public static LineDiff Between(string baseline, string text, int largestWindow)
     {

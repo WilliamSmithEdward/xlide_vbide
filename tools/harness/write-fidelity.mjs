@@ -19,9 +19,12 @@
  * `InsertLines` reproduces the text exactly, so that is what a whole-module write uses now, and
  * the blank line the editor leaves after it is removed.
  *
- * OVER 400 LINES ON PURPOSE. Below that a write goes out as a line diff, which never used the
+ * OVER THE CAP ON PURPOSE. Below it a write goes out as a line diff, which never used the
  * broken call - so a small module passes this whatever the product does, and would have passed
- * it on the day the owner's module broke.
+ * it on the day the owner's module broke. The cap was 400 lines and is 5,000 (2026-09-09), so
+ * the 480-line module below takes the line-diff path now and a 5,200-line one takes the
+ * whole-module path; both stay, because the day the cap rose the line-diff path turned out to
+ * get the editor's trailing blank line too, and had never trimmed it.
  *
  * Run against any fixture with the editor open:
  *   node tools\harness\write-fidelity.mjs
@@ -100,6 +103,13 @@ try {
 
   check("and it holds exactly what was written", back === withDeclare);
 
+  // 1b. THE SAME, PAST THE CAP, so the whole-module path is what writes it.
+  const wholesale = padded(CONTINUED_DECLARE, 1300);
+  const wholesaleBack = await writeAndRead("a continued Declare written whole", wholesale);
+  check(`a ${wholesale.split("\r\n").length}-line module written whole comes back with the same number of lines`,
+    wholesaleBack.split("\r\n").length, wholesale.split("\r\n").length);
+  check("and holds exactly what was written", wholesaleBack === wholesale);
+
   // 2. THE SAME DECLARATION ON ONE LINE, which the editor was always happy with. Here so a
   //    failure above can be read as "the continuation" rather than "Declare statements".
   const oneLine = padded(
@@ -121,6 +131,17 @@ try {
   const small = ["Option Explicit", "", CONTINUED_DECLARE, "", "Public Sub Small()", "End Sub"].join("\r\n");
   check("a module small enough to go out as a line diff holds exactly too",
     (await writeAndRead("a small module", small)) === small);
+
+  // 5. PAST VBA'S LINE CEILING IS REFUSED BEFORE THE EDITOR SEES IT. The editor holds 65,534
+  //    lines in a module and faults rather than refuses a 65,535th: an InsertLines that took
+  //    PerfFixture's largest module to 65,803 lines took Excel down (2026-09-09). The refusal
+  //    names the count, and the module keeps what it held.
+  const tooTall = Array.from({ length: 65_535 }, (_, i) => `' line ${i + 1}`).join("\r\n");
+  const refused = await api.writeModule(name, tooTall, project.projectId)
+    .then(() => "(written)")
+    .catch((error) => error.message);
+  check("a text past the editor's 65,534-line ceiling is refused in words", /65,534/.test(refused), true);
+  check("and the module keeps what it held", (await api.readModule(name, project.projectId)).text === small);
 } finally {
   await scratch.dispose();
 }

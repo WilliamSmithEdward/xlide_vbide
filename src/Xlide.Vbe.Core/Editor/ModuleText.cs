@@ -35,6 +35,16 @@ public static class ModuleText
     public const int LongestLine = 1022;
 
     /// <summary>
+    /// The most lines the editor holds in one module: VBA's 65,534, and the editor does not
+    /// refuse a 65,535th. Measured 2026-09-09 on PerfFixture: an InsertLines that carried a
+    /// 64,803-line module to 65,803 faulted the editor's C runtime (MSVCR100.dll, 0xc0000005)
+    /// and took Excel with it, where the same window into a module left at 65,303 lines took
+    /// 308ms. A whole-module write past the ceiling had instead been accepted and re-parsed for
+    /// a minute. So a text past it is refused before the editor sees it.
+    /// </summary>
+    public const int MostLines = 65534;
+
+    /// <summary>
     /// The first character the host was handed and did not keep, or null when it kept them all.
     ///
     /// VBA stores module text in the system ANSI code page, not in Unicode, so a character outside

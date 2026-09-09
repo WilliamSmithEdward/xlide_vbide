@@ -91,7 +91,10 @@ internal sealed class ScmWatch : IDisposable
             return;
         }
 
-        if (name is "HEAD" or "ORIG_HEAD" or "MERGE_HEAD" or "FETCH_HEAD"
+        // packed-refs too: `git gc`, and a fetch or a push on a busy repository, move branches
+        // there rather than under refs/, and a branch moved that way was a checkout the pane
+        // never heard about.
+        if (name is "HEAD" or "ORIG_HEAD" or "MERGE_HEAD" or "FETCH_HEAD" or "packed-refs"
             || name.StartsWith("refs/", StringComparison.Ordinal))
         {
             Touch();
