@@ -7,7 +7,7 @@ most of the value is in probes that drive the real thing rather than tests of th
 
 ## The four kinds, and when each is right
 
-**Unit tests** (`tests/`, 600 of them, none need Excel). Pure logic with a real answer: the split
+**Unit tests** (`tests/`, 607 of them, none need Excel). Pure logic with a real answer: the split
 tree's arithmetic, the lexer against its corpus, registration plans, pixel maths. Fast enough to
 run on every gate. If a thing can be a unit test it should be, and if it cannot, that is usually a
 sign the logic is tangled with the host and worth extracting.

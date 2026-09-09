@@ -121,6 +121,13 @@ restored away. A form's restore is its code; its design is not restored, and the
 
 ## Remotes
 
+A remote is attached from the pane. The ready state's first line is the remote: with none, an
+input for the URL and Add remote, which runs `git remote add origin`; with one, its URL and
+Change, which shows the same input filled in and re-points it with `set-url`. Fetch, Pull and
+Push are greyed until a remote is attached, because without one they could only be refused. The
+repository on the other end is made first, on GitHub or as a bare folder, since gh is not bundled
+(decision 18); the flow is create it empty, paste its URL, push.
+
 Fetch, pull and push run git with terminal prompts disabled, so nothing can hang waiting for a
 password in a hidden console; a missing credential helper fails in words. A first push on a
 branch with no upstream sets it, to origin when there is one and else to the only remote,
@@ -157,6 +164,7 @@ project. `by=` attributes writes, as everywhere.
 | `browse` | | the status, after the host's folder chooser (blocks; the pane's, not a harness's) |
 | `init` | | the status, after `git init` |
 | `identity` | `name=`, `email=` | the status, after writing the repository's identity |
+| `remote` | `url=`, `remote=` (origin when absent) | the status, after `git remote add`, or `set-url` when the name exists |
 | `commit` | `message=`; body: module names, one per line; empty means every row | ScmCommitReply |
 | `export` | | the status, after writing the folder |
 | `import` | body: module names, empty means every Folder row | ScmImportReply |
@@ -176,7 +184,8 @@ Every reply carries `detail` first. Refusals are `{error}` and the harness clien
 
 - `ScmStatusReply`: `detail`, `project` (display), `projectId`, `state` (`noGit`, `noProject`,
   `unsaved`, `noFolder`, `noRepository`, `noIdentity`, `conflicted`, `ready`), `folder`,
-  `repository` (the root, or empty), `gitVersion`, `branch`, `upstream`, `ahead`, `behind`,
+  `repository` (the root, or empty), `gitVersion`, `branch`, `upstream`, `remote` and
+  `remoteUrl` (origin, else the only remote; empty with none), `ahead`, `behind`,
   `dirty` (the workbook), `identity` `{name, email}` or null, `rows[]` of `{module, kind, file,
   status, from}` with status `modified|added|deleted|renamed`, `outside[]` of `{module, kind,
   file, status}` with status `folderNewer|missingInFolder|missingInProject`, `branches[]` of
@@ -198,11 +207,13 @@ The `status` and `covers` sentences are the pane's own words and the route's, fr
 
 ### The page acts
 
-`act("scmPane", {press})` presses `refresh|commit|export|import|fetch|pull|push|init|abort|blame`;
-`{file}` points the pane at another open file through the select's own change; `{tick, on}`
-ticks a row; `{message}` types the message; `{module}` opens a row's comparison; `{commit}` opens
-a commit; `{branch}` picks a branch through the select. `ui.scm` is the pane's state: `project`,
-`state`, `branch`, `rows`, `outside`, `commits`, `showing`, `message`, `busy`, `behind`.
+`act("scmPane", {press})` presses `refresh|commit|export|import|fetch|pull|push|init|abort|blame`
+and `remote`, the remote line's button; `{file}` points the pane at another open file through the
+select's own change; `{tick, on}` ticks a row; `{message}` types the message; `{module}` opens a
+row's comparison; `{commit}` opens a commit; `{branch}` picks a branch through the select; `{url}`
+types the remote URL, unfolding the input when a remote is attached. `ui.scm` is the pane's state:
+`project`, `state`, `branch`, `remote`, `remoteUrl`, `rows`, `outside`, `commits`, `showing`,
+`message`, `busy`, `behind`.
 `act("blame", {which: toggle|on|off})` drives the editor layer and `ui.blame` reads it.
 
 ## Threading and the host
@@ -235,6 +246,11 @@ a commit; `{branch}` picks a branch through the select. `ui.scm` is the pane's s
 ## What shipped
 
 **Shipped 2026-09-08**, as designed above, with these things learned on the way:
+
+- **A remote is attached from the pane** (later the same day): the flow from Initialize to a
+  first push no longer leaves the VBE for `git remote add`. The status carries the remote and its
+  URL, the remote verbs are greyed until one is attached, and the same verb re-points a wrong
+  paste with `set-url`.
 
 - **An import writes one line terminator fewer than the file carries.** The export appends a
   newline to a module's text, as a text file should, and the applier wrote the file's whole body

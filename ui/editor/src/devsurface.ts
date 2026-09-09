@@ -2132,12 +2132,12 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * Drives the Source Control pane through its own controls, so a suite proves the pane and
      * not merely the route it shares a brain with: `{press}` clicks a named button (refresh,
      * commit, export, import, fetch, pull, push, blame, init, abort, browse, use, identity,
-     * open, restore - the last presses the confirm too), `{file}` points it at another open
+     * remote, open, restore - the last presses the confirm too), `{file}` points it at another open
      * file through the select's own change, `{tick, on}` ticks a Changes row, `{message}`
      * types the commit message, `{module}` opens a row's comparison, `{commit}` opens a commit
      * (with `{module}` as well, a file under it), `{branch}` picks a branch through the
-     * select, which is a checkout, and `{name, email}` types the identity. `ui.scm` is the
-     * read side.
+     * select, which is a checkout, `{name, email}` types the identity, and `{url}` types the
+     * remote URL the remote press then attaches. `ui.scm` is the read side.
      */
     scmPane: (args) => {
       const pane = scmPaneProbe();
@@ -2152,7 +2152,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : {
             did: false,
             detail: `no control named ${control} is on screen and enabled; use refresh, commit, export, `
-              + "import, fetch, pull, push, blame, init, abort, browse, use, identity, open or restore",
+              + "import, fetch, pull, push, blame, init, abort, browse, use, identity, remote, open or restore",
           };
       }
 
@@ -2212,9 +2212,15 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: "the identity inputs are not on screen" };
       }
 
+      if (args.url !== undefined) {
+        return pane.setRemoteUrl(String(args.url))
+          ? { did: true, detail: "remote URL typed; press remote to attach it" }
+          : { did: false, detail: "the remote line is not on screen; the repository is not ready" };
+      }
+
       return {
         did: false,
-        detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), branch, or name and email",
+        detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), branch, name and email, or url",
       };
     },
 

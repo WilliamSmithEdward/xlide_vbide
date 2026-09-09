@@ -208,14 +208,15 @@ internal static class AgentGuide
             + "unwritten edits (naming them), and answers every module's outcome. A removed FORM "
             + "is not re-added - its design is not recorded - and a module whose text the log "
             + "aged out says so."),
-        new("scm", "GET|POST", "action=status|settings|forget|browse|init|identity|commit|export|import|log|diff|show|open|restore|blame|checkout|fetch|pull|push|abort, project=, module=, ref=, message=, folder=, name=, email=, limit=, by=",
+        new("scm", "GET|POST", "action=status|settings|forget|browse|init|identity|remote|commit|export|import|log|diff|show|open|restore|blame|checkout|fetch|pull|push|abort, project=, module=, ref=, message=, folder=, name=, email=, url=, remote=, limit=, by=",
             "Source control: git behind the folder a project's modules are exported to, through "
             + "the same brain the Source Control pane presses. Bare, the status: state (noGit, "
             + "noProject, unsaved, noFolder, noRepository, noIdentity, conflicted, ready), the "
-            + "branch, the rows - every module live against the branch head - the Folder section, "
-            + "the history's last commit and a suggested message from the change log's rounds. "
-            + "settings&folder= remembers the folder, init runs git init in it, identity writes "
-            + "user.name and user.email, commit saves, exports and commits the modules the body "
+            + "branch, the remote and its URL, the rows - every module live against the branch "
+            + "head - the Folder section, the history's last commit and a suggested message from "
+            + "the change log's rounds. settings&folder= remembers the folder, init runs git init "
+            + "in it, identity writes user.name and user.email, remote&url= attaches origin "
+            + "(remote= names another) or re-points it, commit saves, exports and commits the modules the body "
             + "names (all rows when empty) with message=, export writes the folder, import reads "
             + "the Folder rows the body names into the project, log lists commits (limit=, "
             + "module=), diff and show line a module's live text against ref= (HEAD when absent), "

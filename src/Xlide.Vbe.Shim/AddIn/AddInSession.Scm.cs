@@ -132,6 +132,8 @@ internal sealed partial class AddInSession
         string? Message,
         string? Name,
         string? Email,
+        string? Url,
+        string? Remote,
         int Limit,
         List<string> Named,
         string? LiveKind,
@@ -390,7 +392,7 @@ internal sealed partial class AddInSession
             return new ScmGather(
                 action, string.Empty, string.Empty, true, string.Empty, string.Empty, false, false,
                 [], [], [], [], new HashSet<string>(StringComparer.Ordinal), null, null, null, null, null,
-                0, [], null, null, false, carry);
+                null, null, 0, [], null, null, false, carry);
         }
 
         var display = DisplayFromProjectId(projectId) ?? projectId;
@@ -471,6 +473,8 @@ internal sealed partial class AddInSession
         arguments.TryGetValue("message", out var message);
         arguments.TryGetValue("name", out var name);
         arguments.TryGetValue("email", out var email);
+        arguments.TryGetValue("url", out var url);
+        arguments.TryGetValue("remote", out var remoteName);
         arguments.TryGetValue("limit", out var limitText);
         var limit = int.TryParse(limitText, out var parsedLimit) ? parsedLimit : 0;
         var named = body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
@@ -606,12 +610,12 @@ internal sealed partial class AddInSession
         return new ScmGather(
             action, projectId, display, unsaved, folder, suggested, dirty, inDesignMode,
             live, renames, rounds, others, unwrittenBefore,
-            module, reference, message, name, email, limit, named,
+            module, reference, message, name, email, url, remoteName, limit, named,
             liveModule?.Kind, liveModule?.Code, liveUnwritten, carry);
     }
 
     private static bool ActionAnswersStatus(string action) => action is "status" or "settings" or "forget"
-        or "browse" or "init" or "identity" or "export" or "open" or "checkout" or "fetch" or "pull"
+        or "browse" or "init" or "identity" or "remote" or "export" or "open" or "checkout" or "fetch" or "pull"
         or "push" or "abort";
 
     private ScmProjectState ScmStateFor(string projectId)
@@ -651,7 +655,8 @@ internal sealed partial class AddInSession
     /// A git repository as one request sees it: where it is, how the folder sits inside it, and
     /// who commits are signed by.
     /// </summary>
-    private sealed record ScmRepo(GitClient Git, string Root, string Rel, ScmIdentityReply? Identity);
+    private sealed record ScmRepo(
+        GitClient Git, string Root, string Rel, ScmIdentityReply? Identity, IReadOnlyList<GitRemote> Remotes);
 
     private static GitResult Git(GitClient git, string directory, TimeSpan deadline, params string[] args) =>
         git.RunAsync(directory, args, deadline).GetAwaiter().GetResult();
@@ -759,7 +764,34 @@ internal sealed partial class AddInSession
             detail = $"commits here are signed {g.Name.Trim()} <{g.Email.Trim()}>";
         }
 
-        var repo = new ScmRepo(git, root, rel, ReadIdentity(git, root));
+        if (g.Action == "remote")
+        {
+            var address = g.Url?.Trim() ?? string.Empty;
+            if (address.Length == 0)
+            {
+                return Answer(g, ScmError("remote needs url=, the address pushes go to and pulls come from"));
+            }
+
+            // origin unless another name is asked for: the remote a first push then sets the
+            // upstream to, so the URL typed into the pane is the one Push uses. An existing
+            // remote is re-pointed rather than refused, because a wrong paste is the common case.
+            var name = g.Remote is { Length: > 0 } asked ? asked.Trim() : "origin";
+            var standing = GitRemotes.Parse(Git(git, root, GitDeadline, "remote", "-v").StdOut);
+            var exists = standing.Any(one => string.Equals(one.Name, name, StringComparison.Ordinal));
+            var wrote = exists
+                ? Git(git, root, GitDeadline, "remote", "set-url", name, address)
+                : Git(git, root, GitDeadline, "remote", "add", name, address);
+            if (!wrote.Ok)
+            {
+                return Answer(g, ScmError($"the remote could not be {(exists ? "re-pointed" : "added")}: {wrote.Words}"));
+            }
+
+            detail = exists ? $"{name} now points at {address}" : $"{name} added: {address}";
+        }
+
+        var repo = new ScmRepo(
+            git, root, rel, ReadIdentity(git, root),
+            GitRemotes.Parse(Git(git, root, GitDeadline, "remote", "-v").StdOut));
 
         switch (g.Action)
         {
@@ -780,13 +812,11 @@ internal sealed partial class AddInSession
 
             case "fetch" or "pull" or "push":
             {
-                var remotes = Git(git, root, GitDeadline, "remote");
-                var remoteNames = remotes.StdOut.Split(
-                    '\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (remoteNames.Length == 0)
+                var primary = GitRemotes.Primary(repo.Remotes);
+                if (primary is null)
                 {
-                    return Answer(g, ScmError($"{g.Action} needs a remote, and {root} has none configured; add one with "
-                        + "`git remote add origin <url>`"), root);
+                    return Answer(g, ScmError($"{g.Action} needs a remote, and {root} has none; attach one with the "
+                        + "pane's Add remote, or scm?action=remote&url=<url>"), root);
                 }
 
                 // A FIRST PUSH SETS THE UPSTREAM ITSELF. Bare `git push` on a branch with no
@@ -796,8 +826,7 @@ internal sealed partial class AddInSession
                 var hasUpstream = Git(git, root, GitDeadline, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").Ok;
                 if (g.Action == "push" && !hasUpstream)
                 {
-                    var remote = remoteNames.Contains("origin", StringComparer.Ordinal) ? "origin" : remoteNames[0];
-                    args = ["push", "-u", remote, "HEAD"];
+                    args = ["push", "-u", primary.Name, "HEAD"];
                 }
                 else
                 {
@@ -858,7 +887,8 @@ internal sealed partial class AddInSession
 
     private static ScmStatusReply BareStatus(ScmGather g, string state, string detail, string version) =>
         new(detail, g.Display, g.ProjectId, state, g.Folder, string.Empty, version, string.Empty, string.Empty,
-            0, 0, g.Dirty, null, [], [], [], [], null, string.Empty, g.SuggestedFolder, ScmWords.Covers);
+            string.Empty, string.Empty, 0, 0, g.Dirty, null, [], [], [], [], null, string.Empty, g.SuggestedFolder,
+            ScmWords.Covers);
 
     /// <summary>The repository root above a folder, or null when no repository holds it.</summary>
     private static string? RootOf(GitClient git, string folder)
@@ -1009,10 +1039,12 @@ internal sealed partial class AddInSession
         var word = repo.Identity is null ? "noIdentity"
             : conflicts.Length > 0 ? "conflicted"
             : "ready";
+        var primary = GitRemotes.Primary(repo.Remotes);
 
         return new ScmStatusReply(
             detail, g.Display, g.ProjectId, word, g.Folder, repo.Root, repo.Git.Version,
-            state.Head, state.Upstream ?? string.Empty, state.Ahead, state.Behind, g.Dirty, repo.Identity,
+            state.Head, state.Upstream ?? string.Empty, primary?.Name ?? string.Empty, primary?.Url ?? string.Empty,
+            state.Ahead, state.Behind, g.Dirty, repo.Identity,
             [.. rows.Select(RowOf)],
             [.. outside.Select(RowOf)],
             [.. branches.Select(branch => new ScmBranchRow(branch.Name, branch.Current, branch.Upstream))],

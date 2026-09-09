@@ -6862,6 +6862,14 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.85;
 }
 
+.scm-remote {
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+}
+
+.scm-remote .scm-state-text {
+  word-break: break-all;
+}
+
 .scm-conflict {
   padding: 1px 0 1px 12px;
   font-family: var(--vscode-editor-font-family, Consolas, monospace);

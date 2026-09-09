@@ -386,7 +386,7 @@ export async function open({ pid, workbook } = {}) {
  * as GET, which is what lets the bare-GET walk in Test-DebugApi.ps1 call it safely.
  */
 const WRITE_ACTIONS = new Set([
-  "settings", "forget", "browse", "init", "identity", "commit", "export", "import", "open",
+  "settings", "forget", "browse", "init", "identity", "remote", "commit", "export", "import", "open",
   "restore", "checkout", "fetch", "pull", "push", "abort",
 ]);
 
@@ -1461,6 +1461,7 @@ function clientFor(entry) {
      *   await api.scm({ action: "browse" });            // the host's folder chooser: BLOCKS
      *   await api.scm({ action: "init" });              // git init, autocrlf off, .gitignore
      *   await api.scm({ action: "identity", name: "Ada", email: "ada@example.com" });
+     *   await api.scm({ action: "remote", url: "https://github.com/ada/book.git" });  // origin
      *   await api.scm({ action: "commit", message: "taught Ledger dates" });  // every row
      *   await api.scm({ action: "commit", message: "just Ledger", modules: ["Ledger"] });
      *   await api.scm({ action: "export" });            // project -> folder, no git
@@ -1482,8 +1483,8 @@ function clientFor(entry) {
      * runs git, and the remote actions run with terminal prompts disabled so they fail in
      * words rather than hang - but a slow remote can still take a while.
      */
-    scm: ({ action, project, module, ref, message, folder, name, email, limit, by, modules, timeoutMs = 60000 } = {}) =>
-      call(`scm${query({ action, project, module, ref, message, folder, name, email, limit, by })}`, {
+    scm: ({ action, project, module, ref, message, folder, name, email, url, remote, limit, by, modules, timeoutMs = 60000 } = {}) =>
+      call(`scm${query({ action, project, module, ref, message, folder, name, email, url, remote, limit, by })}`, {
         method: WRITE_ACTIONS.has(action) ? "POST" : "GET",
         ...(WRITE_ACTIONS.has(action) ? { body: (modules ?? []).join("\n") } : {}),
         timeout: timeoutMs,

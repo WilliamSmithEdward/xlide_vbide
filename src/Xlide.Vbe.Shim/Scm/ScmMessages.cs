@@ -52,6 +52,9 @@ public sealed record ScmStatusReply(
     [property: JsonPropertyName("gitVersion")] string GitVersion,
     [property: JsonPropertyName("branch")] string Branch,
     [property: JsonPropertyName("upstream")] string Upstream,
+    /// <summary>The remote pushes go to - origin, else the only one - and its URL; empty with none.</summary>
+    [property: JsonPropertyName("remote")] string Remote,
+    [property: JsonPropertyName("remoteUrl")] string RemoteUrl,
     [property: JsonPropertyName("ahead")] int Ahead,
     [property: JsonPropertyName("behind")] int Behind,
     /// <summary>Whether the WORKBOOK has unsaved changes; the folder is one save behind it then.</summary>

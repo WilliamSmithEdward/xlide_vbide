@@ -79,8 +79,8 @@ native code, so Excel never loads a .NET runtime on its account.
   branch head; tick the ones to commit and type a message, pre-filled from what changed since the
   last commit. History opens to the modules each commit touched, with Open this version and
   Restore; blame paints author, date and hash at the end of every committed line; the branch is
-  a select; Fetch, Pull and Push are buttons. Git for Windows' own credential manager handles
-  signing in, and xlide never sees a credential.
+  a select; a remote is attached by pasting its URL, and Fetch, Pull and Push are buttons. Git
+  for Windows' own credential manager handles signing in, and xlide never sees a credential.
 - Analyzer rules you can change. A searchable dialog, a right-click on any finding to suppress it
   here or turn it off on this machine, and the same switch on the lightbulb. Rules that mirror a
   VBE compile failure say so instead of offering a switch that would be ignored.

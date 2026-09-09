@@ -471,7 +471,13 @@ try {
   // ---- a remote: a bare repository beside the folder, then one that cannot answer -------------
 
   execFileSync(gitExe, ["init", "--bare", remote], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  git("remote", "add", "origin", remote);
+  check("before a remote is attached the status says so", (await scm()).remoteUrl, "");
+  const attached = await scm({ action: "remote", url: remote });
+  check("a remote attaches through the route, as origin", [attached.remote, attached.remoteUrl], ["origin", remote]);
+  check("and git holds it", git("remote", "get-url", "origin"), remote);
+  await api.act("scmPane", { press: "refresh" });
+  await paneIdle();
+  check("and the pane shows it", (await paneShown()).remoteUrl, remote);
   const onBranch = (await scm()).branch;
   const pushed = await scm({ action: "push" });
   check("a first push sets the upstream itself", pushed.upstream, `origin/${onBranch}`);
@@ -487,7 +493,17 @@ try {
   // hang on a hidden prompt. With no remote at all the route refuses before git runs, which
   // proves nothing about the prompt; and git itself, asked to fetch with no remote, prints
   // nothing and exits 0.
-  git("remote", "set-url", "origin", join(folder, "nowhere"));
+  // Re-pointed THROUGH THE PANE: the remote line's input and button, the way a wrong paste is
+  // corrected, which is the same verb the route ran above with `set-url` behind it this time.
+  const nowhere = join(folder, "nowhere");
+  await paneIdle();
+  const urlTyped = await api.act("scmPane", { url: nowhere });
+  check("the pane's remote line takes a URL", urlTyped.did, true);
+  const urlPressed = await api.act("scmPane", { press: "remote" });
+  check("and its button re-points the remote", urlPressed.did, true);
+  await paneIdle();
+  check("so git holds the new URL", git("remote", "get-url", "origin"), nowhere);
+  check("and the status says so", (await scm()).remoteUrl, nowhere);
   const broken = await scm({ action: "fetch" }).catch((error) => ({ detail: error.message }));
   check("fetch against a remote that cannot answer fails in git's own words, without hanging",
     /does not appear to be a git repository|could not read from remote/i.test(broken.detail ?? ""), true);

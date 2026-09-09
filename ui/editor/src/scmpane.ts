@@ -68,6 +68,9 @@ export interface ScmStatus {
   gitVersion: string;
   branch: string;
   upstream: string;
+  /** The remote pushes go to - origin, else the only one - and its URL; empty with none. */
+  remote: string;
+  remoteUrl: string;
   ahead: number;
   behind: number;
   dirty: boolean;
@@ -121,7 +124,11 @@ export interface ScmPaneProbe {
     /** Whether the host has seen the folder or repository move since these rows were read. */
     behind: boolean;
     blameOn: boolean;
+    remote: string;
+    remoteUrl: string;
   };
+  /** Types a URL into the remote line's input, unfolding it first when a remote is attached. */
+  setRemoteUrl(url: string): boolean;
   /**
    * Presses a named control: refresh, commit, export, import, fetch, pull, push, blame, init,
    * abort, browse, use, identity, open, restore. False when it is not on screen or is disabled
@@ -212,6 +219,8 @@ function statusOf(raw: unknown): ScmStatus | null {
     gitVersion: asString(reply.gitVersion),
     branch: asString(reply.branch),
     upstream: asString(reply.upstream),
+    remote: asString(reply.remote),
+    remoteUrl: asString(reply.remoteUrl),
     ahead: asNumber(reply.ahead),
     behind: asNumber(reply.behind),
     dirty: reply.dirty === true,
@@ -300,6 +309,9 @@ export class ScmPane {
   /** The stamp the rows were read at, against the newest the host has sent - see stamped(). */
   private drawnStamp = 0;
   private hostStamp = 0;
+
+  /** Whether the remote line shows its input over an attached remote: Change was pressed. */
+  private remoteEditing = false;
   private followTimer: ReturnType<typeof setTimeout> | undefined;
 
   private state: ScmStatus | null = null;
@@ -535,6 +547,11 @@ export class ScmPane {
           this.drawnStamp = asOf;
         }
 
+        // The input folds away once the remote it typed is the one the status shows.
+        if (args.action === "remote") {
+          this.remoteEditing = false;
+        }
+
         // An action's own words are worth showing; a bare read's "ready" is not.
         this.setNotice(args.action ? asString(answer.detail) : "", false);
         if (this.state?.state === "ready") {
@@ -655,9 +672,12 @@ export class ScmPane {
     this.commit.disabled = !ready || this.tickedModules().length === 0 || this.message.value.trim() === "";
     this.exportButton.disabled = !ready;
     this.importButton.disabled = !ready || (this.state?.outside.length ?? 0) === 0;
-    this.fetch.disabled = !ready;
-    this.pull.disabled = !ready;
-    this.push.disabled = !ready;
+    // The remote verbs need a remote, and without one a press would only be refused; the remote
+    // line above the rows is where one is attached.
+    const attached = ready && (this.state?.remoteUrl ?? "") !== "";
+    this.fetch.disabled = !attached;
+    this.pull.disabled = !attached;
+    this.push.disabled = !attached;
     this.branch.disabled = !ready;
     this.branch.hidden = !this.state || this.state.state !== "ready" || this.state.branches.length === 0;
     this.message.hidden = !this.state || this.state.state !== "ready";
@@ -720,6 +740,7 @@ export class ScmPane {
       return;
     }
 
+    this.list.appendChild(this.drawRemote(state));
     this.list.appendChild(this.drawSection("Changes", state.rows.length, state.covers));
     if (state.rows.length === 0) {
       const clean = document.createElement("div");
@@ -956,6 +977,80 @@ export class ScmPane {
     entry.title = `${file.file} at ${commit.short}. Click to compare with the live module`;
     entry.addEventListener("click", () => void this.openFile(commit, file.module || file.file));
     return entry;
+  }
+
+  /**
+   * The remote line of the ready state: the URL pushes go to, or the input that attaches one.
+   * One verb behind both, so Change shows the same input filled in and Save re-points it.
+   */
+  private drawRemote(state: ScmStatus): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "scm-state scm-remote";
+    const acts = document.createElement("div");
+    acts.className = "scm-state-acts";
+
+    const button = (id: string, label: string, run: () => void): HTMLButtonElement => {
+      const made = document.createElement("button");
+      made.type = "button";
+      made.id = id;
+      made.className = "panel-empty-act";
+      made.textContent = label;
+      made.disabled = this.busy;
+      made.addEventListener("click", run);
+      return made;
+    };
+
+    const attached = state.remoteUrl !== "";
+    if (attached && !this.remoteEditing) {
+      const said = document.createElement("div");
+      said.className = "scm-state-text";
+      said.textContent = `${state.remote}: ${state.remoteUrl}`;
+      acts.appendChild(button("scm-remote-change", "Change", () => {
+        this.remoteEditing = true;
+        this.draw();
+      }));
+      box.append(said, acts);
+      return box;
+    }
+
+    const text = document.createElement("div");
+    text.className = "scm-state-text";
+    text.textContent = attached
+      ? `Re-point ${state.remote}. The first push after that sets the upstream again.`
+      : "No remote. Paste the URL of an empty repository on GitHub or elsewhere; the first push "
+        + "sets the upstream, and git's credential manager signs you in.";
+    const input = document.createElement("input");
+    input.id = "scm-remote-url";
+    input.type = "url";
+    input.placeholder = "https://github.com/you/book.git";
+    input.value = state.remoteUrl;
+    const label = document.createElement("label");
+    label.append("Remote URL", input);
+
+    const attach = button("scm-remote-attach", attached ? "Save" : "Add remote", () => {
+      const url = input.value.trim();
+      if (!url) {
+        this.setNotice("A remote needs a URL.", true);
+        return;
+      }
+      void this.run({ action: "remote", url });
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        attach.click();
+      }
+    });
+    acts.appendChild(attach);
+    if (attached) {
+      acts.appendChild(button("scm-remote-cancel", "Cancel", () => {
+        this.remoteEditing = false;
+        this.draw();
+      }));
+    }
+
+    box.append(text, label, acts);
+    return box;
   }
 
   /**
@@ -1341,6 +1436,8 @@ export class ScmPane {
         busy: this.busy,
         behind: this.hostStamp > this.drawnStamp,
         blameOn: this.blame.on(),
+        remote: this.state?.remote ?? "",
+        remoteUrl: this.state?.remoteUrl ?? "",
       }),
       press: (control) => {
         switch (control) {
@@ -1357,6 +1454,7 @@ export class ScmPane {
           case "browse": return press(this.list.querySelector<HTMLButtonElement>("#scm-browse"));
           case "use": return press(this.list.querySelector<HTMLButtonElement>("#scm-use-folder"));
           case "identity": return press(this.list.querySelector<HTMLButtonElement>("#scm-identity-save"));
+          case "remote": return press(this.list.querySelector<HTMLButtonElement>("#scm-remote-attach"));
           case "open": return press(this.diff.querySelector<HTMLButtonElement>("#scm-open-version"));
           case "restore": {
             // The real gesture: the head's button, then the confirm the card raises.
@@ -1442,6 +1540,21 @@ export class ScmPane {
 
         nameBox.value = name;
         emailBox.value = email;
+        return true;
+      },
+      setRemoteUrl: (url) => {
+        let box = this.list.querySelector<HTMLInputElement>("#scm-remote-url");
+        if (!box && this.state?.state === "ready" && !this.busy) {
+          // An attached remote folds the input behind Change; typing is the gesture that unfolds it.
+          this.remoteEditing = true;
+          this.draw();
+          box = this.list.querySelector<HTMLInputElement>("#scm-remote-url");
+        }
+        if (!box) {
+          return false;
+        }
+
+        box.value = url;
         return true;
       },
     };

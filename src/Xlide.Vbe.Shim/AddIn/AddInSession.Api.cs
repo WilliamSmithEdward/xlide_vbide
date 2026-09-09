@@ -1380,6 +1380,8 @@ internal sealed partial class AddInSession
                 request.Query.TryGetValue("folder", out _);
                 request.Query.TryGetValue("name", out _);
                 request.Query.TryGetValue("email", out _);
+                request.Query.TryGetValue("url", out _);
+                request.Query.TryGetValue("remote", out _);
                 request.Query.TryGetValue("limit", out _);
                 request.Query.TryGetValue("by", out _);
                 return ApiServer.ApiReply.Json(AnswerScmFromPool(request.Query, request.Body));
