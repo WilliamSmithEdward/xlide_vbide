@@ -2546,10 +2546,18 @@ export class EditorBridge {
 
     this.applyingHostEdit = true;
     try {
+      // ITS OWN UNDO STEP. Monaco appends an edit to the last undo element while that element
+      // is open, and nothing here ever closed one, so a host edit landing after another host
+      // edit shared its step: a module's first text after its pane opened, then the members a
+      // refactor wrote, and one Ctrl+Z after the refactor emptied the module
+      // (implement-interface.mjs, 2026-09-08). Closed on both sides, a host edit undoes alone,
+      // and whatever was typed before it stays a step of its own.
+      model.pushStackElement();
       model.pushEditOperations(
         selections,
         [{ range: model.getFullModelRange(), text, forceMoveMarkers: false }],
         () => selections);
+      model.pushStackElement();
     } finally {
       this.applyingHostEdit = false;
     }

@@ -2099,3 +2099,27 @@ because Excel hands a workbook on its command line to a running instance, a
 hidden automation one included. `-Force` remains the explicit sweep, and an
 `/automation -Embedding` command line is not evidence of a stray: it is what
 every COM-driven Excel looks like.
+
+## 74. Two host edits were one Ctrl+Z, and undoing a refactor emptied the module
+
+The live gate for 0.15.0 failed one suite: after Implement Interface and one
+undo, the class held `Option Explicit` alone, the `Implements` line gone with
+the stubs. Monaco appends every `pushEditOperations` to the last undo element
+for as long as that element is open, and only `pushStackElement` closes one.
+The page adopts a host edit - a module's text after a write, the members a
+refactor wrote, a rename's result - with one `pushEditOperations` and never
+closed the element, so consecutive host edits were one undo step, and in a
+module the host had first published empty, one Ctrl+Z took it back to empty.
+
+It read as a regression and the mechanism is not one: nothing in the release
+touched the adoption or the undo stack, and Monaco was the same 0.56.0. Why
+the suite had passed before is not established. The likeliest reading is that
+its write used to reach the page before a model existed for the new class, so
+the write was the model's first text rather than an edit on it, and a beat of
+timing moved that; whichever way, the adoption had never been sound.
+
+A host edit is now closed on both sides, so it undoes alone and what was typed
+before it stays its own step. Measured rather than reasoned: a probe counted
+the model's undo elements after each of the suite's steps and spied on the
+element's `close` and `heapSize` and the model's `pushStackElement`; the count
+stayed at one and the spies never fired, which is what settled the mechanism.
