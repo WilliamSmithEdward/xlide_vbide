@@ -105,6 +105,34 @@ public static object WorkbookWindowOf(int processId)
     object window;
     return AccessibleObjectFromWindow(sheet, NativeObjectModel, ref dispatch, out window) == 0 ? window : null;
 }
+
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int m);
+[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+
+// Excel's own question after a crash, "Do you want to start in safe mode?": a visible dialog
+// (#32770) of the process whose static text names safe mode.
+public static bool AsksAboutSafeMode(int processId)
+{
+    bool asks = false;
+    EnumWindows((h, l) =>
+    {
+        int owner;
+        GetWindowThreadProcessId(h, out owner);
+        if (owner != processId || !IsWindowVisible(h)) { return true; }
+        var cls = new System.Text.StringBuilder(64);
+        GetClassNameW(h, cls, 64);
+        if (cls.ToString() != "#32770") { return true; }
+        EnumChildWindows(h, (child, l2) =>
+        {
+            var text = new System.Text.StringBuilder(512);
+            GetWindowTextW(child, text, 512);
+            if (text.ToString().IndexOf("safe mode", System.StringComparison.OrdinalIgnoreCase) >= 0) { asks = true; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return !asks;
+    }, IntPtr.Zero);
+    return asks;
+}
 '@
 
 function Find-ExcelExecutable {
@@ -248,16 +276,40 @@ foreach ($version in @('16.0', '15.0')) {
 # Excel then opens neither and offers to create them.
 $arguments = @($Workbook | ForEach-Object { '"{0}"' -f $_ })
 if ($Separate) { $arguments = @('/x') + $arguments }
-$process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
 $names = ($Workbook | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
 $apart = if ($Separate) { ', in a process of its own' } else { '' }
-Write-Host "Started Excel as process $($process.Id) on $names$apart."
 
-$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+# AFTER A REAL CRASH - a fault, not a harness's kill - the next Excel asks "Do you want to start
+# in safe mode?" before it shows a workbook window, and nothing below could see past that
+# question: the attach waited out its whole budget and the gate reported "Could not reach Excel
+# through its window" three steps in a row (2026-09-08). The question is asked once; the instance
+# asking it is stopped by its id and Excel is started again, which came up clean every time.
 $window = $null
-while ($null -eq $window -and (Get-Date) -lt $deadline) {
-    $window = [XlideHarness.Attach]::WorkbookWindowOf($process.Id)
-    if ($null -eq $window) { Start-Sleep -Milliseconds 50 }
+foreach ($attempt in 1, 2) {
+    $process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
+    Write-Host "Started Excel as process $($process.Id) on $names$apart."
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $asking = $false
+    while ($null -eq $window -and (Get-Date) -lt $deadline) {
+        $window = [XlideHarness.Attach]::WorkbookWindowOf($process.Id)
+        if ($null -ne $window) { break }
+        if ($attempt -eq 1 -and [XlideHarness.Attach]::AsksAboutSafeMode($process.Id)) {
+            $asking = $true
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    }
+
+    if ($null -ne $window) { break }
+    if ($asking) {
+        Write-Host "Excel $($process.Id) is asking whether to start in safe mode, which it does once after a crash; stopping it by id and starting again."
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        $process.WaitForExit(10000) | Out-Null
+        Start-Sleep -Seconds 2
+        continue
+    }
+    throw "Could not reach Excel $($process.Id) through its window."
 }
 if ($null -eq $window) { throw "Could not reach Excel $($process.Id) through its window." }
 

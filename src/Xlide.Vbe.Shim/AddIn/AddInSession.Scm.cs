@@ -1652,7 +1652,7 @@ internal sealed partial class AddInSession
             var live = ModuleSyncService.ReadLiveModules(project, _controlDefaults);
             var plan = ModuleSync.PlanExport(projectId, display, folder, live, ModuleSyncService.ReadFolder(folder), ExportMode.TrueUp);
             var chosen = new HashSet<string>(plan.Items.Where(item => item.Checked).Select(item => item.Id), StringComparer.Ordinal);
-            var applied = ModuleSyncService.Apply(
+            var applied = ApplySyncHeld(
                 project, plan, chosen,
                 (component, text, owner) => WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true));
 
@@ -1711,7 +1711,7 @@ internal sealed partial class AddInSession
                 StringComparer.Ordinal);
         }
 
-        var applied = ModuleSyncService.Apply(
+        var applied = ApplySyncHeld(
             project, plan, chosen,
             (component, text, owner) =>
             {

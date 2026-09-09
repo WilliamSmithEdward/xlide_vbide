@@ -334,6 +334,35 @@ internal sealed class CodePaneTracker : IDisposable
 
         Diagnostics.PerfCounters.WindowEvent();
 
+        // RECORDED, NOT ACTED ON, while this product is inside Remove or Import itself. The
+        // events below are the editor tearing the component's own windows down, and a refresh
+        // taken then reads the component list and the panes out of an editor mid-change. See
+        // Hold for what that cost.
+        if (_holds > 0)
+        {
+            if (!windowEvent.IsLocationChange || MovesPanes(className))
+            {
+                _heldRefresh = true;
+            }
+
+            if (className == FrameClass || className == "MDIClient")
+            {
+                _heldFrame = true;
+            }
+
+            if (windowEvent.IsDestroy)
+            {
+                _heldDestroy = true;
+            }
+
+            if (windowEvent.IsShow || windowEvent.IsHide || windowEvent.IsCreate || windowEvent.IsDestroy)
+            {
+                _heldStir = true;
+            }
+
+            return;
+        }
+
         // A window MOVING somewhere else in the process is not news here.
         //
         // The hook hears everything the host owns, and resizing a frame moves every toolbar,
@@ -406,9 +435,101 @@ internal sealed class CodePaneTracker : IDisposable
     /// <summary>Set when events arrive while a refresh is running, so none of them are lost.</summary>
     private bool _refreshQueued;
 
+    /// <summary>Holds outstanding, and what the hook heard while one was.</summary>
+    private int _holds;
+    private bool _heldRefresh;
+    private bool _heldFrame;
+    private bool _heldDestroy;
+    private bool _heldStir;
+
+    /// <summary>
+    /// A hold on the tracker for as long as this product itself removes or imports a component.
+    ///
+    /// The hook hears the editor tear the component's windows down, and the hook runs on this
+    /// thread WHILE the editor is still inside Remove or Import, because the editor pumps
+    /// messages there. A refresh taken at that moment reads the component list and the panes
+    /// out of an editor that is mid-change, and the surface then follows whatever pane is left,
+    /// reading that module's text out of the same editor. On 2026-09-08, the day the machine's
+    /// September Windows update landed, that was an access violation inside VBE7.DLL at three
+    /// different offsets, five runs in five, on every build back to 0.14.2 - and Excel driven
+    /// through the object model alone, with no add-in loaded, survived the same three
+    /// operations three times over. Held, the hook records what it heard; the release replays
+    /// it once, after the editor is consistent again. Nests.
+    /// </summary>
+    public IDisposable Hold()
+    {
+        _holds++;
+        return new HoldToken(this);
+    }
+
+    private void Release()
+    {
+        if (_holds == 0)
+        {
+            return;
+        }
+
+        if (--_holds > 0)
+        {
+            return;
+        }
+
+        var refresh = _heldRefresh;
+        var frame = _heldFrame;
+        var destroy = _heldDestroy;
+        var stir = _heldStir;
+        _heldRefresh = false;
+        _heldFrame = false;
+        _heldDestroy = false;
+        _heldStir = false;
+
+        if (refresh)
+        {
+            Refresh();
+        }
+
+        if (frame)
+        {
+            FrameChanged?.Invoke();
+        }
+
+        if (destroy)
+        {
+            WindowDestroyed?.Invoke();
+        }
+
+        if (stir)
+        {
+            SurfaceStirred?.Invoke();
+        }
+    }
+
+    private sealed class HoldToken : IDisposable
+    {
+        private CodePaneTracker? _tracker;
+
+        public HoldToken(CodePaneTracker tracker)
+        {
+            _tracker = tracker;
+        }
+
+        public void Dispose()
+        {
+            var tracker = _tracker;
+            _tracker = null;
+            tracker?.Release();
+        }
+    }
+
     /// <summary>Rebuilds the picture from both sources.</summary>
     public void Refresh()
     {
+        if (_holds > 0)
+        {
+            _heldRefresh = true;
+            return;
+        }
+
         // Reading window rectangles can itself raise events on some systems. Re-entering here
         // would recurse without bound - but DROPPING the re-entrant call loses the burst's
         // tail, and the tail is where the truth lives: closing a hidden pane fires its destroy

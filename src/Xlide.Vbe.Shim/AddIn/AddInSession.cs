@@ -39,6 +39,31 @@ internal sealed partial class AddInSession : IDisposable
     private readonly DispatchObject? _addIn;
 
     private CodePaneTracker? _codePanes;
+
+    /// <summary>
+    /// The pane tracker held while this product removes or imports a component, and replayed
+    /// once after: see CodePaneTracker.Hold. Nothing to hold before the tracker exists.
+    /// </summary>
+    private IDisposable HoldCodePanes() => _codePanes?.Hold() ?? NoHold.Instance;
+
+    /// <summary>ModuleSyncService.Apply under that hold: an apply removes and imports components.</summary>
+    private SyncApplyResult ApplySyncHeld(
+        DispatchObject project, SyncPlan plan, IReadOnlySet<string> selected, ModuleSyncService.WriteModuleText write)
+    {
+        using (HoldCodePanes())
+        {
+            return ModuleSyncService.Apply(project, plan, selected, write);
+        }
+    }
+
+    private sealed class NoHold : IDisposable
+    {
+        public static readonly NoHold Instance = new();
+
+        public void Dispose()
+        {
+        }
+    }
     private AnalysisService? _analysis;
     private ImmediateEvaluator? _immediate;
     private ImmediateReader? _immediateReader;
@@ -428,7 +453,7 @@ internal sealed partial class AddInSession : IDisposable
                 // be ticked and would overwrite the developer's source with it. Measured
                 // 2026-08-09: one import and one export destroyed a Cyrillic file byte for byte,
                 // reporting "1 changed, 0 failed" at both ends.
-                var applied = ModuleSyncService.Apply(
+                var applied = ApplySyncHeld(
                     syncTarget, plan, chosen,
                     (component, text, owner) =>
                     {
@@ -1090,7 +1115,11 @@ internal sealed partial class AddInSession : IDisposable
                 using var candidate = components.GetItem(i);
                 if (IsScratchComponent(candidate?.GetString("Name")) && candidate is not null)
                 {
-                    components.InvokeWithObject("Remove", candidate);
+                    using (HoldCodePanes())
+                    {
+                        components.InvokeWithObject("Remove", candidate);
+                    }
+
                     Log.Info("immediate: the scratch module has been taken away");
                 }
             }
@@ -10984,8 +11013,13 @@ internal sealed partial class AddInSession : IDisposable
             var lastWords = ProjectReader.ReadSource(doomed);
             var lastKind = ComponentKind(doomed.GetInt32("Type"));
 
-            // Remove takes the COMPONENT, not an index.
-            components.InvokeWithObject("Remove", doomed);
+            // Remove takes the COMPONENT, not an index. The pane tracker is held for it: the
+            // editor pumps messages inside Remove, and a refresh taken then reads panes out of an
+            // editor mid-change (CodePaneTracker.Hold).
+            using (HoldCodePanes())
+            {
+                components.InvokeWithObject("Remove", doomed);
+            }
 
             RecordChange(
                 removed, foundIn ?? projectId, Core.Changes.ChangeKind.Removed, lastWords, null,

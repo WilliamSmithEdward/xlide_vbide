@@ -2123,3 +2123,38 @@ before it stays its own step. Measured rather than reasoned: a probe counted
 the model's undo elements after each of the suite's steps and spied on the
 element's `close` and `heapSize` and the model's `pushStackElement`; the count
 stayed at one and the spies never fired, which is what settled the mechanism.
+
+## 75. The pane tracker read the editor from inside the editor's own Remove
+
+The second live gate for 0.15.1 lost Excel to an access violation in VBE7.DLL
+during the attributes suite's apply, at three different fault offsets over
+five runs, and the crash did not care which build it was given: the 0.15.0
+shim, the 0.15.1 one, the 0.14.2 shim with today's page, and the whole 0.14.2
+configuration all faulted, the same operations that had passed the gate on
+September 6. Excel driven through its object model alone, with no add-in
+loaded, exported, removed and imported the same class three times and lived.
+What had changed was the machine: Windows installed KB5124007 at 18:35 that
+day and staged KB5124008 behind a pending reboot.
+
+The mechanism was ours all along. Applying attributes exports a module,
+removes the component and imports the file. The editor pumps messages inside
+Remove and Import, so the pane tracker's window-event hook runs then, and its
+refresh read the component list and the code panes out of an editor that was
+mid-change, after which the surface followed whatever pane was left and read
+that module's text from the same editor. Three different offsets is what a
+reader inside a writer looks like. Whether the update moved the events or
+only the timing is not established and does not matter: reading an object
+model from a callback its own teardown raises had never been sound.
+
+The tracker takes a hold now. While this product removes or imports a
+component - the attributes apply, a sync import, a checkout's import, the
+tree's remove, the Immediate window's scratch clean-up - the hook records
+what it heard and does nothing, and the release replays one refresh and the
+follow-ups once the editor is consistent again. Five attributes runs in a
+row on the machine that had faulted five in five.
+
+Two smaller things from the same afternoon. After a real fault, Excel's next
+start asks whether to start in safe mode, a modal the launcher could not see
+past; it is asked once, so the launcher stops that instance by id and starts
+again. And `release.ps1` runs the bare gate: the live half, which is what
+found both of these, has to be run by hand before the tag.

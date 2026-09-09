@@ -648,36 +648,45 @@ internal sealed partial class AddInSession
             }
 
             _editorSurface?.DiscardEdits(module, display);
-            components.InvokeWithObject("Remove", component);
-            removed = true;
-            try
+
+            // THE PANE TRACKER IS HELD from the remove to the read-back: the editor pumps
+            // messages inside Remove and Import, and the tracker's refresh, running then, read
+            // the panes and the components out of an editor mid-change (CodePaneTracker.Hold).
+            string roundTrip;
+            using (HoldCodePanes())
             {
-                components.Invoke("Import", temporary);
-            }
-            catch (Exception ex)
-            {
-                // THE MODULE IS OUT AND THE FILE IS ITS ONLY COPY. The export as it came goes
-                // back in before anything is said; if that fails too the outer catch keeps the
-                // file and names it.
-                Log.Warn($"attributes: the editor refused the rewritten {module} ({ex.GetType().Name}: {ex.Message}); putting the original back");
-                File.WriteAllText(temporary, exported, ansi);
-                components.Invoke("Import", temporary);
+                components.InvokeWithObject("Remove", component);
+                removed = true;
+                try
+                {
+                    components.Invoke("Import", temporary);
+                }
+                catch (Exception ex)
+                {
+                    // THE MODULE IS OUT AND THE FILE IS ITS ONLY COPY. The export as it came goes
+                    // back in before anything is said; if that fails too the outer catch keeps the
+                    // file and names it.
+                    Log.Warn($"attributes: the editor refused the rewritten {module} ({ex.GetType().Name}: {ex.Message}); putting the original back");
+                    File.WriteAllText(temporary, exported, ansi);
+                    components.Invoke("Import", temporary);
+                    removed = false;
+                    ComponentsChanged();
+                    return $"{module} could not take its attributes ({ex.Message}). Its code was put back as it was.";
+                }
                 removed = false;
-                ComponentsChanged();
-                return $"{module} could not take its attributes ({ex.Message}). Its code was put back as it was.";
-            }
-            removed = false;
 
-            using var imported = FindComponent(module, owner, out _);
-            if (imported is null)
-            {
-                keep = true;
-                Log.Warn($"attributes: the editor imported {module} but no module of that name came back");
-                ComponentsChanged();
-                return $"{module} was exported and removed, but the import did not bring it back under its name. Its text is in {temporary}.";
+                using var imported = FindComponent(module, owner, out _);
+                if (imported is null)
+                {
+                    keep = true;
+                    Log.Warn($"attributes: the editor imported {module} but no module of that name came back");
+                    ComponentsChanged();
+                    return $"{module} was exported and removed, but the import did not bring it back under its name. Its text is in {temporary}.";
+                }
+
+                roundTrip = ProjectReader.ReadSource(imported) ?? string.Empty;
             }
 
-            var roundTrip = ProjectReader.ReadSource(imported) ?? string.Empty;
             if (!ModuleSync.SameText(ModuleSync.CodeWithoutHeader(roundTrip), ModuleSync.CodeWithoutHeader(source)))
             {
                 Log.Warn($"attributes: {module} came back from the import with different code");
