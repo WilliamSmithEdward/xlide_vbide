@@ -45,11 +45,44 @@ function Check([string] $name, [bool] $ok, [string] $detail = '') {
     }
 }
 
+$ownedPidFile = Join-Path $dataFolder 'harness-excel.pid'
+
+function Get-RecordedPid {
+    if (-not (Test-Path $ownedPidFile)) { return 0 }
+    $recorded = 0
+    if ([int]::TryParse((Get-Content $ownedPidFile -Raw).Trim(), [ref] $recorded)) { return $recorded }
+    return 0
+}
+
+function Get-DoorFile {
+    # THE SESSION UNDER TEST: the Excel XLIDE_PID names (the gate's), else the one a restart here
+    # recorded, else the newest door whose process is alive. A door file outlives an Excel
+    # stopped by id, and the last file by name is anybody's - another automation's, when its
+    # tests opened the editor (2026-09-08).
+    $files = @(Get-ChildItem (Join-Path $dataFolder 'xlide-api-*.json') -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending)
+    $preferred = @()
+    if ($env:XLIDE_PID) { $preferred += [int] $env:XLIDE_PID }
+    $recorded = Get-RecordedPid
+    if ($recorded -gt 0) { $preferred += $recorded }
+    foreach ($id in $preferred) {
+        $match = $files | Where-Object { $_.BaseName -eq "xlide-api-$id" } | Select-Object -First 1
+        if ($match -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) { return $match }
+    }
+    foreach ($file in $files) {
+        if ($file.BaseName -match 'xlide-api-(\d+)$' -and (Get-Process -Id ([int] $Matches[1]) -ErrorAction SilentlyContinue)) {
+            return $file
+        }
+    }
+    return $null
+}
+
 function Get-Door {
-    $file = Get-ChildItem (Join-Path $dataFolder 'xlide-api-*.json') -ErrorAction SilentlyContinue |
-        Select-Object -Last 1
+    $file = Get-DoorFile
     if (-not $file) { return $null }
-    Get-Content $file.FullName -Raw | ConvertFrom-Json
+    $door = Get-Content $file.FullName -Raw | ConvertFrom-Json
+    $door | Add-Member -NotePropertyName 'hostPid' -NotePropertyValue ([int] ($file.BaseName -replace '^xlide-api-', '')) -Force
+    $door
 }
 
 function Test-Listening([int] $port) {
@@ -62,11 +95,26 @@ function Set-ApiSetting([bool] $on) {
     ($settings | ConvertTo-Json) | Out-File $settingsPath -Encoding utf8
 }
 
-function Restart-Editor {
-    Get-Process EXCEL -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force }
-    Start-Sleep -Seconds 3
+function Restart-Editor([int] $hostPid) {
+    # ONLY THE SESSION UNDER TEST is stopped, by id, and the Excel a restart here recorded when
+    # it started one. Every Excel by name was the old way, and it ended other automations'
+    # Excels in the middle of whatever statement they were running (#24).
+    $targets = @()
+    if ($hostPid -gt 0) { $targets += $hostPid }
+    $recorded = Get-RecordedPid
+    if ($recorded -gt 0) { $targets += $recorded }
+    foreach ($id in @($targets | Select-Object -Unique)) {
+        $standing = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($null -ne $standing -and $standing.ProcessName -eq 'EXCEL') {
+            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+            $standing.WaitForExit(10000) | Out-Null
+        }
+    }
+    Start-Sleep -Seconds 1
+    # -AllowExistingExcel: whatever else is running is left running, and the check starts its
+    # own process beside it.
     & powershell -NoProfile -ExecutionPolicy Bypass `
-        -File (Join-Path $PSScriptRoot 'Invoke-VbeLoadCheck.ps1') -KeepOpen | Out-Null
+        -File (Join-Path $PSScriptRoot 'Invoke-VbeLoadCheck.ps1') -KeepOpen -AllowExistingExcel | Out-Null
     Start-Sleep -Seconds 3
 }
 
@@ -125,13 +173,13 @@ Check 'the choice was written down' ($saved.'api.enabled' -eq $false)
 # remembered `false` outranking the build's own lean - which is the same mechanism that keeps a
 # shipped build shut when nobody has said anything at all.
 
-Restart-Editor
+Restart-Editor $door.hostPid
 Check 'a remembered no keeps the door shut, even in a build that leans open' (-not (Get-Door))
 
 # ---- put it back --------------------------------------------------------------------------
 
 Set-ApiSetting $true
-Restart-Editor
+Restart-Editor 0
 
 $back = Get-Door
 Check 'and a remembered yes opens it again' ($null -ne $back)

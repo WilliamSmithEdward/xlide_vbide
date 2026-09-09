@@ -23,12 +23,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $Database,
 
-    # Close any Access already running first. Access only - an Excel session beside it is somebody
-    # else's work and stays. It REFUSES when a running Access holds a database this harness did
-    # not open; -Force sweeps anyway.
+    # Close the Accesses this harness started first - the ones holding a fixture or chaos
+    # database - each by its own id. Access only, and every other Access stays, whoever started
+    # it: a stop by name ended other automations' hosts mid-statement (#24).
     [switch] $Fresh,
 
-    # Sweep even when a database that is none of this harness's business is open.
+    # Close EVERY Access the census saw, strangers included, each by id.
     [switch] $Force,
 
     # Seconds to wait for the host's window to appear.
@@ -58,17 +58,21 @@ if (-not [System.IO.Path]::IsPathRooted($Database)) { $Database = Join-Path $rep
 if (-not (Test-Path $Database)) { throw "No database at $Database." }
 
 if ($Fresh) {
-    # THE SAME GUARD the other two launchers carry: -Fresh closes every Access on the machine, and
-    # a database this harness did not open is somebody's actual work. A process whose database
-    # cannot be read counts as a stranger, because unreadable is not empty.
+    # THE SAME RULE the other two launchers carry: only an Access holding a database this harness
+    # put there is this harness's to close, and it is closed by id. A process whose database
+    # cannot be read is left standing, because unreadable is not empty, and so is one holding
+    # somebody's actual work; a stop by name ended other automations' hosts mid-statement (#24).
+    # -Force closes every Access the census saw.
     $mine = @(
         (Join-Path $repoRoot 'artifacts\fixtures'),
-        (Join-Path $repoRoot 'artifacts\chaos')
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
     ) | ForEach-Object {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
-    $strangers = @()
+    $ours = @()
+    $theirs = @()
     foreach ($running in @(Get-Process MSACCESS -ErrorAction SilentlyContinue)) {
         $held = $null
         try {
@@ -78,23 +82,33 @@ if ($Fresh) {
         catch { $held = $null }
 
         if ($null -eq $held) {
-            $strangers += "pid $($running.Id) (its database could not be read)"
-            continue
+            $theirs += "pid $($running.Id) (no database this harness can read)"
         }
-        foreach ($one in $held) {
-            if ($mine -notcontains $one) { $strangers += "$one (pid $($running.Id))" }
+        elseif (@($held | Where-Object { $mine -contains $_ }).Count -gt 0) {
+            $ours += $running.Id
+        }
+        else {
+            $theirs += "pid $($running.Id) ($($held -join ', '))"
         }
     }
 
-    if ($strangers.Count -gt 0 -and -not $Force) {
-        throw ("-Fresh closes every Access, and these are not this harness's to close:" +
-            [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
-            [Environment]::NewLine +
-            'Close them yourself, or pass -Force if the machine is yours to sweep.')
+    $stopping = @(if ($Force) { Get-Process MSACCESS -ErrorAction SilentlyContinue | ForEach-Object { $_.Id } } else { $ours })
+    foreach ($id in $stopping) {
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($id in $stopping) {
+        $stopped = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($null -ne $stopped) { $stopped.WaitForExit(10000) | Out-Null }
+    }
+    if ($stopping.Count -gt 0) {
+        $whose = if ($Force) { 'every Access' } else { "this harness's Access" }
+        Write-Host "Closed $whose by id: $($stopping -join ', ')."
     }
 
-    Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
+    if (-not $Force -and $theirs.Count -gt 0) {
+        Write-Host ("Left standing, not this harness's to close:" + [Environment]::NewLine + '  ' +
+            ($theirs -join ([Environment]::NewLine + '  ')))
+    }
 
     # A killed Access leaves its lock file behind, and the next open then reads as a second user
     # on the database rather than as the only one.

@@ -31,13 +31,12 @@ param(
     # The document or documents to open. Relative paths are taken from the repository root.
     [string[]] $Document,
 
-    # Close any Word already running first. Word only - an Excel session beside it is somebody
-    # else's work and stays.
-    # It closes every Word on the machine, so it REFUSES when one of them holds a document this
-    # harness did not open - see the guard below. -Force sweeps anyway.
+    # Close the Words this harness started first - the ones holding a fixture or chaos document -
+    # each by its own id. Word only, and every other Word stays, whoever started it: a stop by
+    # name ended other automations' hosts mid-statement (#24).
     [switch] $Fresh,
 
-    # Sweep even when a document that is none of this harness's business is open.
+    # Close EVERY Word the census saw, strangers included, each by id.
     [switch] $Force,
 
     # Seconds to wait for the host's window to appear.
@@ -135,18 +134,21 @@ $Document = @($Document | ForEach-Object {
 })
 
 if ($Fresh) {
-    # THE SAME GUARD Start-Excel.ps1 carries, and for the same reason: -Fresh closes every Word
-    # on the machine, and a document this harness did not open is somebody's actual work. A
-    # process whose documents cannot be read counts as a stranger, because unreadable is not
-    # empty. -Force is the way through when the machine really is yours.
+    # THE SAME RULE Start-Excel.ps1 carries, and for the same reason: only a Word holding a
+    # document this harness put there is this harness's to close, and it is closed by id. A
+    # process whose documents cannot be read is left standing, because unreadable is not empty,
+    # and so is one holding somebody's actual work; a stop by name ended other automations'
+    # hosts mid-statement (#24). -Force closes every Word the census saw.
     $mine = @(
         (Join-Path $repoRoot 'artifacts\fixtures'),
-        (Join-Path $repoRoot 'artifacts\chaos')
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
     ) | ForEach-Object {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
-    $strangers = @()
+    $ours = @()
+    $theirs = @()
     foreach ($running in @(Get-Process WINWORD -ErrorAction SilentlyContinue)) {
         $held = $null
         try {
@@ -158,24 +160,36 @@ if ($Fresh) {
         catch { $held = $null }
 
         if ($null -eq $held) {
-            $strangers += "pid $($running.Id) (its documents could not be read)"
-            continue
+            $theirs += "pid $($running.Id) (no document window this harness can read)"
         }
-
-        foreach ($document in $held) {
-            if ($mine -notcontains $document) { $strangers += "$document (pid $($running.Id))" }
+        elseif (@($held | Where-Object { $mine -contains $_ }).Count -gt 0) {
+            $ours += $running.Id
+        }
+        else {
+            $what = if ($held.Count -gt 0) { $held -join ', ' } else { 'no document open' }
+            $theirs += "pid $($running.Id) ($what)"
         }
     }
 
-    if ($strangers.Count -gt 0 -and -not $Force) {
-        throw ("-Fresh closes every Word, and these are not this harness's to close:" +
-            [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
-            [Environment]::NewLine +
-            'Close them yourself, or pass -Force if the machine is yours to sweep.')
+    $stopping = @(if ($Force) { Get-Process WINWORD -ErrorAction SilentlyContinue | ForEach-Object { $_.Id } } else { $ours })
+    foreach ($id in $stopping) {
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($id in $stopping) {
+        $stopped = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($null -ne $stopped) { $stopped.WaitForExit(10000) | Out-Null }
+    }
+    if ($stopping.Count -gt 0) {
+        $whose = if ($Force) { 'every Word' } else { "this harness's Word" }
+        Write-Host "Closed $whose by id: $($stopping -join ', ')."
     }
 
-    Get-Process WINWORD -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
+    if (-not $Force -and $theirs.Count -gt 0) {
+        # Word hands a document on its command line to an instance already running, so the
+        # launch below may not reach a window of its own while one of these stands.
+        Write-Host ("Left standing, not this harness's to close:" + [Environment]::NewLine + '  ' +
+            ($theirs -join ([Environment]::NewLine + '  ')))
+    }
 }
 
 # A harness terminates Word by design, and Word reads termination as a crash: on the next start

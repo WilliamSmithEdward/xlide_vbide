@@ -54,13 +54,40 @@ New-Item -ItemType Directory -Force $Folder | Out-Null
 $book = Join-Path $Folder 'MacroProbe.xlsm'
 Remove-Item $book -ErrorAction SilentlyContinue
 
-Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 2
+# THE PID OF THE EXCEL THIS SCRIPT MADE, from the Application's own window handle, never the
+# first titled Excel in the process list, which is another automation's when one is running.
+# And nothing here stops an Excel by name, or any Excel but its own: that ended other
+# automations' Excels mid-statement (#24). Quit first; a host made visible considers itself
+# user-owned and can outlive Quit, and that one is stopped by its id.
+Add-Type -Namespace XlideHarness -Name MacrosProbe -MemberDefinition @'
+[DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+'@
+
+function Get-HostPid([object] $application) {
+    $id = 0
+    [void] [XlideHarness.MacrosProbe]::GetWindowThreadProcessId([IntPtr] $application.Hwnd, [ref] $id)
+    return $id
+}
+
+function Stop-OwnHost([object] $application, [int] $hostPid) {
+    try { $application.Quit() } catch { }
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($application) | Out-Null } catch { }
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    $standing = Get-Process -Id $hostPid -ErrorAction SilentlyContinue
+    if ($null -ne $standing -and -not $standing.WaitForExit(10000)) {
+        Stop-Process -Id $hostPid -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host 'building the probe workbook'
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $false
 $excel.DisplayAlerts = $false
+$builderPid = Get-HostPid $excel
+$made = $null
+$project = $null
+$module = $null
 try {
     $made = $excel.Workbooks.Add()
     $project = $made.VBProject
@@ -80,10 +107,15 @@ try {
     $made.SaveAs($book, 52)
     $made.Close($false)
 } finally {
-    $excel.Quit()
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+    # Wrappers first, then Quit: one the collector finalises after its Excel has gone makes DCOM
+    # start a hidden Excel to answer the release.
+    foreach ($wrapper in @($module, $project, $made)) {
+        if ($null -ne $wrapper) {
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
+        }
+    }
+    Stop-OwnHost $excel $builderPid
 }
-Start-Sleep -Seconds 2
 
 # msoAutomationSecurityLow = 1, msoAutomationSecurityForceDisable = 3. Reached this way rather
 # than through the mark of the web, because the mark sends the file to Protected View first and
@@ -91,6 +123,8 @@ Start-Sleep -Seconds 2
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $true
 $excel.DisplayAlerts = $false
+$hostPid = Get-HostPid $excel
+$opened = $null
 
 function Try-Run([string] $name) {
     try { return @{ Ran = $true; Detail = "returned $($excel.Run("'$name'!Probe.Answer"))" } }
@@ -118,7 +152,6 @@ try {
     Check 'the VBA project is still loaded either way' ([bool] $opened.HasVBProject) 'HasVBProject'
 
     $excel.CommandBars.ExecuteMso('VisualBasic')
-    $hostPid = (Get-Process EXCEL | Where-Object { $_.MainWindowTitle } | Select-Object -First 1).Id
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $door = $null
@@ -130,12 +163,22 @@ try {
     Check 'the editor opens on a workbook it cannot run' ([bool] $door) "pid $hostPid"
     if (-not $door) { throw 'the door never came up' }
 
+    # AIMED BY PID through the client's own convention, because another session is a designed
+    # state now and a bare open() rightly refuses to guess between two doors.
     $probe = Join-Path $PSScriptRoot 'macros-disabled-probe.mjs'
-    $answer = & node $probe --pid $hostPid 2>&1 | Out-String
+    $env:XLIDE_PID = $hostPid
+    try {
+        $answer = & node $probe --pid $hostPid 2>&1 | Out-String
+    } finally {
+        $env:XLIDE_PID = $null
+    }
     Write-Host $answer.TrimEnd()
     if ($LASTEXITCODE -ne 0) { $failures.Add('the api probe reported failures') }
 } finally {
-    Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
+    if ($null -ne $opened) {
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($opened) | Out-Null } catch { }
+    }
+    Stop-OwnHost $excel $hostPid
 }
 
 Write-Host ''

@@ -36,15 +36,15 @@ param(
     # what makes them one session and one door.
     [string[]] $Workbook,
 
-    # Close any Excel already running first. A publish needs this anyway, because a host holds an
-    # add-in library open for its lifetime.
-    #
-    # It closes every Excel on the machine, so it REFUSES when one of them holds a workbook this
-    # harness did not put there - see the guard below. -Force sweeps anyway.
+    # Close the Excels this harness started first - the ones holding a fixture or chaos
+    # workbook - each by its own id. A publish needs this anyway, because a host holds an add-in
+    # library open for its lifetime. Every other Excel stays, whoever started it: the developer's
+    # own workbooks, and another automation's hidden instances, which a sweep by name was ending
+    # mid-statement (#24). When one stays, the fixture starts in a process of its own.
     [switch] $Fresh,
 
-    # Sweep even when a workbook that is none of this harness's business is open. For a machine
-    # that is genuinely yours; it is the switch that says "yes, I know, close them".
+    # Close EVERY Excel the census saw, strangers included, each by id. For a machine that is
+    # genuinely yours and on which nobody else's automation is running.
     [switch] $Force,
 
     # Start a SEPARATE Excel process rather than letting Excel reuse the one already running.
@@ -137,102 +137,103 @@ $Workbook = @($Workbook | ForEach-Object {
 
 if ($Fresh) {
     <#
-        -Fresh CLOSES EXCEL WITHOUT ASKING, and for a long time it did that to every Excel on
-        the machine. That is right for the fixtures this harness owns and catastrophic for
-        anything else: the developer works in their own workbooks beside these runs, and on
-        2026-08-29 one of theirs survived a sweep only because they had just reopened it. The
-        gate carries the same call, so a live run started while a real workbook was open would
-        have taken it down with everything unsaved in it.
+        -Fresh CLOSES ONLY WHAT THIS HARNESS STARTED. For a long time it closed every Excel on
+        the machine, behind a census that refused when a workbook it had not put there was
+        open. The refusal kept the developer's own workbooks safe (2026-08-29, one of theirs
+        survived a sweep only because they had just reopened it) and nothing else: an Excel
+        another automation drives over COM holds no workbook of ours and no window this census
+        can read, and a stop by name ended it in the middle of whatever statement was running.
+        vbaSQLBridge measured six runs in sixty lost while a fixture Excel was up, none in forty
+        after it had gone, with no crash record anywhere, because nothing crashed (#24).
 
-        So a workbook this harness did not put there stops the sweep and says which one. The
-        answer comes from the WORKBOOKS each process holds rather than its title bar, because a
-        title names only the active one and the developer's file is routinely the second in a
-        window. A process that cannot be read counts as a stranger: unreadable is not empty,
-        and guessing wrong here costs somebody their morning.
-
-        -Force is the way through when the machine really is yours.
+        So the census decides what is OURS - a process holding a workbook under the fixture or
+        chaos folders - and only those are stopped, each by its id. The answer comes from the
+        WORKBOOKS each process holds rather than its title bar, because a title names only the
+        active one. Everything else is left standing and named, and the fixture then starts in
+        a process of its own, because Excel would otherwise open it inside whichever instance is
+        already up. -Force stops every process the census saw, strangers included.
     #>
     $mine = @(
         (Join-Path $repoRoot 'artifacts\fixtures'),
-        (Join-Path $repoRoot 'artifacts\chaos')
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
     ) | ForEach-Object {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
-    # A process whose workbooks cannot be read gets a MOMENT before it counts as a stranger.
-    # An Excel mid-teardown answers nothing for a beat and is gone the next - the state a
-    # previous fixture group's own sweep routinely leaves at a step boundary - and refusing on
-    # the corpse cost three whole gate runs in one morning (2026-08-31). So the census retries
-    # while every stranger is merely unreadable, up to a short deadline; a workbook that is
-    # plainly somebody's refuses at once, and a process that STAYS unreadable is a stranger
-    # after all: unreadable is still not empty, and guessing wrong here still costs somebody
-    # their morning.
-    $undertaker = (Get-Date).AddSeconds(12)
-    while ($true) {
-        $strangers = @()
-        $merelyUnreadable = 0
-        foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
-            $held = $null
-            # EVERY WRAPPER THIS READ TAKES IS GIVEN BACK BEFORE THE SWEEP. A wrapper the collector
-            # finalises after its Excel has been killed makes DCOM start a fresh hidden Excel to
-            # answer the release - the "Book1" strangers this very census then refused on, run
-            # after run (2026-09-08). The window, its Application, the Workbooks collection and
-            # each workbook are released here, in reverse, while the process is still alive.
-            $itsWindow = $null
-            $itsApp = $null
-            $itsBooks = $null
-            try {
-                $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
-                if ($null -ne $itsWindow) {
-                    $itsApp = $itsWindow.Application
-                    $itsBooks = $itsApp.Workbooks
-                    $held = @()
-                    foreach ($book in $itsBooks) {
-                        $held += $book.FullName
-                        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($book) | Out-Null
-                    }
+    $ours = @()
+    $theirs = @()
+    foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
+        $held = $null
+        # EVERY WRAPPER THIS READ TAKES IS GIVEN BACK BEFORE THE SWEEP. A wrapper the collector
+        # finalises after its Excel has been killed makes DCOM start a fresh hidden Excel to
+        # answer the release (2026-09-08, a "Book1" after every kill). The window, its
+        # Application, the Workbooks collection and each workbook are released here, in reverse,
+        # while the process is still alive.
+        $itsWindow = $null
+        $itsApp = $null
+        $itsBooks = $null
+        try {
+            $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
+            if ($null -ne $itsWindow) {
+                $itsApp = $itsWindow.Application
+                $itsBooks = $itsApp.Workbooks
+                $held = @()
+                foreach ($book in $itsBooks) {
+                    $held += $book.FullName
+                    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($book) | Out-Null
                 }
             }
-            catch { $held = $null }
-            finally {
-                foreach ($wrapper in @($itsBooks, $itsApp, $itsWindow)) {
-                    if ($null -ne $wrapper) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
-                    }
+        }
+        catch { $held = $null }
+        finally {
+            foreach ($wrapper in @($itsBooks, $itsApp, $itsWindow)) {
+                if ($null -ne $wrapper) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
                 }
             }
-
-            if ($null -eq $held) {
-                $strangers += "pid $($running.Id) (its workbooks could not be read)"
-                $merelyUnreadable += 1
-                continue
-            }
-
-            foreach ($book in $held) {
-                if ($mine -notcontains $book) { $strangers += "$book (pid $($running.Id))" }
-            }
         }
 
-        if ($strangers.Count -eq 0 -or $Force) {
-            # And the collector runs NOW, with every Excel still alive: a wrapper missed above is
-            # released while its server can still answer, rather than after the kill below.
-            [GC]::Collect()
-            [GC]::WaitForPendingFinalizers()
-            break
+        if ($null -eq $held) {
+            # A hidden automation instance, or one mid-teardown: no window to ask, and not ours
+            # to close on a guess. Unreadable is not empty.
+            $theirs += "pid $($running.Id) (no workbook window this harness can read)"
         }
-
-        if ($strangers.Count -ne $merelyUnreadable -or (Get-Date) -ge $undertaker) {
-            throw ("-Fresh closes every Excel, and these are not this harness's to close:" +
-                [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
-                [Environment]::NewLine +
-                'Close them yourself, or pass -Force if the machine is yours to sweep.')
+        elseif (@($held | Where-Object { $mine -contains $_ }).Count -gt 0) {
+            $ours += $running.Id
         }
-
-        Start-Sleep -Milliseconds 500
+        else {
+            $what = if ($held.Count -gt 0) { $held -join ', ' } else { 'no workbook open' }
+            $theirs += "pid $($running.Id) ($what)"
+        }
     }
 
-    Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
+    # The collector runs NOW, with every Excel still alive: a wrapper missed above is released
+    # while its server can still answer, rather than after the stop below.
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+
+    $stopping = @(if ($Force) { Get-Process EXCEL -ErrorAction SilentlyContinue | ForEach-Object { $_.Id } } else { $ours })
+    foreach ($id in $stopping) {
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($id in $stopping) {
+        $stopped = Get-Process -Id $id -ErrorAction SilentlyContinue
+        if ($null -ne $stopped) { $stopped.WaitForExit(10000) | Out-Null }
+    }
+    if ($stopping.Count -gt 0) {
+        $whose = if ($Force) { 'every Excel' } else { "this harness's Excel" }
+        Write-Host "Closed $whose by id: $($stopping -join ', ')."
+    }
+
+    if (-not $Force -and $theirs.Count -gt 0) {
+        Write-Host ("Left standing, not this harness's to close:" + [Environment]::NewLine + '  ' +
+            ($theirs -join ([Environment]::NewLine + '  ')))
+        # SEPARATE, or the fixture opens inside theirs: Excel hands a workbook on its command line
+        # to an instance already running, and the door would then be in a process this harness
+        # never started.
+        $Separate = $true
+    }
 }
 
 # A harness terminates Excel by design, and Excel reads termination as a crash: on the next start
@@ -249,7 +250,8 @@ $arguments = @($Workbook | ForEach-Object { '"{0}"' -f $_ })
 if ($Separate) { $arguments = @('/x') + $arguments }
 $process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
 $names = ($Workbook | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
-Write-Host "Started Excel as process $($process.Id) on $names."
+$apart = if ($Separate) { ', in a process of its own' } else { '' }
+Write-Host "Started Excel as process $($process.Id) on $names$apart."
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $window = $null

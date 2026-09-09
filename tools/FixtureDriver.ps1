@@ -50,8 +50,7 @@ function Invoke-FixtureLaunch {
         # minute later, which the launcher's -Fresh census rightly reads as a stranger's and
         # refuses to close (2026-09-08: four builds in a row refused on an Excel this driver had
         # summoned). So the wrappers go first, in reverse order, then Quit, then the collector,
-        # and any Excel step 1 brought into existence is waited for and stopped if it will not
-        # leave, because it is this driver's own whichever way it arrived.
+        # and the maker is waited for and stopped by id if it will not leave.
         foreach ($wrapper in @($blank, $books)) {
             if ($null -ne $wrapper) {
                 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null
@@ -69,11 +68,16 @@ function Invoke-FixtureLaunch {
             }
         }
         Start-Sleep -Seconds 2
+
+        # NAMED, NOT STOPPED. An Excel that appeared while this step ran may be a hidden one DCOM
+        # started to answer a wrapper released late - this driver's own - or another automation's,
+        # started in the same seconds, and the process list cannot tell the two apart. Stopping on
+        # that guess ended other automations' Excels mid-statement (#24); the wrapper release
+        # above is what keeps the first kind from appearing at all.
         Get-Process EXCEL -ErrorAction SilentlyContinue |
-            Where-Object { $before -notcontains $_.Id } |
+            Where-Object { $before -notcontains $_.Id -and $makerPid -notcontains $_.Id } |
             ForEach-Object {
-                Write-Host "   an Excel this step summoned (pid $($_.Id)) is still standing; stopping it."
-                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+                Write-Host "   an Excel appeared during this step (pid $($_.Id)); left standing, it is not this driver's to close."
             }
     }
 

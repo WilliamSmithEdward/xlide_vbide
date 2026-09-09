@@ -94,8 +94,10 @@ tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm -F
 **Always with `-Fresh`.** Excel reuses one process for several workbooks, so launching while an
 older instance is still shutting down attaches to that one and the script dies on "Could not reach
 Excel NNNN through its window". It is not a real failure and it costs a minute every time. The
-switch closes what is running first, and does it more reliably than killing the process by hand,
-because the window can outlive the kill by a second or two.
+switch closes the Excel this harness started first - the one holding a fixture or chaos workbook,
+by its id - and waits for it to go. Every other Excel stays, whoever started it: yours, and
+another automation's hidden instances, which a stop by name was ending mid-statement (#24). When
+one stays, the fixture starts in a process of its own, and the launcher says which it left.
 
 Not `New-Object -ComObject Excel.Application`. A host created through automation runs in
 **embedding mode** and loads **no add-ins**, so the thing under test is never there. It has to be
@@ -141,7 +143,7 @@ node tools\harness\access.mjs
 ```
 
 Access keeps one database per process, so there is no joining several on a command line, and its
-`-Fresh` closes every Access rather than every Excel. The database is built by
+`-Fresh` closes the Access this harness started rather than an Excel. The database is built by
 `tools\New-AccessFixture.ps1`, which has to save each module by name through `DoCmd`: Access,
 alone among the hosts, does not write a module created through the object model into the file
 when the file is saved, so a session closed without that leaves the modules behind.

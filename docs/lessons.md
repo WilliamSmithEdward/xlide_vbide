@@ -2073,3 +2073,29 @@ Consequence, beyond the fix: a generated module must not declare an option the
 host may already have declared. The dispatcher now lower-cases its keys and its
 lookups in the generated code, so the matching it wanted Option Compare Text for
 holds under whatever any host prepends.
+
+## 73. Stopping Excel by name ended somebody else's Excel mid-statement
+
+Three harness scripts closed Excel with `Get-Process EXCEL | Stop-Process`,
+behind a census that refused when a workbook the harness had not put there was
+open. The refusal protected the developer's own workbooks and nothing else. An
+Excel another automation drives over COM holds no workbook of ours and has no
+window the census can read, so it was a stranger the census could not name, and
+`-Force` - or a hand-typed sweep - ended it in the middle of whatever statement
+was running. vbaSQLBridge's suite measured six runs in sixty lost while a
+fixture Excel was up and none in forty after it had gone, with no crash record
+anywhere, because nothing had crashed; from that side it read as a bug in
+whichever statement the process vanished under, and three wrong causes were
+ruled out before the mechanism turned up here (#24). The same afternoon, this
+side had read those hidden instances as DCOM strays of its own and swept them.
+
+The rule now is that the harness stops only what it started, by id: the launcher
+stops the Excel holding a fixture or chaos workbook and names what it leaves
+standing, the fixture driver names an Excel that appeared during its step rather
+than stopping it, Test-MacrosDisabled takes its host's pid from the
+Application's own window handle, and Test-ApiSwitch restarts the session under
+test and no other. When another Excel stands, the fixture starts with `/x`,
+because Excel hands a workbook on its command line to a running instance, a
+hidden automation one included. `-Force` remains the explicit sweep, and an
+`/automation -Embedding` command line is not evidence of a stray: it is what
+every COM-driven Excel looks like.

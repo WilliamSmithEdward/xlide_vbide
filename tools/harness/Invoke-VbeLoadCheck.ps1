@@ -195,7 +195,12 @@ try {
         $scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsm'
         if (-not (Test-Path $scratch)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
 
-        $excelProcess = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $scratch -PassThru
+        # IN A PROCESS OF ITS OWN when an Excel is already up: Excel hands a workbook on its
+        # command line to a running instance, a hidden automation one included, and the check
+        # would then be looking at a process it never started (#24).
+        $arguments = @($scratch)
+        if ($preExisting.Length -gt 0) { $arguments = @('/x') + $arguments }
+        $excelProcess = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
         New-Item -ItemType Directory -Force -Path (Split-Path $ownedPidFile) | Out-Null
         Set-Content -Path $ownedPidFile -Value $excelProcess.Id
 
