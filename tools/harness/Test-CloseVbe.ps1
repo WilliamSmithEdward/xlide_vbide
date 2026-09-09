@@ -40,7 +40,10 @@ public static IntPtr FrameOf(int processId)
 }
 '@
 
-$excelProcess = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+# The instance under test is the one the caller named through XLIDE_PID when it did; the first
+# EXCEL in the process list may be an automation Excel of somebody else's (2026-09-08).
+$excelProcess = if ($env:XLIDE_PID) { Get-Process -Id ([int]$env:XLIDE_PID) -ErrorAction SilentlyContinue }
+if (-not $excelProcess) { $excelProcess = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1 }
 if (-not $excelProcess) { Write-Output 'RESULT: FAIL - no Excel is running'; exit 1 }
 $processId = $excelProcess.Id
 

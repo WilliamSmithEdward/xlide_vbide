@@ -173,13 +173,34 @@ if ($Fresh) {
         $merelyUnreadable = 0
         foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
             $held = $null
+            # EVERY WRAPPER THIS READ TAKES IS GIVEN BACK BEFORE THE SWEEP. A wrapper the collector
+            # finalises after its Excel has been killed makes DCOM start a fresh hidden Excel to
+            # answer the release - the "Book1" strangers this very census then refused on, run
+            # after run (2026-09-08). The window, its Application, the Workbooks collection and
+            # each workbook are released here, in reverse, while the process is still alive.
+            $itsWindow = $null
+            $itsApp = $null
+            $itsBooks = $null
             try {
                 $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
                 if ($null -ne $itsWindow) {
-                    $held = @($itsWindow.Application.Workbooks | ForEach-Object { $_.FullName })
+                    $itsApp = $itsWindow.Application
+                    $itsBooks = $itsApp.Workbooks
+                    $held = @()
+                    foreach ($book in $itsBooks) {
+                        $held += $book.FullName
+                        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($book) | Out-Null
+                    }
                 }
             }
             catch { $held = $null }
+            finally {
+                foreach ($wrapper in @($itsBooks, $itsApp, $itsWindow)) {
+                    if ($null -ne $wrapper) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
+                    }
+                }
+            }
 
             if ($null -eq $held) {
                 $strangers += "pid $($running.Id) (its workbooks could not be read)"
@@ -192,7 +213,13 @@ if ($Fresh) {
             }
         }
 
-        if ($strangers.Count -eq 0 -or $Force) { break }
+        if ($strangers.Count -eq 0 -or $Force) {
+            # And the collector runs NOW, with every Excel still alive: a wrapper missed above is
+            # released while its server can still answer, rather than after the kill below.
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            break
+        }
 
         if ($strangers.Count -ne $merelyUnreadable -or (Get-Date) -ge $undertaker) {
             throw ("-Fresh closes every Excel, and these are not this harness's to close:" +
@@ -242,8 +269,22 @@ $excel.DisplayAlerts = $false
 # not an exception, a null, so a try/catch reports success and prints nothing. ExecuteMso is
 # Excel executing its own Developer > Visual Basic button, and is not gated. So this script, and
 # everything the xlide api does after it, works with that setting OFF (verified 2026-08-07).
-$excel.CommandBars.ExecuteMso('VisualBasic')
+$commandBars = $excel.CommandBars
+$commandBars.ExecuteMso('VisualBasic')
 Write-Host 'Editor opened (through the ribbon command, which needs no VBA project trust).'
+
+# GIVEN BACK NOW, not left for the collector. A fixture generator dot-sources this script and
+# stops the very Excel it attached to when it is done; a wrapper finalised after that kill makes
+# DCOM start a fresh hidden Excel to answer the release (2026-09-08). Everything after this line
+# talks to the door over HTTP and needs none of these.
+foreach ($wrapper in @($commandBars, $excel, $window)) {
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
+}
+$commandBars = $null
+$excel = $null
+$window = $null
+[GC]::Collect()
+[GC]::WaitForPendingFinalizers()
 
 # What is in the project is asked of the DOOR, for the same reason.
 $listed = $false

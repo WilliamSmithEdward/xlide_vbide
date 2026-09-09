@@ -529,12 +529,31 @@ if ($Live) {
         $books = @($fixture -split ' \+ ' | ForEach-Object {
             Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $_.Trim())
         })
-        & (Join-Path $repoRoot 'tools\harness\Start-Excel.ps1') -Workbook $books -Fresh | Out-Host
-
-        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        # THE PID THE LAUNCHER PRINTS, never the first EXCEL in the process list: an automation
+        # Excel that another session's tests summoned sorts first there (2026-09-08), and a
+        # suite aimed at it refuses with "no instance with pid".
+        $said = @(& (Join-Path $repoRoot 'tools\harness\Start-Excel.ps1') -Workbook $books -Fresh *>&1)
+        $said | Out-Host
+        $started = $said | ForEach-Object { "$_" } | Select-String 'pid=(\d+)' | Select-Object -Last 1
+        $excel = if ($started) { Get-Process -Id ([int]$started.Matches[0].Groups[1].Value) -ErrorAction SilentlyContinue }
         if (-not $excel) { throw "Excel did not start on $fixture" }
 
         return $excel
+    }
+
+    # The Excel that has the shim in it, named by its door file rather than by its place in the
+    # process list, which an automation Excel of somebody else's may head. A door file older than
+    # the process it names is one a dead instance left behind a reused pid.
+    function Find-DoorExcel {
+        $doors = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'xlide_vbide') -Filter 'xlide-api-*.json' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+        foreach ($door in $doors) {
+            if ($door.BaseName -notmatch 'xlide-api-(\d+)$') { continue }
+            $excel = Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue
+            if ($excel -and $excel.ProcessName -eq 'EXCEL' -and $excel.StartTime -le $door.LastWriteTime) { return $excel }
+        }
+
+        return $null
     }
 
     # THE GATE NAMES ITS OWN SESSION, for exactly as long as it drives it. A bare open() refuses
@@ -943,7 +962,7 @@ if ($Live) {
     # Every read route, many rounds, live count before and after. See lessons.md entry 36.
     Step 'no leaks' {
         # Whatever the suites left open is fine: the sweep brings its own state and puts it back.
-        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        $excel = Find-DoorExcel
         if (-not $excel) { $excel = Use-Fixture 'DebugFixture.xlsm' }
 
         $answer = Invoke-Aimed $excel.Id { node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1 }
@@ -965,11 +984,13 @@ if ($Live) {
     # cycles; ~10 seconds on the session the sweep above leaves open. The -Deep phase after
     # this is safe because every deep group relaunches fresh.
     Step 'closing the editor leaves Excel standing' {
-        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        $excel = Find-DoorExcel
         if (-not $excel) { throw 'no Excel to close the editor of; the live half should have left one open' }
 
-        $answer = powershell -NoProfile -ExecutionPolicy Bypass `
-            -File (Join-Path $repoRoot 'tools\harness\Test-CloseVbe.ps1') 2>&1
+        $answer = Invoke-Aimed $excel.Id {
+            powershell -NoProfile -ExecutionPolicy Bypass `
+                -File (Join-Path $repoRoot 'tools\harness\Test-CloseVbe.ps1') 2>&1
+        }
         $answer | Out-Host
         $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
         if ("$verdict" -notmatch 'PASS') { throw 'Test-CloseVbe.ps1 did not pass' }
