@@ -47,18 +47,18 @@ public static class ScmRows
 
         foreach (var module in live)
         {
-            var file = ModuleSync.FileNameFor(module.Name, module.Kind);
-            if (head.TryGetValue(file, out var committed))
+            if (FileOf(module, head) is { } paired)
             {
-                claimed.Add(file);
-                if (!ModuleSync.SameText(Code(committed), Code(module.Code)))
+                claimed.Add(paired.File);
+                if (!ModuleSync.SameText(Code(paired.Text), Code(module.Code)))
                 {
-                    rows.Add(new ScmRow(module.Name, module.Kind, file, "modified", null));
+                    rows.Add(new ScmRow(module.Name, module.Kind, paired.File, "modified", null));
                 }
             }
             else
             {
-                rows.Add(new ScmRow(module.Name, module.Kind, file, "added", null));
+                rows.Add(new ScmRow(
+                    module.Name, module.Kind, ModuleSync.FileNameFor(module.Name, module.Kind), "added", null));
             }
         }
 
@@ -111,18 +111,18 @@ public static class ScmRows
 
         foreach (var module in live)
         {
-            var file = ModuleSync.FileNameFor(module.Name, module.Kind);
-            if (folder.TryGetValue(file, out var onDisk))
+            if (FileOf(module, folder) is { } paired)
             {
-                claimed.Add(file);
-                if (!ModuleSync.SameText(Code(onDisk), Code(module.Code)))
+                claimed.Add(paired.File);
+                if (!ModuleSync.SameText(Code(paired.Text), Code(module.Code)))
                 {
-                    rows.Add(new ScmRow(module.Name, module.Kind, file, "folderNewer", null));
+                    rows.Add(new ScmRow(module.Name, module.Kind, paired.File, "folderNewer", null));
                 }
             }
             else
             {
-                rows.Add(new ScmRow(module.Name, module.Kind, file, "missingInFolder", null));
+                rows.Add(new ScmRow(
+                    module.Name, module.Kind, ModuleSync.FileNameFor(module.Name, module.Kind), "missingInFolder", null));
             }
         }
 
@@ -149,6 +149,33 @@ public static class ScmRows
     /// </summary>
     private static string Code(string text) =>
         ModuleSync.CodeWithoutHeader(text).TrimEnd('\n');
+
+    /// <summary>
+    /// The file a live module has on the other side: the name this product writes, or, for a
+    /// form, the .cls the companion editor writes a form as (xlide_vscode#21) when no .frm is
+    /// there. A folder the two products share holds a form either way, and read by name alone it
+    /// was two false rows - the form "added" under the spelling this side writes and its own file
+    /// "deleted" - where the file is the form's, whatever it is called.
+    /// </summary>
+    private static (string File, string Text)? FileOf(ScmLiveModule module, Dictionary<string, string> files)
+    {
+        var file = ModuleSync.FileNameFor(module.Name, module.Kind);
+        if (files.TryGetValue(file, out var text))
+        {
+            return (file, text);
+        }
+
+        if (string.Equals(module.Kind, "userform", StringComparison.OrdinalIgnoreCase))
+        {
+            var asClass = ModuleSync.FileNameFor(module.Name, "class");
+            if (files.TryGetValue(asClass, out var classText) && ModuleSync.IsFormText(classText))
+            {
+                return (asClass, classText);
+            }
+        }
+
+        return null;
+    }
 
     private static Dictionary<string, string> ByFileName(IReadOnlyDictionary<string, string> files)
     {

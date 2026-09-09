@@ -39,8 +39,36 @@ internal sealed partial class AddInSession
 
     private const string HistoryFacePrefix = "history:";
 
-    /// <summary>git.exe, found once per session on the first pool-thread use, or null when absent.</summary>
-    private readonly Lazy<GitClient?> _git = new(GitClient.Locate);
+    /// <summary>git.exe as last found, or null while it is absent.</summary>
+    private GitClient? _gitClient;
+
+    /// <summary>When git was last looked for and not found, so a session without it does not
+    /// start a process per status.</summary>
+    private long _gitMissedAtTicks;
+
+    /// <summary>
+    /// git.exe, found on the first use and LOOKED FOR AGAIN when it was not there: the noGit
+    /// state tells the developer to install Git for Windows and press Refresh, and a lookup made
+    /// once per session would make that sentence a lie until the next restart. A miss is
+    /// remembered for five seconds, because each look starts a process. On the pool thread.
+    /// </summary>
+    private GitClient? GitNow()
+    {
+        if (_gitClient is { } found)
+        {
+            return found;
+        }
+
+        var now = Environment.TickCount64;
+        if (now - Interlocked.Read(ref _gitMissedAtTicks) < 5000)
+        {
+            return null;
+        }
+
+        Interlocked.Exchange(ref _gitMissedAtTicks, now);
+        _gitClient = GitClient.Locate();
+        return _gitClient;
+    }
 
     /// <summary>
     /// What this session knows per project under source control: the repository watcher and the
@@ -652,7 +680,7 @@ internal sealed partial class AddInSession
     private ScmWork RunScmCore(ScmGather g)
     {
         var answersStatus = ActionAnswersStatus(g.Action);
-        var git = _git.Value;
+        var git = GitNow();
         var version = git?.Version ?? string.Empty;
 
         // The states before a repository, in the order the pane draws them.
@@ -753,13 +781,30 @@ internal sealed partial class AddInSession
             case "fetch" or "pull" or "push":
             {
                 var remotes = Git(git, root, GitDeadline, "remote");
-                if (remotes.StdOut.Trim().Length == 0)
+                var remoteNames = remotes.StdOut.Split(
+                    '\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (remoteNames.Length == 0)
                 {
                     return Answer(g, ScmError($"{g.Action} needs a remote, and {root} has none configured; add one with "
                         + "`git remote add origin <url>`"), root);
                 }
 
-                var ran = Git(git, root, GitRemoteDeadline, g.Action);
+                // A FIRST PUSH SETS THE UPSTREAM ITSELF. Bare `git push` on a branch with no
+                // upstream stops to ask for `--set-upstream`, which is the one thing a button
+                // cannot answer: origin when there is one, else the only remote there is.
+                string[] args;
+                var hasUpstream = Git(git, root, GitDeadline, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").Ok;
+                if (g.Action == "push" && !hasUpstream)
+                {
+                    var remote = remoteNames.Contains("origin", StringComparer.Ordinal) ? "origin" : remoteNames[0];
+                    args = ["push", "-u", remote, "HEAD"];
+                }
+                else
+                {
+                    args = [g.Action];
+                }
+
+                var ran = git.RunAsync(root, args, GitRemoteDeadline).GetAwaiter().GetResult();
                 if (!ran.Ok)
                 {
                     return Answer(g, ScmError($"{g.Action} failed: {ran.Words}"), root);
@@ -1423,8 +1468,13 @@ internal sealed partial class AddInSession
     private ScmStep ScmApply(ScmWork work)
     {
         var g = work.Gather;
-        if (work.Root is not null && g.Folder.Length > 0 && g.ProjectId.Length > 0)
+        if (work.Root is not null && g.Folder.Length > 0 && g.ProjectId.Length > 0
+            && LoadSyncSettings().For(g.ProjectId).Repository is { Length: > 0 } named
+            && SamePath(named, g.Folder))
         {
+            // Read again, not taken from the gather: a forget can land while the round is out with
+            // git, and a watcher armed for the folder it gathered would hold that folder, and stamp
+            // the page for it, until the workbook closed.
             EnsureScmWatch(g.ProjectId, work.Root, g.Folder);
         }
 

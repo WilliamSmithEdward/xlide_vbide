@@ -206,4 +206,52 @@ public sealed class ScmRowsTests
             [new ScmLiveModule("Ledger", "standard", LedgerCode)],
             Files(("Ledger.bas", LedgerFile), (".xlide-sync.lock", "xlide, process 1"))));
     }
+
+    /// <summary>The companion editor writes a form as .cls (xlide_vscode#21); this side writes .frm.</summary>
+    private const string FormAsClass = """
+        VERSION 5.00
+        Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} EntryForm
+           Caption         =   "Entry"
+           OleObjectBlob   =   "EntryForm.frx":0000
+        End
+        Attribute VB_Name = "EntryForm"
+        Attribute VB_GlobalNameSpace = False
+        Option Explicit
+        Private Sub OkButton_Click()
+        End Sub
+
+        """;
+
+    [Fact]
+    public void AFormTheCompanionWroteAsAClassFileIsItsOwnFile()
+    {
+        // A folder shared with the companion editor holds EntryForm.cls for the form. Read by
+        // the name this side writes alone, that was the form "added" as EntryForm.frm beside its
+        // own file "deleted" - two rows over a form nothing had touched.
+        var live = new ScmLiveModule(
+            "EntryForm", "userform", "Option Explicit\r\nPrivate Sub OkButton_Click()\r\nEnd Sub");
+
+        Assert.Empty(ScmRows.Compute([live], Files(("EntryForm.cls", FormAsClass)), []));
+        Assert.Empty(ScmRows.Outside([live], Files(("EntryForm.cls", FormAsClass))));
+
+        // And a change is a change of THAT file.
+        var edited = live with { Code = live.Code + "\r\n' typed since" };
+        Assert.Equal(
+            [new ScmRow("EntryForm", "userform", "EntryForm.cls", "modified", null)],
+            ScmRows.Compute([edited], Files(("EntryForm.cls", FormAsClass)), []));
+    }
+
+    [Fact]
+    public void AClassFileThatIsNotAFormDoesNotStandInForOne()
+    {
+        var live = new ScmLiveModule("EntryForm", "userform", "Option Explicit");
+
+        // Two rows for one name: sorted by file within the module.
+        Assert.Equal(
+            [
+                new ScmRow("EntryForm", "class", "EntryForm.cls", "deleted", null),
+                new ScmRow("EntryForm", "userform", "EntryForm.frm", "added", null),
+            ],
+            ScmRows.Compute([live], Files(("EntryForm.cls", $"{ClassHeader}\r\nOption Explicit\r\n")), []));
+    }
 }

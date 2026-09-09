@@ -221,7 +221,8 @@ internal static class AgentGuide
             + "module=), diff and show line a module's live text against ref= (HEAD when absent), "
             + "open puts the text at ref= in a read-only tab, restore writes it into the module "
             + "as a change-log round, blame maps the committed lines onto the editor's, checkout "
-            + "switches branch and imports, fetch/pull/push run git, abort ends a merge.",
+            + "switches branch and imports, fetch/pull/push run git (a first push sets the upstream "
+            + "itself), abort ends a merge.",
             "GET scm", true, DoorPolicy.HttpOnly,
             "git runs on the pool thread and the host thread is crossed only to read and write "
             + "the project, so it never blocks the editor; the inside door holds that very "

@@ -116,10 +116,36 @@ mkdirSync(scratch, { recursive: true });
 const folder = realpathSync.native(scratch);
 console.log(`folder: ${folder}\n`);
 
+// A bare repository beside the folder stands in for a remote: no credentials, no network, and
+// push, fetch and pull run for real against it.
+const remote = `${folder}-remote`;
+rmSync(remote, { recursive: true, force: true });
+
 const held = (name) => api.readModule(name, project.projectId).then((one) => one.text);
 const write = (name, text, by) => api.writeModule(name, text, project.projectId, { by });
 const scm = (args = {}) => api.scm({ ...args, project: project.projectId });
 const log = (args = {}) => api.changes({ ...args, project: project.projectId });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Windows refuses to delete a folder that is some process's working directory, and git runs
+// with its own in the repository: a round the pane started before the forget can still be out
+// with git when the cleanup reaches the folder. rmSync's own retries never fire for that: asked
+// for ten of them, it threw EPERM after 0ms against a folder a process sat in (2026-09-08), so
+// this asks again itself, for up to ten seconds.
+const removeWhenFree = async (path) => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return null;
+    } catch (error) {
+      if (attempt >= 40) {
+        return error.message;
+      }
+
+      await sleep(250);
+    }
+  }
+};
 
 // Every action answers the status after acting; commit and import carry it under `status`,
 // which is how the pane redraws after them. One reader for both shapes.
@@ -442,19 +468,66 @@ try {
   const commitOpened = await api.act("scmPane", { commit: first.short });
   check("a commit opens from the pane's history", commitOpened.did, true);
 
-  // A remote that cannot answer, so the fetch reaches git and fails in git's own words at once
-  // rather than hanging on a hidden prompt. With no remote at all the route refuses before git
-  // runs, which proves nothing about the prompt; and git itself, asked to fetch with no remote,
-  // prints nothing and exits 0.
-  git("remote", "add", "origin", join(folder, "nowhere"));
-  const fetched = await scm({ action: "fetch" }).catch((error) => ({ detail: error.message }));
+  // ---- a remote: a bare repository beside the folder, then one that cannot answer -------------
+
+  execFileSync(gitExe, ["init", "--bare", remote], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  git("remote", "add", "origin", remote);
+  const onBranch = (await scm()).branch;
+  const pushed = await scm({ action: "push" });
+  check("a first push sets the upstream itself", pushed.upstream, `origin/${onBranch}`);
+  check("and leaves the branch level with it", [pushed.ahead, pushed.behind], [0, 0]);
+  check("and git agrees the remote holds the branch",
+    git("ls-remote", "--heads", "origin").includes(`refs/heads/${onBranch}`), true);
+  const fetched = await scm({ action: "fetch" });
+  check("fetch answers the status", fetched.state, "ready");
+  const pulled = await scm({ action: "pull" });
+  check("pull with nothing to pull says so in git's words", /up to date/i.test(pulled.detail ?? ""), true);
+
+  // Then a remote that cannot answer, so the failure is git's own words at once rather than a
+  // hang on a hidden prompt. With no remote at all the route refuses before git runs, which
+  // proves nothing about the prompt; and git itself, asked to fetch with no remote, prints
+  // nothing and exits 0.
+  git("remote", "set-url", "origin", join(folder, "nowhere"));
+  const broken = await scm({ action: "fetch" }).catch((error) => ({ detail: error.message }));
   check("fetch against a remote that cannot answer fails in git's own words, without hanging",
-    /does not appear to be a git repository|could not read from remote/i.test(fetched.detail ?? ""), true);
+    /does not appear to be a git repository|could not read from remote/i.test(broken.detail ?? ""), true);
 
   // ---- and the way out ------------------------------------------------------------------------
 
-  const forgotten = await scm({ action: "forget" });
+  // RACED ON PURPOSE: a status round is out with git for a few hundred milliseconds, and a forget
+  // that lands inside that window used to be undone by the round's last step, which armed the
+  // watcher for the folder it had gathered. The forgotten folder then refused to delete and
+  // stamped the page until the workbook closed. The door answers concurrently, so the forget can
+  // overtake the round; a reply that already says noFolder means it did not, and the race is run
+  // again from a fresh pointing.
+  let overtaken = null;
+  let forgotten = null;
+  let sinceRace = 0;
+  for (let attempt = 0; attempt < 5 && overtaken === null; attempt += 1) {
+    if (attempt > 0) {
+      await scm({ action: "settings", folder });
+      await paneIdle();
+    }
+
+    sinceRace = (await api.log({ max: 1 })).next;
+    const inFlight = scm();
+    await sleep(30);
+    forgotten = await scm({ action: "forget" });
+    const raced = await inFlight;
+    overtaken = raced.state === "noFolder" ? null : raced.state;
+  }
+
   check("forgetting the folder puts the project back under no source control", forgotten.state, "noFolder");
+  check("the forget overtook a status round that had gathered the folder", overtaken, "ready");
+
+  // THE LOG IS THE WITNESS, because the fault is invisible from outside: a watcher holds its
+  // folder with delete sharing, so the folder still deletes, and the stamps it sends land on a
+  // pane that answers "no folder". The host logs "watching" only when it arms a new watcher,
+  // and the watcher for this folder was standing before the race, so any such line after it is
+  // the round the forget overtook arming one for a folder the project no longer names.
+  await paneIdle();
+  const armed = (await api.log({ since: sinceRace, match: "scm: watching", max: 20 })).lines ?? [];
+  check("the round the forget overtook does not arm a watcher for the forgotten folder", armed.length, 0);
 } finally {
   // THE FIXTURE GOES BACK, whatever happened above: the texts as captured, saved to the file,
   // the repository forgotten, and the folder gone. Each step is tolerant of the others, because
@@ -492,12 +565,12 @@ try {
     console.log(`     WARNING: the folder is still remembered as the repository (${error.message})`);
   }
 
-  // GUARDED like every step above it: git may still hold a file in the folder for a beat after
-  // the pane's last read, and a throw here would take the verdict with it.
-  try {
-    rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  } catch (error) {
-    console.log(`     WARNING: the folder was left behind (${error.message})`);
+  // GUARDED like every step above it: a throw here would take the verdict with it.
+  for (const gone of [folder, remote]) {
+    const trouble = await removeWhenFree(gone);
+    if (trouble !== null) {
+      console.log(`     WARNING: ${gone} was left behind (${trouble})`);
+    }
   }
 }
 

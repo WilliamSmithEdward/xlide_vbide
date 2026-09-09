@@ -71,7 +71,10 @@ is the outside-change signal: a checkout, a pull, an edit in another editor. It 
 (folder to project, through the existing sync import, which keeps tabs and the caret and applies
 annotations afterwards) and Export (project to folder). Nothing imports silently, ever. The host
 watches the folder and the repository's HEAD and refs, and taps the pane with a stamp; the pane
-re-reads a moment later if it is showing.
+re-reads a moment later if it is showing. The watcher is armed by the last step of a status
+round, which checks that the project still names the folder, because a forget can land while
+the round is out with git, and a watcher armed for a forgotten folder held it, and stamped the
+page for it, until the workbook closed.
 
 ## Where the repository lives
 
@@ -119,7 +122,9 @@ restored away. A form's restore is its code; its design is not restored, and the
 ## Remotes
 
 Fetch, pull and push run git with terminal prompts disabled, so nothing can hang waiting for a
-password in a hidden console; a missing credential helper fails in words. A pull that conflicts
+password in a hidden console; a missing credential helper fails in words. A first push on a
+branch with no upstream sets it, to origin when there is one and else to the only remote,
+because a bare `git push` stops there to ask for `--set-upstream`, which a button cannot answer. A pull that conflicts
 leaves the folder conflicted: the pane says so, blocks Import until the folder is clean, and offers
 Abort. Resolving conflicts inside the VBE is a later milestone.
 
