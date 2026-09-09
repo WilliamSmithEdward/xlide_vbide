@@ -2153,6 +2153,14 @@ what it heard and does nothing, and the release replays one refresh and the
 follow-ups once the editor is consistent again. Five attributes runs in a
 row on the machine that had faulted five in five.
 
+Where the release lands matters as much as that it waits. Released right
+after the import's read-back, the replay followed whatever pane was left and
+published the strip without the module, the page closed its tab, and the
+restore that came next reopened it at the end of the strip with its caret at
+line one - the live gate's next run said so. The hold now lasts until the
+module is back on the surface, so the one refresh the replay makes sees the
+pane the restore reopened.
+
 Two smaller things from the same afternoon. After a real fault, Excel's next
 start asks whether to start in safe mode, a modal the launcher could not see
 past; it is asked once, so the launcher stops that instance by id and starts

@@ -649,9 +649,12 @@ internal sealed partial class AddInSession
 
             _editorSurface?.DiscardEdits(module, display);
 
-            // THE PANE TRACKER IS HELD from the remove to the read-back: the editor pumps
-            // messages inside Remove and Import, and the tracker's refresh, running then, read
-            // the panes and the components out of an editor mid-change (CodePaneTracker.Hold).
+            // THE PANE TRACKER IS HELD from the remove until the module is back on the surface:
+            // the editor pumps messages inside Remove and Import, and the tracker's refresh,
+            // running then, read the panes and the components out of an editor mid-change
+            // (CodePaneTracker.Hold). Released any earlier, the replay followed whatever pane was
+            // left and published the strip without the module, so the page closed its tab and
+            // the GoTo below reopened it at the end of the strip with its caret at line one.
             string roundTrip;
             using (HoldCodePanes())
             {
@@ -685,39 +688,40 @@ internal sealed partial class AddInSession
                 }
 
                 roundTrip = ProjectReader.ReadSource(imported) ?? string.Empty;
-            }
 
-            if (!ModuleSync.SameText(ModuleSync.CodeWithoutHeader(roundTrip), ModuleSync.CodeWithoutHeader(source)))
-            {
-                Log.Warn($"attributes: {module} came back from the import with different code");
-            }
-
-            SavedModules.Assert(savedPath, module, applied);
-            Log.Info($"attributes: {verb} on {module}: {string.Join("; ", result.Changes)}");
-
-            // THE MODULE NEVER LEAVES THE SURFACE. Its pane went with the old component; it is
-            // opened again HERE, before the tree and the tab strip are republished, so both lists
-            // still hold the module when they are drawn and nothing flickers out and back in. The
-            // native breakpoints went too, and this session's record puts them back through the
-            // same toggle a click makes; then the caret returns to where the developer had it,
-            // and the module that was showing before shows again if this was not it.
-            if (wasOpen || breakpoints.Length > 0)
-            {
-                GoTo(module, breakpoints.Length > 0 ? breakpoints[0] : caretLine, 1, display);
-                foreach (var line in breakpoints)
+                if (!ModuleSync.SameText(ModuleSync.CodeWithoutHeader(roundTrip), ModuleSync.CodeWithoutHeader(source)))
                 {
-                    ToggleBreakpoint(line);
+                    Log.Warn($"attributes: {module} came back from the import with different code");
                 }
 
-                if (wasShown)
+                SavedModules.Assert(savedPath, module, applied);
+                Log.Info($"attributes: {verb} on {module}: {string.Join("; ", result.Changes)}");
+
+                // THE MODULE NEVER LEAVES THE SURFACE. Its pane went with the old component; it is
+                // opened again HERE, before the tree and the tab strip are republished, so both
+                // lists still hold the module when they are drawn and nothing flickers out and
+                // back in. The native breakpoints went too, and this session's record puts them
+                // back through the same toggle a click makes; then the caret returns to where the
+                // developer had it, and the module that was showing before shows again if this
+                // was not it.
+                if (wasOpen || breakpoints.Length > 0)
                 {
-                    GoTo(module, caretLine, caretColumn, display);
-                }
-                else if (shownBefore is not null)
-                {
-                    // The developer was in another module; this one was open behind it, or only
-                    // carried breakpoints. Back to theirs, caret where it was.
-                    GoTo(shownBefore, shownLineBefore, shownColumnBefore, shownProjectBefore);
+                    GoTo(module, breakpoints.Length > 0 ? breakpoints[0] : caretLine, 1, display);
+                    foreach (var line in breakpoints)
+                    {
+                        ToggleBreakpoint(line);
+                    }
+
+                    if (wasShown)
+                    {
+                        GoTo(module, caretLine, caretColumn, display);
+                    }
+                    else if (shownBefore is not null)
+                    {
+                        // The developer was in another module; this one was open behind it, or
+                        // only carried breakpoints. Back to theirs, caret where it was.
+                        GoTo(shownBefore, shownLineBefore, shownColumnBefore, shownProjectBefore);
+                    }
                 }
             }
 
