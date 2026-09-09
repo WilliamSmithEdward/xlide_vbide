@@ -374,6 +374,49 @@ try {
   check("and the second one carries the message the pane typed",
     git("log", "-1", "--format=%s"), `just Ledger ${process.pid}`);
 
+  // ---- undo: the head comes back as rows, with its message in the box ------------------------
+  //
+  // Undo is the pane's amend. The branch goes back one commit, the commit's changes return to
+  // the rows, and its message returns to the box to be edited and committed again - which is
+  // what happens below, through the pane's own Commit. The first commit has nothing before it,
+  // and a commit the upstream holds is not undone here; both refusals are checked where they
+  // arise, the first one now and the other after the push.
+  await paneIdle();
+  const beforeUndo = await paneShown();
+  check("the pane offers Undo on the branch head", [beforeUndo.undoable, beforeUndo.undoBlocked], [true, ""]);
+  const headBefore = beforeUndo.head;
+  check("which is the commit the pane just made", headBefore, git("rev-parse", "HEAD"));
+  const pressedUndo = await api.act("scmPane", { press: "undo" });
+  check("undo presses", pressedUndo.did, true);
+  const undone = await waitFor("the undo to land", async () => {
+    const pane = await paneShown();
+    return pane && pane.busy === false && pane.head !== headBefore ? pane : false;
+  }, { budgetMs: 30000 });
+  check("the branch head went back one commit", undone.head, first.hash);
+  check("and the commit's changes are rows again", rowsOf(undone), ["Ledger:modified", "Reports:modified"]);
+  check("with its message back in the box", undone.message, `just Ledger ${process.pid}`);
+  check("and the notice says what happened", /^undid [0-9a-f]{7}: just Ledger/.test(undone.detail), true);
+  check("git agrees there is one commit again", git("rev-list", "--count", "HEAD"), "1");
+  check("and the folder still holds the text that was committed",
+    readFileSync(join(folder, "Ledger.bas"), "utf8").includes("by claude"), true);
+  check("and nothing is left staged", git("diff", "--cached", "--name-only"), "");
+
+  check("the first commit cannot be undone, and the status says why", /first commit/.test((await scm()).undoBlocked), true);
+  check("and the pane greys its Undo", (await paneIdle()).undoable, false);
+  const rootRefused = await scm({ action: "undo" }).then(() => "(answered)").catch((error) => error.message);
+  check("and the route refuses it in the same words", /first commit/.test(rootRefused), true);
+
+  // Committing again from the box is the amend: Ledger is still ticked and Reports still not.
+  await paneIdle();
+  const recommitted = await api.act("scmPane", { press: "commit" });
+  check("Commit is live again, with the message and the ticks as they were", recommitted.did, true);
+  await waitFor("the commit to land again", async () => {
+    const now = await scm();
+    return JSON.stringify(rowsOf(now)) === JSON.stringify(["Reports:modified"]) ? now : false;
+  }, { budgetMs: 40000 });
+  check("and git has two commits once more, the second carrying the undone message",
+    [git("rev-list", "--count", "HEAD"), git("log", "-1", "--format=%s")], ["2", `just Ledger ${process.pid}`]);
+
   // ---- history, comparisons, and the text at a commit -----------------------------------------
 
   const history = await scm({ action: "log" });
@@ -438,6 +481,32 @@ try {
     return pane && pane.branch === `feature-${process.pid}` && pane.busy === false ? pane : false;
   }, { budgetMs: 20000 });
   check("and the pane's branch select shows it", paneBranch.branch, `feature-${process.pid}`);
+
+  // ---- a new branch, cut from the head through the select's own New branch... entry ----------
+  //
+  // Cut from the head and staying on its commit, so nothing is imported and the workbook being
+  // dirty is no bar; the first push sets its upstream. The names git refuses are refused in
+  // git's words, through the route, which is the same brain the card's Create presses.
+  await paneIdle();
+  const created = await api.act("scmPane", { create: `topic-${process.pid}` });
+  check("New branch... in the select asks for a name and makes it", created.did, true);
+  const onTopic = await waitFor("the pane to be on the new branch", async () => {
+    const pane = await paneShown();
+    return pane && pane.branch === `topic-${process.pid}` && pane.busy === false ? pane : false;
+  }, { budgetMs: 20000 });
+  check("the new branch is current, with no upstream yet", [onTopic.branch, onTopic.upstream], [`topic-${process.pid}`, null]);
+  check("and git agrees, at the same commit",
+    [git("rev-parse", "--abbrev-ref", "HEAD"), git("rev-parse", "HEAD") === git("rev-parse", `feature-${process.pid}`)],
+    [`topic-${process.pid}`, true]);
+  check("and the select lists it beside the others", onTopic.branches.includes(`topic-${process.pid}`) && onTopic.branches.includes(trunk), true);
+  check("ending in the entry that made it",
+    await api.ask(`document.getElementById('scm-branch').lastElementChild.textContent`), "New branch...");
+  const badName = await scm({ action: "branch", name: "no spaces allowed" })
+    .then(() => "(answered)").catch((error) => error.message);
+  check("a name git will not take is refused in its words", /not a valid branch name/i.test(badName), true);
+  const taken = await scm({ action: "branch", name: trunk })
+    .then(() => "(answered)").catch((error) => error.message);
+  check("and a name already taken too", /already exists/i.test(taken), true);
 
   // ---- blame: committed lines carry their commit, the rest are uncommitted -------------------
 
@@ -557,14 +626,61 @@ try {
   await api.act("scmPane", { press: "refresh" });
   await paneIdle();
   check("and the pane shows it", (await paneShown()).remoteUrl, remote);
+
+  // One commit on this branch before the push, so the pushed-commit refusal below has a parent
+  // and is not the first-commit one: the Account edit imported from the folder above.
+  const accountCommit = await scm({ action: "commit", message: `account from the folder ${process.pid}`, modules: ["Account"], by: "scm.mjs" });
+  check("the imported Account edit commits on this branch", accountCommit.committed, ["Account"]);
+
   const onBranch = (await scm()).branch;
   const pushed = await scm({ action: "push" });
   check("a first push sets the upstream itself", pushed.upstream, `origin/${onBranch}`);
   check("and leaves the branch level with it", [pushed.ahead, pushed.behind], [0, 0]);
   check("and git agrees the remote holds the branch",
     git("ls-remote", "--heads", "origin").includes(`refs/heads/${onBranch}`), true);
+
+  // A commit the upstream holds is not undone here: undoing it would only make the branch
+  // diverge, and the pane says so on its greyed button.
+  check("a pushed commit cannot be undone, and the status says why",
+    /already on origin\//.test(pushed.undoBlocked ?? ""), true);
+  const pushedRefused = await scm({ action: "undo" }).then(() => "(answered)").catch((error) => error.message);
+  check("and the route refuses it in the same words", /already on origin\//.test(pushedRefused), true);
+
+  // ---- a branch only the remote has is offered after a fetch, and tracked when picked --------
+  //
+  // Pushed straight to the remote under a name no local branch has, the way a colleague's
+  // branch arrives. The select lists it as origin's after the fetch; picking it is a checkout
+  // that makes the local branch tracking it, with the import a checkout always brings.
+  git("push", "origin", `HEAD:refs/heads/elsewhere-${process.pid}`);
   const fetched = await scm({ action: "fetch" });
   check("fetch answers the status", fetched.state, "ready");
+  const offered = (fetched.branches ?? []).find((one) => one.name === `elsewhere-${process.pid}`);
+  check("a branch only the remote has is listed after the fetch, as the remote's", offered?.remote, "origin");
+  check("while a branch both have is listed once, as the local one",
+    (fetched.branches ?? []).filter((one) => one.name === onBranch).map((one) => one.remote), [""]);
+
+  await api.command("save");
+  await waitFor("the save to land", async () => (await scm()).dirty === false, { budgetMs: 30000 });
+  await paneIdle();
+  await api.act("scmPane", { press: "refresh" });
+  const listedRemote = await waitFor("the pane's select to offer the remote's branch", async () => {
+    const pane = await paneShown();
+    return pane && pane.busy === false && pane.branches.includes(`origin/elsewhere-${process.pid}`) ? pane : false;
+  }, { budgetMs: 20000 });
+  check("and the pane's select offers it under the remote",
+    listedRemote.branches.includes(`origin/elsewhere-${process.pid}`), true);
+  const picked = await api.act("scmPane", { branch: `origin/elsewhere-${process.pid}` });
+  check("picking it in the select checks it out", picked.did, true);
+  const tracking = await waitFor("the pane to be on it", async () => {
+    const pane = await paneShown();
+    return pane && pane.busy === false && pane.branch === `elsewhere-${process.pid}` ? pane : false;
+  }, { budgetMs: 30000 });
+  check("as a local branch of that name", tracking.branch, `elsewhere-${process.pid}`);
+  check("tracking the remote's",
+    git("rev-parse", "--abbrev-ref", `elsewhere-${process.pid}@{upstream}`), `origin/elsewhere-${process.pid}`);
+  const onElsewhere = await scm();
+  check("and the status shows the upstream, level", [onElsewhere.upstream, onElsewhere.ahead], [`origin/elsewhere-${process.pid}`, 0]);
+
   const pulled = await scm({ action: "pull" });
   check("pull with nothing to pull says so in git's words", /up to date/i.test(pulled.detail ?? ""), true);
 

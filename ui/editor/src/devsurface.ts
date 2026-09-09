@@ -2131,14 +2131,15 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     /**
      * Drives the Source Control pane through its own controls, so a suite proves the pane and
      * not merely the route it shares a brain with: `{press}` clicks a named button (refresh,
-     * commit, export, import, fetch, pull, push, blame, init, abort, browse, use, identity,
-     * remote, open, restore - the last presses the confirm too), `{file}` points it at another open
-     * file through the select's own change, `{tick, on}` ticks a Changes row, `{message}`
-     * types the commit message, `{module}` opens a row's comparison, `{commit}` opens a commit
-     * (with `{module}` as well, a file under it), `{branch}` picks a branch through the
-     * select, which is a checkout, `{name, email}` types the identity, `{url}` types the
-     * remote URL the remote press then attaches, and `{width}` puts the divider where a drag
-     * to that many pixels would leave it. `ui.scm` is the read side.
+     * commit, undo, export, import, fetch, pull, push, blame, init, abort, browse, use,
+     * identity, remote, open, restore - the last presses the confirm too), `{file}` points it at
+     * another open file through the select's own change, `{tick, on}` ticks a Changes row,
+     * `{message}` types the commit message, `{module}` opens a row's comparison, `{commit}`
+     * opens a commit (with `{module}` as well, a file under it), `{branch}` picks a branch
+     * through the select, which is a checkout, `{create}` makes one through the select's New
+     * branch... entry and the card it raises, `{name, email}` types the identity, `{url}` types
+     * the remote URL the remote press then attaches, and `{width}` puts the divider where a
+     * drag to that many pixels would leave it. `ui.scm` is the read side.
      */
     scmPane: (args) => {
       const pane = scmPaneProbe();
@@ -2152,7 +2153,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           ? { did: true, detail: `${control} pressed` }
           : {
             did: false,
-            detail: `no control named ${control} is on screen and enabled; use refresh, commit, export, `
+            detail: `no control named ${control} is on screen and enabled; use refresh, commit, undo, export, `
               + "import, fetch, pull, push, blame, init, abort, browse, use, identity, remote, open or restore",
           };
       }
@@ -2207,6 +2208,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: `${branch} is not a branch the select offers, or the select is disabled` };
       }
 
+      if (args.create !== undefined) {
+        const name = String(args.create);
+        return pane.createBranch(name)
+          ? { did: true, detail: `New branch... picked and ${name} typed into its card, and Create pressed` }
+          : { did: false, detail: "the branch select is not usable in this state; the repository must be ready" };
+      }
+
       if (args.name !== undefined || args.email !== undefined) {
         return pane.setIdentity(String(args.name ?? ""), String(args.email ?? ""))
           ? { did: true, detail: "identity typed; press identity to save it" }
@@ -2228,7 +2236,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return {
         did: false,
         detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), "
-          + "branch, name and email, url, or width",
+          + "branch, create, name and email, url, or width",
       };
     },
 

@@ -6817,8 +6817,45 @@ body.objbrowser-page #objbrowser-card {
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
 }
 
-.scm-commit-open > .scm-commit-head {
+/* A commit's row: the head button, and beside it Undo on the one commit that is the branch
+   head. A button cannot sit inside a button, so the two are siblings in a row. */
+.scm-commit-top {
+  display: flex;
+  align-items: stretch;
+}
+
+.scm-commit-top > .scm-commit-head {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.scm-commit-open > .scm-commit-top > .scm-commit-head {
   border-left-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.scm-undo {
+  flex: 0 0 auto;
+  margin: 2px 8px 2px 0;
+  padding: 0 8px;
+  border: 1px solid var(--vscode-button-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.scm-undo:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+.scm-undo:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .scm-short {
@@ -6930,6 +6967,49 @@ body.objbrowser-page #objbrowser-card {
   margin-top: 8px;
   font-size: 12px;
   opacity: 0.85;
+}
+
+/* The new-branch card: the restore card's shape, with one input and a line for git's refusal. */
+#scm-branch-card {
+  width: min(460px, 90vw);
+}
+
+#scm-branch-consequence {
+  margin-top: 6px;
+}
+
+#scm-branch-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+#scm-branch-name {
+  padding: 4px 6px;
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+#scm-branch-name:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+#scm-branch-error {
+  min-height: 1.2em;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+#scm-branch-card .modal-buttons {
+  margin-top: 14px;
 }
 
 /* A past version's editor fills the group the way the designer does. */

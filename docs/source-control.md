@@ -33,8 +33,18 @@ pane until it is moved, then the width it was left at, kept across reloads, betw
 rows can still be read at and a ceiling that leaves the message box and the comparison their room.
 
 The branch is a select. Changing it is a checkout followed by an import into the project, refused
-while the workbook is dirty, the way git refuses a checkout over uncommitted work. Fetch, Pull and
-Push are buttons that run git and report what it said.
+while the workbook is dirty, the way git refuses a checkout over uncommitted work. Its last entry,
+New branch..., asks for a name and cuts one from the head, staying on the same commit, so nothing
+is imported and a dirty workbook is no bar. After a fetch, the branches only a remote has are
+listed under the remote's name; picking one checks it out as a local branch of that name tracking
+it. Fetch, Pull and Push are buttons that run git and report what it said.
+
+The branch head's row in the history carries Undo, the pane's amend: the branch goes back one
+commit, the commit's changes return to the rows, and its message returns to the box to be edited
+and committed again. Nothing is deleted - the folder keeps the text. It is greyed with the reason
+when this pane cannot undo the head: the first commit, a merge, a commit that did not touch this
+folder, or one the upstream already holds, which undoing here would only make the branch diverge
+from.
 
 ## The three copies
 
@@ -171,6 +181,8 @@ project. `by=` attributes writes, as everywhere.
 | `identity` | `name=`, `email=` | the status, after writing the repository's identity |
 | `remote` | `url=`, `remote=` (origin when absent) | the status, after `git remote add`, or `set-url` when the name exists |
 | `commit` | `message=`; body: module names, one per line; empty means every row | ScmCommitReply |
+| `undo` | | ScmUndoReply: the head taken back one commit with `git reset --mixed HEAD~1`, its `subject` and whole `message`, and the status; refused with the status's `undoBlocked` reason |
+| `branch` | `name=` | the status, on the new branch cut from the head; git's words when the name is refused or taken |
 | `export` | | the status, after writing the folder |
 | `import` | body: module names, empty means every Folder row | ScmImportReply |
 | `log` | `limit=`, `module=` | ScmLogReply |
@@ -179,7 +191,7 @@ project. `by=` attributes writes, as everywhere.
 | `open` | `module=`, `ref=` | the status; the past-version tab is open |
 | `restore` | `module=`, `ref=` | ScmRestoreReply |
 | `blame` | `module=` | ScmBlameReply |
-| `checkout` | `ref=` | the status, after checkout and import |
+| `checkout` | `ref=`: a local branch, a commit, or a remote's branch as `origin/name` (bare `name` when one remote has it), checked out as a local branch tracking it | the status, after checkout and import |
 | `fetch`, `pull`, `push` | | the status, with git's words in `detail` |
 | `abort` | | the status, after `git merge --abort` |
 
@@ -189,15 +201,20 @@ Every reply carries `detail` first. Refusals are `{error}` and the harness clien
 
 - `ScmStatusReply`: `detail`, `project` (display), `projectId`, `state` (`noGit`, `noProject`,
   `unsaved`, `noFolder`, `noRepository`, `noIdentity`, `conflicted`, `ready`), `folder`,
-  `repository` (the root, or empty), `gitVersion`, `branch`, `upstream`, `remote` and
-  `remoteUrl` (origin, else the only remote; empty with none), `ahead`, `behind`,
-  `dirty` (the workbook), `identity` `{name, email}` or null, `rows[]` of `{module, kind, file,
-  status, from}` with status `modified|added|deleted|renamed`, `outside[]` of `{module, kind,
-  file, status}` with status `folderNewer|missingInFolder|missingInProject`, `branches[]` of
-  `{name, current, upstream}`, `conflicts[]` of file names, `lastCommit` `{hash, short, author,
-  when, subject}` or null, `suggestedMessage`, `covers`.
+  `repository` (the root, or empty), `gitVersion`, `branch`, `head` (the branch's commit in
+  full; empty on an unborn branch), `upstream`, `remote` and `remoteUrl` (origin, else the only
+  remote; empty with none), `ahead`, `behind`, `dirty` (the workbook), `identity` `{name,
+  email}` or null, `rows[]` of `{module, kind, file, status, from}` with status
+  `modified|added|deleted|renamed`, `outside[]` of `{module, kind, file, status}` with status
+  `folderNewer|missingInFolder|missingInProject`, `branches[]` of `{name, current, upstream,
+  remote}` - the local branches, then those only a remote has, `remote` naming it and empty
+  for a local one - `conflicts[]` of file names, `lastCommit` `{hash, short, author, when,
+  subject}` or null, `undoBlocked` (empty when the head can be undone from here, else why not),
+  `suggestedMessage`, `covers`.
 - `ScmCommitReply`: `detail`, `hash`, `short`, `committed[]` (module names), `skipped[]` of
   `{module, why}`, then the same status fields.
+- `ScmUndoReply`: `detail`, `hash` and `short` of the commit taken back, its `subject` and
+  whole `message` (subject and body, for the box), then the status under `status`.
 - `ScmImportReply`: `detail`, `imported[]`, `skipped[]` of `{module, why}`, then the status.
 - `ScmLogReply`: `detail`, `commits[]` of `{hash, short, author, email, when, subject, body,
   files[]}` where files are `{module, file, status}`.
@@ -212,14 +229,16 @@ The `status` and `covers` sentences are the pane's own words and the route's, fr
 
 ### The page acts
 
-`act("scmPane", {press})` presses `refresh|commit|export|import|fetch|pull|push|init|abort|blame`
+`act("scmPane", {press})` presses `refresh|commit|undo|export|import|fetch|pull|push|init|abort|blame`
 and `remote`, the remote line's button; `{file}` points the pane at another open file through the
 select's own change; `{tick, on}` ticks a row; `{message}` types the message; `{module}` opens a
-row's comparison; `{commit}` opens a commit; `{branch}` picks a branch through the select; `{url}`
-types the remote URL, unfolding the input when a remote is attached; `{width}` puts the divider
-where a drag to that many pixels would leave it. `ui.scm` is the pane's state: `project`,
-`state`, `branch`, `remote`, `remoteUrl`, `rows`, `outside`, `commits`, `showing`, `message`,
-`busy`, `behind`, `listWidth`.
+row's comparison; `{commit}` opens a commit; `{branch}` picks a branch through the select, a
+remote's as `origin/name`; `{create}` makes one through the select's New branch... entry and the
+card it raises; `{url}` types the remote URL, unfolding the input when a remote is attached;
+`{width}` puts the divider where a drag to that many pixels would leave it. `ui.scm` is the
+pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remote in front),
+`head`, `undoable`, `undoBlocked`, `remote`, `remoteUrl`, `rows`, `outside`, `commits`,
+`showing`, `message`, `busy`, `behind`, `listWidth`.
 `act("blame", {which: toggle|on|off})` drives the editor layer and `ui.blame` reads it.
 
 ## Threading and the host
@@ -265,6 +284,15 @@ where a drag to that many pixels would leave it. `ui.scm` is the pane's state: `
   thirds, and a long module name or a wide comparison had no way to ask for more. It is the
   Changes pane's rail divider now, with the floor, the ceiling and the arrow keys, and the width
   is kept in the page's storage beside the dock sizes.
+- **Undo, New branch..., and the remote's branches** (the same day, from the same live test).
+  Undo is `git reset --mixed HEAD~1` rather than the soft reset VS Code runs: this pane never
+  shows the index, so a soft reset would leave the undone commit staged where only an outside
+  `git status` could see it, and the next `--only` commit of one row would leave the rest of it
+  there. The reasons Undo is greyed ride the status as `undoBlocked`, read with every status, so
+  the button explains itself instead of refusing when pressed. A remote's branch is offered
+  with the remote in front and checked out with an explicit `--track`, because a bare
+  `git checkout origin/name` detaches and the bare name's do-what-I-mean fails as soon as two
+  remotes hold it.
 
 - **An import writes one line terminator fewer than the file carries.** The export appends a
   newline to a module's text, as a text file should, and the applier wrote the file's whole body

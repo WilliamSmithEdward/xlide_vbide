@@ -145,6 +145,7 @@ internal sealed partial class AddInSession
     {
         None,
         Committed,
+        Undone,
         Export,
         Import,
         Checkout,
@@ -615,8 +616,8 @@ internal sealed partial class AddInSession
     }
 
     private static bool ActionAnswersStatus(string action) => action is "status" or "settings" or "forget"
-        or "browse" or "init" or "identity" or "remote" or "export" or "open" or "checkout" or "fetch" or "pull"
-        or "push" or "abort";
+        or "browse" or "init" or "identity" or "remote" or "branch" or "export" or "open" or "checkout" or "fetch"
+        or "pull" or "push" or "abort";
 
     private ScmProjectState ScmStateFor(string projectId)
     {
@@ -855,6 +856,35 @@ internal sealed partial class AddInSession
                 break;
             }
 
+            case "branch":
+            {
+                var name = g.Name?.Trim() ?? string.Empty;
+                if (name.Length == 0)
+                {
+                    return Answer(g, ScmError("branch needs name=, what to call the new branch"), root);
+                }
+
+                var valid = Git(git, root, GitDeadline, "check-ref-format", "--branch", name);
+                if (!valid.Ok)
+                {
+                    return Answer(g, ScmError(valid.Words.Length > 0 ? valid.Words : $"'{name}' is not a valid branch name"), root);
+                }
+
+                // CUT FROM THE HEAD AND STAYING ON ITS COMMIT, so nothing is imported and a dirty
+                // workbook is no bar: the modules are what they were, only the branch under them
+                // is new. A first push sets its upstream, as it does for any branch without one.
+                var before = Git(git, root, GitDeadline, "symbolic-ref", "--short", "-q", "HEAD");
+                var from = before.Ok && before.StdOut.Trim().Length > 0 ? before.StdOut.Trim() : "a detached head";
+                var made = Git(git, root, GitDeadline, "checkout", "-b", name);
+                if (!made.Ok)
+                {
+                    return Answer(g, ScmError($"the branch could not be made: {made.Words}"), root);
+                }
+
+                detail = $"{name} is a new branch, cut from {from}; the first push sets its upstream";
+                break;
+            }
+
             case "checkout":
                 return CheckoutWork(g, repo);
         }
@@ -865,6 +895,9 @@ internal sealed partial class AddInSession
         {
             case "commit":
                 return CommitWork(g, repo, status);
+
+            case "undo":
+                return UndoWork(g, repo, status);
 
             case "import":
                 return ImportWork(g, repo, status);
@@ -887,8 +920,8 @@ internal sealed partial class AddInSession
 
     private static ScmStatusReply BareStatus(ScmGather g, string state, string detail, string version) =>
         new(detail, g.Display, g.ProjectId, state, g.Folder, string.Empty, version, string.Empty, string.Empty,
-            string.Empty, string.Empty, 0, 0, g.Dirty, null, [], [], [], [], null, string.Empty, g.SuggestedFolder,
-            ScmWords.Covers);
+            string.Empty, string.Empty, string.Empty, 0, 0, g.Dirty, null, [], [], [], [], null, string.Empty,
+            string.Empty, g.SuggestedFolder, ScmWords.Covers);
 
     /// <summary>The repository root above a folder, or null when no repository holds it.</summary>
     private static string? RootOf(GitClient git, string folder)
@@ -1046,9 +1079,11 @@ internal sealed partial class AddInSession
     {
         var state = GitStatus.Parse(
             Git(repo.Git, repo.Root, GitDeadline, "status", "--porcelain=v2", "--branch", "-z", "--", repo.Rel).StdOut);
-        var branches = GitBranches.Parse(
-            Git(repo.Git, repo.Root, GitDeadline, "for-each-ref",
-                "--format=%(refname:short)%09%(HEAD)%09%(upstream:short)", "refs/heads").StdOut);
+
+        // The local branches and the remotes' in one read, so a branch only a remote has since
+        // the last fetch is offered as well; a checkout of one makes the local branch tracking it.
+        var branches = GitBranches.Choices(GitBranches.Parse(
+            Git(repo.Git, repo.Root, GitDeadline, "for-each-ref", $"--format={GitBranches.Format}", "refs/heads", "refs/remotes").StdOut));
 
         var rows = ScmRows.Compute(g.Live, HeadFiles(repo), g.Renames);
         var outside = ScmRows.Outside(g.Live, FolderFiles(g.Folder));
@@ -1058,19 +1093,64 @@ internal sealed partial class AddInSession
             : conflicts.Length > 0 ? "conflicted"
             : "ready";
         var primary = GitRemotes.Primary(repo.Remotes);
+        var last = LastCommit(repo);
 
         return new ScmStatusReply(
             detail, g.Display, g.ProjectId, word, g.Folder, repo.Root, repo.Git.Version,
-            state.Head, state.Upstream ?? string.Empty, primary?.Name ?? string.Empty, primary?.Url ?? string.Empty,
+            state.Head, state.Oid ?? string.Empty, state.Upstream ?? string.Empty,
+            primary?.Name ?? string.Empty, primary?.Url ?? string.Empty,
             state.Ahead, state.Behind, g.Dirty, repo.Identity,
             [.. rows.Select(RowOf)],
             [.. outside.Select(RowOf)],
-            [.. branches.Select(branch => new ScmBranchRow(branch.Name, branch.Current, branch.Upstream))],
+            [.. branches.Select(branch => new ScmBranchRow(branch.Name, branch.Current, branch.Upstream, branch.Remote ?? string.Empty))],
             conflicts,
-            LastCommit(repo),
+            last,
+            UndoBlocker(repo, state, last),
             CommitMessage.Suggest(g.Rounds),
             g.SuggestedFolder,
             ScmWords.Covers);
+    }
+
+    /// <summary>
+    /// Why the branch head cannot be undone from this pane, or empty when it can. Undo is the
+    /// pane's amend - the head goes back one commit and its changes return to the rows - so it
+    /// takes only a commit this pane could have made: one that touched this folder, with a parent
+    /// to go back to, not a merge, and not yet on the upstream, where undoing it here would only
+    /// make the branch diverge. Read with every status, so the pane's button can say why it is
+    /// grey rather than refuse when pressed.
+    /// </summary>
+    private static string UndoBlocker(ScmRepo repo, GitBranchState state, ScmLastCommitReply? last)
+    {
+        if (state.Oid is not { Length: > 0 } head)
+        {
+            return "no commit has been made yet";
+        }
+
+        var shortHead = ShortOf(head);
+        if (last is null || !string.Equals(last.Hash, head, StringComparison.Ordinal))
+        {
+            return $"the branch head {shortHead} did not touch this folder; undo it with git";
+        }
+
+        // "hash parent [parent]": the parents are what follows the hash.
+        var parents = Git(repo.Git, repo.Root, GitDeadline, "rev-list", "--parents", "-n", "1", "HEAD").StdOut.Trim()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries).Length - 1;
+        if (parents <= 0)
+        {
+            return $"{shortHead} is the first commit; there is nothing before it to go back to";
+        }
+
+        if (parents > 1)
+        {
+            return $"{shortHead} is a merge; undo it with git";
+        }
+
+        if (state.Upstream is { Length: > 0 } upstream && state.Ahead == 0)
+        {
+            return $"{shortHead} is already on {upstream}; undoing it here would only make the branch diverge";
+        }
+
+        return string.Empty;
     }
 
     // ---------------------------------------------------------------- the reads: log, diff, show, blame
@@ -1357,6 +1437,44 @@ internal sealed partial class AddInSession
         return new ScmWork(g, json, ScmFollowUp.Committed, repo.Root, [], [], [], null, null, hash, after.Detail);
     }
 
+    private static ScmWork UndoWork(ScmGather g, ScmRepo repo, ScmStatusReply status)
+    {
+        if (status.Conflicts.Length > 0)
+        {
+            return Answer(g, ScmError("the folder has unresolved conflicts; resolve them, or Abort the merge, then undo"), repo.Root);
+        }
+
+        if (status.UndoBlocked.Length > 0)
+        {
+            return Answer(g, ScmError($"nothing to undo: {status.UndoBlocked}"), repo.Root);
+        }
+
+        var head = status.Head;
+        var subject = status.LastCommit?.Subject ?? string.Empty;
+
+        // The whole message, subject and body, for the box: the commit is about to be gone, and
+        // its words are what the next attempt most likely starts from.
+        var message = Git(repo.Git, repo.Root, GitDeadline, "log", "-1", "--format=%B", "HEAD").StdOut
+            .Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
+
+        // A MIXED reset, not a soft one: this pane never shows the index, so leaving the undone
+        // commit staged there would be a state only an outside `git status` could see - and the
+        // next commit of one row with `--only` would leave the rest of it staged. The folder is
+        // untouched; the rows read the live modules against the new head.
+        var reset = Git(repo.Git, repo.Root, GitDeadline, "reset", "--mixed", "-q", "HEAD~1");
+        if (!reset.Ok)
+        {
+            return Answer(g, ScmError($"undo failed: {reset.Words}"), repo.Root);
+        }
+
+        var after = ReadStatus(g, repo, $"undid {ShortOf(head)}: {subject}; its changes are back in the rows");
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new ScmUndoReply(after.Detail, head, ShortOf(head), subject, message, after),
+            ScmJsonContext.Default.ScmUndoReply);
+
+        return new ScmWork(g, json, ScmFollowUp.Undone, repo.Root, [], [], [], null, null, head, after.Detail);
+    }
+
     private static ScmWork ImportWork(ScmGather g, ScmRepo repo, ScmStatusReply status)
     {
         if (!g.InDesignMode)
@@ -1496,7 +1614,13 @@ internal sealed partial class AddInSession
             sharing.Add(other);
         }
 
-        var switched = Git(repo.Git, repo.Root, GitDeadline, "checkout", g.Ref.Trim());
+        var (args, refusal) = CheckoutArgs(repo, g.Ref.Trim());
+        if (refusal is not null)
+        {
+            return Answer(g, ScmError(refusal), repo.Root);
+        }
+
+        var switched = repo.Git.RunAsync(repo.Root, args, GitDeadline).GetAwaiter().GetResult();
         if (!switched.Ok)
         {
             return Answer(g, ScmError($"checkout failed: {switched.Words}"), repo.Root);
@@ -1506,6 +1630,44 @@ internal sealed partial class AddInSession
         projects.AddRange(sharing);
         return new ScmWork(g, string.Empty, ScmFollowUp.Checkout, repo.Root, [], projects, [], null, null, null,
             switched.Words.Length > 0 ? switched.Words : $"checked out {g.Ref.Trim()}");
+    }
+
+    /// <summary>
+    /// What `git checkout` is given for the ref the pane or the route named. A local branch, a
+    /// commit or a tag goes as it is. A branch only a remote has - named as the select names it,
+    /// `origin/feature`, or bare as `feature` when exactly one remote has it - is checked out as
+    /// a NEW local branch tracking it, said explicitly because `git checkout origin/feature`
+    /// would check the commit out detached, and the bare name's do-what-I-mean fails as soon as
+    /// two remotes hold the name.
+    /// </summary>
+    private static (string[] Args, string? Refusal) CheckoutArgs(ScmRepo repo, string wanted)
+    {
+        if (Git(repo.Git, repo.Root, GitDeadline, "show-ref", "--verify", "--quiet", $"refs/heads/{wanted}").Ok)
+        {
+            return (["checkout", wanted], null);
+        }
+
+        var tracking = GitBranches.Parse(
+            Git(repo.Git, repo.Root, GitDeadline, "for-each-ref", $"--format={GitBranches.Format}", "refs/remotes").StdOut);
+        var exact = tracking.FirstOrDefault(one => one.Remote is not null && string.Equals(one.Ref, wanted, StringComparison.Ordinal));
+        if (exact is not null)
+        {
+            return (["checkout", "-b", exact.Name, "--track", exact.Ref], null);
+        }
+
+        var bare = tracking.Where(one => one.Remote is not null && string.Equals(one.Name, wanted, StringComparison.Ordinal)).ToList();
+        if (bare.Count == 1)
+        {
+            return (["checkout", "-b", bare[0].Name, "--track", bare[0].Ref], null);
+        }
+
+        if (bare.Count > 1)
+        {
+            return ([], $"{wanted} is a branch on {bare.Count} remotes ({string.Join(", ", bare.Select(one => one.Ref))}); "
+                + "name the one to track");
+        }
+
+        return (["checkout", wanted], null);
     }
 
     // ---------------------------------------------------------------- step three: apply (host)
@@ -1534,6 +1696,16 @@ internal sealed partial class AddInSession
             {
                 var state = ScmStateFor(g.ProjectId);
                 state.LastCommitAt = DateTimeOffset.UtcNow;
+                Log.Info($"scm: {g.Display} {work.Detail}");
+                _editorSurface?.ShowScmStamp(++_scmStamp);
+                return new ScmStep(work.Json, null);
+            }
+
+            case ScmFollowUp.Undone:
+            {
+                // The commit time stays where it was: the rounds behind the undone commit are
+                // spoken for by its message, which the reply carries for the box, and the rounds
+                // since it are still the ones a fresh suggestion should name.
                 Log.Info($"scm: {g.Display} {work.Detail}");
                 _editorSurface?.ShowScmStamp(++_scmStamp);
                 return new ScmStep(work.Json, null);

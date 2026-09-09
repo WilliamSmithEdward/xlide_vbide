@@ -36,9 +36,12 @@ export interface ScmOutsideRow {
 }
 
 export interface ScmBranch {
+  /** The branch's own name; for a remote's branch, without the remote in front. */
   name: string;
   current: boolean;
   upstream: string | null;
+  /** Empty for a local branch; the remote's name for a branch only that remote has. */
+  remote: string;
 }
 
 export interface ScmCommitFile {
@@ -68,6 +71,8 @@ export interface ScmStatus {
   repository: string;
   gitVersion: string;
   branch: string;
+  /** The commit the branch is at, in full; empty on an unborn branch. */
+  head: string;
   upstream: string;
   /** The remote pushes go to - origin, else the only one - and its URL; empty with none. */
   remote: string;
@@ -81,6 +86,8 @@ export interface ScmStatus {
   branches: ScmBranch[];
   conflicts: string[];
   lastCommit: { hash: string; short: string; author: string; when: string; subject: string } | null;
+  /** Empty when the branch head can be undone from here; else why it cannot. */
+  undoBlocked: string;
   suggestedMessage: string;
   covers: string;
   /** A folder the host offers when none is remembered: the sync folder, or one beside the
@@ -109,7 +116,12 @@ export interface ScmPaneProbe {
     repository: string;
     branch: string;
     upstream: { name: string; ahead: number; behind: number } | null;
+    /** As the select names them: a remote's branch with the remote in front. */
     branches: string[];
+    head: string;
+    /** Whether the head commit's Undo is on screen and enabled; `undoBlocked` says why not. */
+    undoable: boolean;
+    undoBlocked: string;
     dirty: boolean;
     files: string[];
     rows: ScmRow[];
@@ -138,11 +150,16 @@ export interface ScmPaneProbe {
    */
   resizeList(width: number): boolean;
   /**
-   * Presses a named control: refresh, commit, export, import, fetch, pull, push, blame, init,
-   * abort, browse, use, identity, open, restore. False when it is not on screen or is disabled
-   * in this state.
+   * Presses a named control: refresh, commit, undo, export, import, fetch, pull, push, blame,
+   * init, abort, browse, use, identity, open, restore. False when it is not on screen or is
+   * disabled in this state.
    */
   press(control: string): boolean;
+  /**
+   * Makes a branch the way the select does: its "New branch..." entry, then the card's name
+   * input and Create. False when the select is not usable in this state.
+   */
+  createBranch(name: string): boolean;
   /** Points the pane at another open file, through the select's own change event. */
   chooseFile(name: string): boolean;
   /** Ticks or unticks a Changes row, through its checkbox's own change event. */
@@ -226,6 +243,7 @@ function statusOf(raw: unknown): ScmStatus | null {
     repository: asString(reply.repository),
     gitVersion: asString(reply.gitVersion),
     branch: asString(reply.branch),
+    head: asString(reply.head),
     upstream: asString(reply.upstream),
     remote: asString(reply.remote),
     remoteUrl: asString(reply.remoteUrl),
@@ -250,6 +268,7 @@ function statusOf(raw: unknown): ScmStatus | null {
       name: asString(row.name),
       current: row.current === true,
       upstream: typeof row.upstream === "string" && row.upstream.length > 0 ? row.upstream : null,
+      remote: asString(row.remote),
     })),
     conflicts: Array.isArray(reply.conflicts) ? reply.conflicts.filter((one): one is string => typeof one === "string") : [],
     lastCommit: last
@@ -261,6 +280,7 @@ function statusOf(raw: unknown): ScmStatus | null {
         subject: asString(last.subject),
       }
       : null,
+    undoBlocked: asString(reply.undoBlocked),
     suggestedMessage: asString(reply.suggestedMessage),
     covers: asString(reply.covers),
     suggestedFolder: asString(reply.suggestedFolder) || asString(reply.syncFolder),
@@ -300,6 +320,9 @@ const LIST_FLOOR = 180;
 const LIST_KEEP = 260;
 /** One arrow key's worth, the dock splitters' step. */
 const LIST_STEP = 24;
+
+/** The select's last entry, which asks for a name rather than being a branch. */
+const NEW_BRANCH = "+new";
 
 let livePane: ScmPaneProbe | null = null;
 
@@ -419,8 +442,16 @@ export class ScmPane {
 
     // Picking a branch IS the checkout. The select is redrawn from the status that comes back,
     // so a refused checkout (a dirty workbook) leaves it showing the branch that is still current.
+    // The last entry is not a branch: the select goes back to the one that is, and a card asks
+    // for the new one's name.
     this.branch.addEventListener("change", () => {
       const ref = this.branch.value;
+      if (ref === NEW_BRANCH) {
+        this.branch.value = this.state?.branch ?? "";
+        this.askNewBranch();
+        return;
+      }
+
       if (ref && ref !== this.state?.branch) {
         void this.run({ action: "checkout", ref });
       }
@@ -578,6 +609,14 @@ export class ScmPane {
           this.remoteEditing = false;
         }
 
+        // An undone commit's message returns to the box - over an empty box or the suggestion
+        // the status just put there; a message the developer typed is theirs and stays. Held as
+        // typed from then on, so a later suggestion does not replace it either.
+        if (args.action === "undo" && typeof answer.message === "string") {
+          this.fillMessage(answer.message);
+          this.lastSuggested = "";
+        }
+
         // An action's own words are worth showing; a bare read's "ready" is not.
         this.setNotice(args.action ? asString(answer.detail) : "", false);
         if (this.state?.state === "ready") {
@@ -705,7 +744,8 @@ export class ScmPane {
     this.pull.disabled = !attached;
     this.push.disabled = !attached;
     this.branch.disabled = !ready;
-    this.branch.hidden = !this.state || this.state.state !== "ready" || this.state.branches.length === 0;
+    // Shown with no branch at all, because its last entry is how the first one is made.
+    this.branch.hidden = !this.state || this.state.state !== "ready";
     this.message.hidden = !this.state || this.state.state !== "ready";
 
     // Blame reads the repository the pane is showing; with none there is nothing to paint from,
@@ -911,11 +951,11 @@ export class ScmPane {
     const state = this.state;
     const branches = state?.state === "ready" ? state.branches : [];
     const current = state?.branch ?? "";
-    const signature = JSON.stringify([branches.map((one) => one.name), current]);
+    const signature = JSON.stringify([branches.map((one) => `${one.remote}/${one.name}`), current]);
     if (this.branch.dataset.signature !== signature) {
       this.branch.dataset.signature = signature;
       this.branch.replaceChildren();
-      for (const one of branches) {
+      for (const one of branches.filter((one) => one.remote === "")) {
         const option = document.createElement("option");
         option.value = one.name;
         option.textContent = one.upstream ? `${one.name} (${one.upstream})` : one.name;
@@ -923,13 +963,37 @@ export class ScmPane {
       }
 
       // A detached head is not a branch; it is shown as its own entry so the select says the
-      // truth rather than the first branch.
-      if (current && !branches.some((one) => one.name === current)) {
+      // truth rather than the first branch. An unborn branch has no ref yet and is shown the
+      // same way.
+      if (current && !branches.some((one) => one.remote === "" && one.name === current)) {
         const option = document.createElement("option");
         option.value = current;
         option.textContent = current;
         this.branch.appendChild(option);
       }
+
+      // The branches only a remote has, as of the last fetch. Picking one checks it out as a
+      // local branch of the same name tracking it - what git's own checkout of a bare name does
+      // when one remote has it - said with the remote in front here, so two remotes holding the
+      // name cannot make it ambiguous.
+      const remotes = branches.filter((one) => one.remote !== "");
+      if (remotes.length > 0) {
+        const group = document.createElement("optgroup");
+        group.label = "Remote";
+        for (const one of remotes) {
+          const option = document.createElement("option");
+          option.value = `${one.remote}/${one.name}`;
+          option.textContent = `${one.remote}/${one.name}`;
+          group.appendChild(option);
+        }
+        this.branch.appendChild(group);
+      }
+
+      // How a branch is made: the last entry, which asks for a name rather than being one.
+      const fresh = document.createElement("option");
+      fresh.value = NEW_BRANCH;
+      fresh.textContent = "New branch...";
+      this.branch.appendChild(fresh);
     }
 
     // ALWAYS, not only on a rebuild: a refused checkout leaves the options as they were and the
@@ -1059,7 +1123,35 @@ export class ScmPane {
       }
       this.draw();
     });
-    box.appendChild(head);
+
+    const top = document.createElement("div");
+    top.className = "scm-commit-top";
+    top.appendChild(head);
+
+    // The branch head's row carries Undo, the pane's amend: the head goes back one commit, its
+    // changes return to the rows and its message to the box, and nothing is deleted. Only on the
+    // commit that IS the head, and greyed with the reason when this pane cannot undo it - a first
+    // commit, a merge, a commit the upstream already holds.
+    const state = this.state;
+    if (state && state.head !== "" && commit.hash === state.head) {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.id = "scm-undo";
+      undo.className = "scm-undo";
+      undo.textContent = "Undo";
+      undo.disabled = this.busy || state.undoBlocked !== "";
+      undo.title = state.undoBlocked !== ""
+        ? `Cannot undo: ${state.undoBlocked}`
+        : "Take this commit back: the branch goes back one commit, its changes return to the rows, and its "
+          + "message to the box. Nothing is deleted.";
+      undo.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.run({ action: "undo" });
+      });
+      top.appendChild(undo);
+    }
+
+    box.appendChild(top);
 
     if (open) {
       if (commit.files.length === 0) {
@@ -1412,6 +1504,126 @@ export class ScmPane {
   }
 
   /**
+   * The card behind New branch...: a name, and Create. The branch is cut from the head and stays
+   * on its commit, so nothing is imported and a dirty workbook is no bar; the card says so. A
+   * refusal - a name git will not take, a name already taken - is shown in the card, with the
+   * input live again for another go.
+   */
+  private askNewBranch(): void {
+    if (this.busy || this.state?.state !== "ready") {
+      return;
+    }
+
+    const from = this.state.branch || "the current commit";
+    const { card, dismiss } = openModal({
+      backdropId: "scm-branch-backdrop",
+      cardId: "scm-branch-card",
+      label: "New branch",
+    });
+
+    const title = document.createElement("div");
+    title.id = "scm-branch-title";
+    title.className = "modal-title";
+    title.textContent = "New branch";
+
+    const said = document.createElement("div");
+    said.id = "scm-branch-consequence";
+    said.className = "modal-detail";
+    said.textContent = `Cut from ${from}, at the same commit: the modules stay as they are, only the branch under `
+      + "them is new. The first push sets its upstream.";
+    card.setAttribute("aria-describedby", said.id);
+
+    const input = document.createElement("input");
+    input.id = "scm-branch-name";
+    input.type = "text";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = "feature/dates";
+    const label = document.createElement("label");
+    label.id = "scm-branch-label";
+    label.append("Branch name", input);
+
+    const error = document.createElement("div");
+    error.id = "scm-branch-error";
+    error.setAttribute("role", "alert");
+
+    const buttons = document.createElement("div");
+    buttons.className = "modal-buttons";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.id = "scm-branch-cancel";
+    cancel.className = "modal-button";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => dismiss());
+
+    const go = document.createElement("button");
+    go.type = "button";
+    go.id = "scm-branch-create";
+    go.className = "modal-button primary";
+    go.textContent = "Create";
+    go.addEventListener("click", () => void this.runBranch({ input, go, cancel, error, dismiss }));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        go.click();
+      }
+    });
+
+    buttons.append(go, cancel);
+    card.append(title, said, label, error, buttons);
+    input.focus();
+  }
+
+  private async runBranch(card: {
+    input: HTMLInputElement;
+    go: HTMLButtonElement;
+    cancel: HTMLButtonElement;
+    error: HTMLElement;
+    dismiss: () => void;
+  }): Promise<void> {
+    const name = card.input.value.trim();
+    if (!name) {
+      card.error.textContent = "A branch needs a name.";
+      card.input.focus();
+      return;
+    }
+
+    const live = (on: boolean): void => {
+      card.go.disabled = !on;
+      card.cancel.disabled = !on;
+      card.input.disabled = !on;
+      card.go.textContent = on ? "Create" : "Creating...";
+    };
+    live(false);
+    card.error.textContent = "";
+
+    // Asked directly rather than through run(), so a read the host's stamp started while the
+    // card stood cannot swallow the answer: what comes back IS the status, and it is drawn here.
+    let answer: Record<string, unknown>;
+    try {
+      answer = await this.ask(this.withProject({ action: "branch", name }));
+    } catch (failed) {
+      answer = { error: failed instanceof Error ? failed.message : String(failed) };
+    }
+
+    if (typeof answer.error === "string") {
+      card.error.textContent = answer.error;
+      live(true);
+      card.input.focus();
+      return;
+    }
+
+    const status = statusOf(answer);
+    if (status) {
+      this.adopt(status);
+    }
+    this.setNotice(asString(answer.detail), false);
+    card.dismiss();
+    this.draw();
+  }
+
+  /**
    * Asks first, does it, and says what happened - one card for the whole exchange, the Changes
    * pane's shape. A restore is recoverable by design: it lands as a change-log round labelled
    * with the commit, so the Changes pane can take it back.
@@ -1533,7 +1745,13 @@ export class ScmPane {
         upstream: this.state?.upstream
           ? { name: this.state.upstream, ahead: this.state.ahead, behind: this.state.behind }
           : null,
-        branches: (this.state?.branches ?? []).map((one) => one.name),
+        branches: (this.state?.branches ?? []).map((one) => (one.remote ? `${one.remote}/${one.name}` : one.name)),
+        head: this.state?.head ?? "",
+        undoable: (() => {
+          const undo = this.list.querySelector<HTMLButtonElement>("#scm-undo");
+          return undo !== null && !undo.disabled;
+        })(),
+        undoBlocked: this.state?.undoBlocked ?? "",
         dirty: this.state?.dirty ?? false,
         files: [...this.file.options].map((one) => one.value),
         rows: (this.state?.rows ?? []).map((row) => ({ ...row })),
@@ -1568,6 +1786,7 @@ export class ScmPane {
         switch (control) {
           case "refresh": return press(this.refresh);
           case "commit": return press(this.commit);
+          case "undo": return press(this.list.querySelector<HTMLButtonElement>("#scm-undo"));
           case "export": return press(this.exportButton);
           case "import": return press(this.importButton);
           case "fetch": return press(this.fetch);
@@ -1636,7 +1855,7 @@ export class ScmPane {
       },
       openCommit: (short) => {
         const head = this.list.querySelector<HTMLButtonElement>(
-          `.scm-commit[data-short="${CSS.escape(short)}"] > .scm-commit-head`);
+          `.scm-commit[data-short="${CSS.escape(short)}"] > .scm-commit-top > .scm-commit-head`);
         head?.click();
         return head !== null;
       },
@@ -1654,6 +1873,24 @@ export class ScmPane {
 
         this.branch.value = option.value;
         this.branch.dispatchEvent(new Event("change"));
+        return true;
+      },
+      createBranch: (name) => {
+        if (this.branch.disabled || this.branch.hidden) {
+          return false;
+        }
+
+        // The real gesture: the select's last entry, then the card it raises.
+        this.branch.value = NEW_BRANCH;
+        this.branch.dispatchEvent(new Event("change"));
+        const input = document.querySelector<HTMLInputElement>("#scm-branch-name");
+        const create = document.querySelector<HTMLButtonElement>("#scm-branch-create");
+        if (!input || !create) {
+          return false;
+        }
+
+        input.value = name;
+        create.click();
         return true;
       },
       setIdentity: (name, email) => {

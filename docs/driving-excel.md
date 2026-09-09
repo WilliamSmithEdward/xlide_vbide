@@ -381,7 +381,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
 | Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder, point it at a project | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }` / `{ project }`; read it back on `ui.sync`, which carries `project` and `projects` |
-| Drive the Source Control pane: press refresh/commit/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the remote line's remote, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch, type the identity, type the remote URL, point it at a file, put the divider at a width | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ name, email }` / `{ url }` / `{ file }` / `{ width }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm`, whose `listWidth` is the rows' width as the divider leaves it |
+| Drive the Source Control pane: press refresh/commit/undo/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the remote line's remote, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch (a remote's as `origin/name`), make one through New branch..., type the identity, type the remote URL, point it at a file, put the divider at a width | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ create }` / `{ name, email }` / `{ url }` / `{ file }` / `{ width }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm`, whose `listWidth` is the rows' width as the divider leaves it and whose `undoable` and `undoBlocked` say whether the head's Undo is live and why not |
 | Paint blame at the end of every committed line of the active module, or take it away | `act("blame", { which: "toggle" })`, `on`, `off`; read it back on `ui.blame`: `on`, `lines`, `uncommitted`, and `painted`, the decorations actually on the model, because the reading and the paint are two claims |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
@@ -458,6 +458,9 @@ await api.act("scmPane", { module: "Ledger" });  // open a row's comparison agai
 await api.act("scmPane", { commit: "abc1234" }); // open a commit to the modules it touched
 await api.act("scmPane", { commit: "abc1234", module: "Ledger" });  // a file under an opened commit
 await api.act("scmPane", { branch: "feature" }); // pick a branch through the select: a checkout
+await api.act("scmPane", { branch: "origin/feature" });  // a remote's: a local branch tracking it
+await api.act("scmPane", { create: "feature/dates" });   // New branch... and its card: cut from the head
+await api.act("scmPane", { press: "undo" });     // the head commit's Undo: back one commit, message in the box
 await api.act("scmPane", { name: "Ada", email: "ada@example.com" });  // type the identity inputs
 await api.act("scmPane", { width: 320 });        // the rows' width, as a drag of the divider leaves it
 await api.act("scmPane", { url: "https://github.com/ada/book.git" });  // type the remote URL;
@@ -1571,6 +1574,12 @@ await api.scm({ action: "restore", module: "Ledger", ref: "abc1234", by: "claude
 await api.scm({ action: "blame", module: "Ledger" }); // -> {lines: [{line, hash, short, author,
                                                       //    when, summary}], uncommitted: [lines]}
 await api.scm({ action: "checkout", ref: "feature" });  // refused while the workbook is dirty
+await api.scm({ action: "checkout", ref: "origin/feature" });  // a remote's branch: a local one
+                                                      //    of that name, tracking it
+await api.scm({ action: "branch", name: "feature/dates" });  // a new branch, cut from the head
+await api.scm({ action: "undo" });                    // the head back one commit -> {hash, short,
+                                                      //    subject, message, status}; refused
+                                                      //    with the status's undoBlocked words
 await api.scm({ action: "import", modules: ["Account"] });  // a Folder row into the project
 ```
 

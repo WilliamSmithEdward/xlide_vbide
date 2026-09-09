@@ -24,9 +24,12 @@ public sealed record ScmRowReply(
     [property: JsonPropertyName("from")] string? From);
 
 public sealed record ScmBranchRow(
+    /// <summary>The branch's own name; for a remote's branch, without the remote in front.</summary>
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("current")] bool Current,
-    [property: JsonPropertyName("upstream")] string? Upstream);
+    [property: JsonPropertyName("upstream")] string? Upstream,
+    /// <summary>Empty for a local branch; the remote's name for a branch only that remote has.</summary>
+    [property: JsonPropertyName("remote")] string Remote);
 
 public sealed record ScmIdentityReply(
     [property: JsonPropertyName("name")] string Name,
@@ -51,6 +54,8 @@ public sealed record ScmStatusReply(
     [property: JsonPropertyName("repository")] string Repository,
     [property: JsonPropertyName("gitVersion")] string GitVersion,
     [property: JsonPropertyName("branch")] string Branch,
+    /// <summary>The commit the branch is at, in full; empty on an unborn branch.</summary>
+    [property: JsonPropertyName("head")] string Head,
     [property: JsonPropertyName("upstream")] string Upstream,
     /// <summary>The remote pushes go to - origin, else the only one - and its URL; empty with none.</summary>
     [property: JsonPropertyName("remote")] string Remote,
@@ -65,6 +70,8 @@ public sealed record ScmStatusReply(
     [property: JsonPropertyName("branches")] ScmBranchRow[] Branches,
     [property: JsonPropertyName("conflicts")] string[] Conflicts,
     [property: JsonPropertyName("lastCommit")] ScmLastCommitReply? LastCommit,
+    /// <summary>Empty when the branch head can be undone from here; else why it cannot.</summary>
+    [property: JsonPropertyName("undoBlocked")] string UndoBlocked,
     [property: JsonPropertyName("suggestedMessage")] string SuggestedMessage,
     /// <summary>For noFolder: the sync folder the project remembers, else a folder beside the workbook.</summary>
     [property: JsonPropertyName("suggestedFolder")] string SuggestedFolder,
@@ -86,6 +93,16 @@ public sealed record ScmImportReply(
     [property: JsonPropertyName("detail")] string Detail,
     [property: JsonPropertyName("imported")] string[] Imported,
     [property: JsonPropertyName("skipped")] ScmSkippedReply[] Skipped,
+    [property: JsonPropertyName("status")] ScmStatusReply Status);
+
+/// <summary>The commit an undo took back, its whole message for the box, and the status after.</summary>
+public sealed record ScmUndoReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("hash")] string Hash,
+    [property: JsonPropertyName("short")] string ShortHash,
+    [property: JsonPropertyName("subject")] string Subject,
+    /// <summary>Subject and body as they were written, so the next attempt starts from them.</summary>
+    [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("status")] ScmStatusReply Status);
 
 /// <summary>One file a commit touched, named by the module it holds.</summary>
@@ -160,6 +177,7 @@ public sealed record ScmErrorReply([property: JsonPropertyName("error")] string 
 [JsonSerializable(typeof(ScmSkippedReply))]
 [JsonSerializable(typeof(ScmCommitReply))]
 [JsonSerializable(typeof(ScmImportReply))]
+[JsonSerializable(typeof(ScmUndoReply))]
 [JsonSerializable(typeof(ScmFileRow))]
 [JsonSerializable(typeof(ScmCommitRow))]
 [JsonSerializable(typeof(ScmLogReply))]

@@ -386,8 +386,8 @@ export async function open({ pid, workbook } = {}) {
  * as GET, which is what lets the bare-GET walk in Test-DebugApi.ps1 call it safely.
  */
 const WRITE_ACTIONS = new Set([
-  "settings", "forget", "browse", "init", "identity", "remote", "commit", "export", "import", "open",
-  "restore", "checkout", "fetch", "pull", "push", "abort",
+  "settings", "forget", "browse", "init", "identity", "remote", "commit", "undo", "export", "import", "open",
+  "restore", "branch", "checkout", "fetch", "pull", "push", "abort",
 ]);
 
 function clientFor(entry) {
@@ -1473,7 +1473,12 @@ function clientFor(entry) {
      *   await api.scm({ action: "open", module: "Ledger", ref: "abc1234" });  // past-version tab
      *   await api.scm({ action: "restore", module: "Ledger", ref: "abc1234", by: "claude" });
      *   await api.scm({ action: "blame", module: "Ledger" });        // lines[], uncommitted[]
+     *   await api.scm({ action: "undo" });              // the head back one commit: {hash, short,
+     *                                                   //    subject, message, status}
+     *   await api.scm({ action: "branch", name: "feature" });   // a new branch, cut from the head
      *   await api.scm({ action: "checkout", ref: "feature" });  // refused while dirty
+     *   await api.scm({ action: "checkout", ref: "origin/feature" });  // a remote's branch, as a
+     *                                                   //    local one tracking it
      *   await api.scm({ action: "fetch" });                     // pull and push the same way
      *   await api.scm({ action: "abort" });                     // git merge --abort
      *
