@@ -62,6 +62,8 @@ public sealed record ScmStatusReply(
     [property: JsonPropertyName("remoteUrl")] string RemoteUrl,
     [property: JsonPropertyName("ahead")] int Ahead,
     [property: JsonPropertyName("behind")] int Behind,
+    /// <summary>The upstream is set but its remote branch is gone, so the counts mean nothing.</summary>
+    [property: JsonPropertyName("upstreamGone")] bool UpstreamGone,
     /// <summary>Whether the WORKBOOK has unsaved changes; the folder is one save behind it then.</summary>
     [property: JsonPropertyName("dirty")] bool Dirty,
     [property: JsonPropertyName("identity")] ScmIdentityReply? Identity,

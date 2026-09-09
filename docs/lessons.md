@@ -2214,3 +2214,58 @@ change the keyboard walked to now waits for Enter or the select losing
 focus, and Escape puts it back. And a ref, name, email, url or remote that
 begins with a dash would have reached git as an option - `ref=--detach` was
 a detached head - so they are refused before git sees them.
+
+## 77. Two edits far apart were a module replaced, and the Debug shim is 400 times slower at loops
+
+The same hunt, taken to PerfFixture, whose modules run from 100 lines to
+VBA's 65,534-line ceiling. Two findings, one of them about the instrument.
+
+**A write that is not one window was a wholesale replacement.** The write
+path finds the run of lines that changed and writes only that; anything
+else it handed to the editor whole. Measured with two one-line edits far
+apart - the shape a rename, a declaration with its use, a replace-all or an
+agent's write produces - against one edit:
+
+| Module | One edit | Two edits far apart |
+| --- | --- | --- |
+| 4,502 lines | 17 ms | 330 ms |
+| 11,252 lines | 33 ms | 1,349 ms |
+| 64,803 lines | 202 ms | 30,704 ms |
+
+The replacement's cost is the editor's own, and it is superlinear: five
+times the lines cost twenty-three times the time. `LineDiff.Windows` now
+splits the middle between the common head and tail at anchors - lines that
+occur exactly once on each side, in the same order, patience diff's idea -
+and each gap becomes a window of its own once its head and tail are trimmed.
+The shim writes them from the last to the first, so no window moves the
+lines an earlier one is addressed by, and a failure after one has gone in
+puts the baseline back whole. The same three writes are 33, 77 and 513 ms.
+The line split it takes is the allocation the one-window path exists to
+avoid, and it is paid only once that path has declined - never on a pause
+in typing.
+
+**The Debug shim overstates every loop by two orders of magnitude.** A
+status on the 65,000-line module spent 400 ms comparing the folder's file
+with the live text, and a diff 150 ms normalising two copies, where the
+same functions took 6 and 3 ms in a benchmark. The benchmark was JIT; the
+shim is NativeAOT, and published as Debug its loops run unoptimised. The
+same code published both ways under NativeAOT:
+
+| Function, 65,000 lines | AOT Debug | AOT Release |
+| --- | --- | --- |
+| CodeWithoutHeader | 405 ms | 1 ms |
+| SameText over two normalised copies | 780 ms | 3 ms |
+| Blame porcelain parse | 487 ms | 28 ms |
+
+Process spawns, COM calls and the editor's own work cost what they cost in
+either build; anything that walks characters in our code or the framework's
+is a Debug number until it is measured in Release. The comparison was made
+allocation-free anyway (`SameCode`, 3 ms to 1 in Release, and four 1.4 MB
+copies per module per status gone), but the 400 ms was never a user's.
+
+A door detail from the same run: an api request whose host half outlives
+the door's three-second budget - a commit whose save Excel takes seconds
+over - answers "ask again" and its git half never runs, while the pane's
+own door has no budget at all. Asking again commits. It is noted here
+rather than changed: the budget is the door's whole promise about the host
+thread.

@@ -139,6 +139,124 @@ public class LineDiffTests
         Assert.Equal(LineChange.Wholesale, LineDiff.Between(was, now, Window).Change);
     }
 
+    /// <summary>Applies windows the way the shim does: from the last to the first.</summary>
+    private static string ApplyAll(string baseline, IReadOnlyList<LineDiff> windows)
+    {
+        var text = baseline;
+        for (var i = windows.Count - 1; i >= 0; i--)
+        {
+            text = Apply(text, windows[i]);
+        }
+
+        return text;
+    }
+
+    [Fact]
+    public void TwoEditsFarApartAreTwoWindowsNotAReplacement()
+    {
+        // The shape a rename, or a declaration and its use, produces: 64,802 lines, two of them
+        // changed, 64,600 lines apart. One window cannot hold that; two can.
+        var lines = Enumerable.Range(0, 64_802).Select(one => $"    x = {one}").ToArray();
+        var was = Module(lines);
+        lines[100] = "    x = near the top";
+        lines[64_700] = "    x = near the end";
+        var now = Module(lines);
+
+        Assert.Equal(LineChange.Wholesale, LineDiff.Between(was, now, Window).Change);
+
+        var windows = LineDiff.Windows(was, now, Window, 32);
+        Assert.NotNull(windows);
+        Assert.Equal(2, windows.Count);
+        Assert.Equal((101, 1, 1, "    x = near the top", "    x = 100"), (windows[0].At, windows[0].Removing, windows[0].Inserting, windows[0].Text, windows[0].Removed));
+        Assert.Equal((64_701, 1, 1, "    x = near the end", "    x = 64700"), (windows[1].At, windows[1].Removing, windows[1].Inserting, windows[1].Text, windows[1].Removed));
+        Assert.All(windows, one => Assert.Equal(64_802, one.TotalLines));
+        Assert.Equal(now, ApplyAll(was, windows));
+    }
+
+    [Fact]
+    public void ADeclarationAtTheTopAndItsUseAtTheBottomAreTwoInsertions()
+    {
+        var lines = Enumerable.Range(0, 2_000).Select(one => $"    x = {one}").ToList();
+        var was = Module([.. lines]);
+        lines.Insert(1, "    Dim total As Long");
+        lines.Add("    total = x");
+        var now = Module([.. lines]);
+
+        var windows = LineDiff.Windows(was, now, Window, 32);
+        Assert.NotNull(windows);
+        Assert.Equal(2, windows.Count);
+        Assert.Equal((2, 0, 1, "    Dim total As Long"), (windows[0].At, windows[0].Removing, windows[0].Inserting, windows[0].Text));
+        Assert.Equal((2_001, 0, 1, "    total = x"), (windows[1].At, windows[1].Removing, windows[1].Inserting, windows[1].Text));
+        Assert.All(windows, one => Assert.Equal(2_002, one.TotalLines));
+        Assert.Equal(now, ApplyAll(was, windows));
+    }
+
+    [Fact]
+    public void RepeatedLinesBetweenTheEditsDoNotAnchorAndDoNotConfuse()
+    {
+        // Real modules are mostly "End If", blank lines and "End Sub": none of those occurs once,
+        // so none anchors, and the procedure headers do the work instead.
+        var lines = new List<string>();
+        for (var procedure = 0; procedure < 300; procedure++)
+        {
+            lines.Add($"Public Sub Proc{procedure}()");
+            lines.Add("    If x > 0 Then");
+            lines.Add("        y = 1");
+            lines.Add("    End If");
+            lines.Add("End Sub");
+            lines.Add("");
+        }
+
+        var was = Module([.. lines]);
+        lines[2] = "        y = 2";
+        lines[lines.Count - 4] = "        y = 3";
+        lines.RemoveAt(900);
+        var now = Module([.. lines]);
+
+        var windows = LineDiff.Windows(was, now, Window, 32);
+        Assert.NotNull(windows);
+        Assert.Equal(3, windows.Count);
+        Assert.Equal(now, ApplyAll(was, windows));
+        Assert.All(windows, one => Assert.True(one.Removing <= 1 && one.Inserting <= 1));
+    }
+
+    [Fact]
+    public void TooManyScatteredEditsAreStillAReplacement()
+    {
+        var lines = Enumerable.Range(0, 900).Select(one => $"    x = {one}").ToArray();
+        var was = Module(lines);
+        for (var i = 0; i < 900; i += 10)
+        {
+            lines[i] = $"    y = {i}";
+        }
+
+        var now = Module(lines);
+
+        Assert.Null(LineDiff.Windows(was, now, Window, 32));
+        Assert.NotNull(LineDiff.Windows(was, now, Window, 100));
+    }
+
+    [Fact]
+    public void AnUnsplittableMiddleIsStillAReplacement()
+    {
+        // Nothing occurs once on both sides, so no anchor exists and the one honest answer stands.
+        var was = Module([.. Enumerable.Range(0, 900).Select(one => $"    x = {one}")]);
+        var now = Module([.. Enumerable.Range(0, 900).Select(one => $"    y = {one}")]);
+
+        Assert.Null(LineDiff.Windows(was, now, Window, 32));
+    }
+
+    [Fact]
+    public void OneWindowAndNoChangeAnswerAsBetweenDoes()
+    {
+        var was = Module("Option Explicit", "", "Public Sub One()", "    x = 1", "End Sub");
+        var now = Module("Option Explicit", "", "Public Sub One()", "    x = 2", "End Sub");
+
+        Assert.Empty(LineDiff.Windows(was, was, Window, 32)!);
+        var one = Assert.Single(LineDiff.Windows(was, now, Window, 32)!);
+        Assert.Equal((4, 1, 1, "    x = 2"), (one.At, one.Removing, one.Inserting, one.Text));
+    }
+
     [Fact]
     public void AnEditDeepInALargeModuleIsStillOneLine()
     {

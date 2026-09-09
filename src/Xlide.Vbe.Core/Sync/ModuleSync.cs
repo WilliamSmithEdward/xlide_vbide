@@ -389,7 +389,9 @@ public static class ModuleSync
     }
 
     /// <summary>True for a line the VBA editor keeps out of sight and the developer never edits.</summary>
-    public static bool IsAttributeLine(string line) =>
+    public static bool IsAttributeLine(string line) => IsAttributeLine(line.AsSpan());
+
+    private static bool IsAttributeLine(ReadOnlySpan<char> line) =>
         line.TrimStart().StartsWith("Attribute ", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -405,7 +407,9 @@ public static class ModuleSync
     /// Only ever consulted BEFORE the first line of code, so a Caption or a Client inside a
     /// procedure is code like anything else.
     /// </summary>
-    public static bool IsHeaderPreamble(string line)
+    public static bool IsHeaderPreamble(string line) => IsHeaderPreamble(line.AsSpan());
+
+    private static bool IsHeaderPreamble(ReadOnlySpan<char> line)
     {
         var trimmed = line.TrimStart();
         return trimmed.StartsWith("VERSION", StringComparison.OrdinalIgnoreCase)
@@ -428,34 +432,186 @@ public static class ModuleSync
     /// </summary>
     public static string CodeWithoutHeader(string source)
     {
-        var lines = NormaliseEol(source).Split('\n');
-        var kept = new List<string>(lines.Length);
-        var stillInHeader = true;
+        ArgumentNullException.ThrowIfNull(source);
 
-        foreach (var line in lines)
+        // Two walks and one allocation. This used to normalise the endings, split into lines
+        // and join the kept ones: for a 65,000-line module that was four copies of 1.4 MB and
+        // a 65,000-string array, and a status read did it four times per module (2026-09-09).
+        var length = 0;
+        var count = 0;
+        var measuring = new KeptLines(source);
+        while (measuring.Next(out var line))
         {
-            if (stillInHeader && (IsAttributeLine(line) || IsHeaderPreamble(line)))
-            {
-                continue;
-            }
-
-            // An Attribute line can also appear INSIDE a procedure (VB_Description), and those are
-            // dropped wherever they are, the way the editor hides them.
-            if (IsAttributeLine(line))
-            {
-                continue;
-            }
-
-            if (stillInHeader && line.Trim().Length == 0)
-            {
-                continue;
-            }
-
-            stillInHeader = false;
-            kept.Add(line);
+            length += line.Length;
+            count++;
         }
 
-        return string.Join("\n", kept);
+        if (count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Create(length + count - 1, source, static (span, text) =>
+        {
+            var filling = new KeptLines(text);
+            var at = 0;
+            var first = true;
+            while (filling.Next(out var line))
+            {
+                if (!first)
+                {
+                    span[at++] = '\n';
+                }
+
+                first = false;
+                line.CopyTo(span[at..]);
+                at += line.Length;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Whether two module texts hold the same code: what <see cref="SameText"/> over
+    /// <see cref="CodeWithoutHeader"/>, trailing newlines off, would answer - without building
+    /// either normalised text. The status compares every module against the branch head and
+    /// against its file on every read, and the normalised copies it built to do so were most of
+    /// a read's time on a large module, and a garbage collection besides (2026-09-09).
+    /// </summary>
+    public static bool SameCode(string left, string right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        var a = new CodeLines(left);
+        var b = new CodeLines(right);
+        while (true)
+        {
+            var moreA = a.Next(out var lineA);
+            var moreB = b.Next(out var lineB);
+            if (!moreA || !moreB)
+            {
+                return moreA == moreB;
+            }
+
+            if (!lineA.SequenceEqual(lineB))
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The lines of a module text as <see cref="CodeWithoutHeader"/> keeps them, one span at a
+    /// time: endings read as endings (CRLF, LF, or a lone CR), the header's attribute and
+    /// preamble lines gone, attribute lines gone wherever they are, and the blank lines above
+    /// the first code line gone. Counts lines as a split would: a text ending in an ending has
+    /// one empty line after it, and an empty text is one empty line.
+    /// </summary>
+    private ref struct KeptLines(string text)
+    {
+        private readonly string _text = text;
+        private int _at;
+        private bool _stillInHeader = true;
+
+        public bool Next(out ReadOnlySpan<char> line)
+        {
+            while (_at <= _text.Length)
+            {
+                var start = _at;
+                var end = _text.AsSpan(start).IndexOfAny('\r', '\n');
+                ReadOnlySpan<char> raw;
+                if (end < 0)
+                {
+                    raw = _text.AsSpan(start);
+                    _at = _text.Length + 1;
+                }
+                else
+                {
+                    raw = _text.AsSpan(start, end);
+                    var ending = start + end;
+                    _at = ending + (_text[ending] == '\r' && ending + 1 < _text.Length && _text[ending + 1] == '\n' ? 2 : 1);
+                }
+
+                if (_stillInHeader && (IsAttributeLine(raw) || IsHeaderPreamble(raw)))
+                {
+                    continue;
+                }
+
+                // An Attribute line can also appear INSIDE a procedure (VB_Description), and
+                // those are dropped wherever they are, the way the editor hides them.
+                if (IsAttributeLine(raw))
+                {
+                    continue;
+                }
+
+                if (_stillInHeader && raw.Trim().IsEmpty)
+                {
+                    continue;
+                }
+
+                _stillInHeader = false;
+                line = raw;
+                return true;
+            }
+
+            line = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="KeptLines"/> with the trailing empty lines left off, which is what trimming
+    /// the joined text's newlines does: an empty line counts only once a line with something
+    /// in it follows.
+    /// </summary>
+    private ref struct CodeLines(string text)
+    {
+        private KeptLines _kept = new(text);
+        private int _emptiesOwed;
+        private ReadOnlySpan<char> _held;
+        private bool _holding;
+
+        public bool Next(out ReadOnlySpan<char> line)
+        {
+            if (_emptiesOwed > 0)
+            {
+                _emptiesOwed--;
+                line = default;
+                return true;
+            }
+
+            if (_holding)
+            {
+                _holding = false;
+                line = _held;
+                return true;
+            }
+
+            var pendingEmpty = 0;
+            while (_kept.Next(out var next))
+            {
+                if (next.IsEmpty)
+                {
+                    pendingEmpty++;
+                    continue;
+                }
+
+                if (pendingEmpty > 0)
+                {
+                    _emptiesOwed = pendingEmpty - 1;
+                    _held = next;
+                    _holding = true;
+                    line = default;
+                    return true;
+                }
+
+                line = next;
+                return true;
+            }
+
+            line = default;
+            return false;
+        }
     }
 
     /// <summary>

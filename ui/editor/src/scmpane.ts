@@ -79,6 +79,8 @@ export interface ScmStatus {
   remoteUrl: string;
   ahead: number;
   behind: number;
+  /** The upstream is set but its remote branch is gone, so the counts mean nothing. */
+  upstreamGone: boolean;
   dirty: boolean;
   identity: { name: string; email: string } | null;
   rows: ScmRow[];
@@ -249,6 +251,7 @@ function statusOf(raw: unknown): ScmStatus | null {
     remoteUrl: asString(reply.remoteUrl),
     ahead: asNumber(reply.ahead),
     behind: asNumber(reply.behind),
+    upstreamGone: reply.upstreamGone === true,
     dirty: reply.dirty === true,
     identity: identity ? { name: asString(identity.name), email: asString(identity.email) } : null,
     rows: asArray(reply.rows).map((row) => ({
@@ -1052,9 +1055,11 @@ export class ScmPane {
     // select showing the branch that was picked, which is exactly the one that is not current.
     this.branch.value = current;
     const behind = state && state.upstream
-      ? ` ${state.ahead} ahead, ${state.behind} behind ${state.upstream}`
+      ? state.upstreamGone
+        ? ` Its upstream ${state.upstream} is gone from the remote.`
+        : ` ${state.ahead} ahead, ${state.behind} behind ${state.upstream}.`
       : "";
-    this.branch.title = current ? `Branch ${current}.${behind} Pick another to check it out.` : "";
+    this.branch.title = current ? `Branch ${current}.${behind} Pick another to check it out, or make one.` : "";
   }
 
   private drawSection(name: string, count: number, hint: string): HTMLElement {

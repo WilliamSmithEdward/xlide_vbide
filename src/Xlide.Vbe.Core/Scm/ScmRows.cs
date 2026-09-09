@@ -50,7 +50,7 @@ public static class ScmRows
             if (FileOf(module, head) is { } paired)
             {
                 claimed.Add(paired.File);
-                if (!ModuleSync.SameText(Code(paired.Text), Code(module.Code)))
+                if (!ModuleSync.SameCode(paired.Text, module.Code))
                 {
                     rows.Add(new ScmRow(module.Name, module.Kind, paired.File, "modified", null));
                 }
@@ -114,7 +114,7 @@ public static class ScmRows
             if (FileOf(module, folder) is { } paired)
             {
                 claimed.Add(paired.File);
-                if (!ModuleSync.SameText(Code(paired.Text), Code(module.Code)))
+                if (!ModuleSync.SameCode(paired.Text, module.Code))
                 {
                     rows.Add(new ScmRow(module.Name, module.Kind, paired.File, "folderNewer", null));
                 }
@@ -141,14 +141,6 @@ public static class ScmRows
 
         return Sorted(rows);
     }
-
-    /// <summary>
-    /// The text as the comparison sees it: header off, line endings normalised, and no trailing
-    /// newline, because a file ends with one and the code store's text does not, and neither side
-    /// means anything by it.
-    /// </summary>
-    private static string Code(string text) =>
-        ModuleSync.CodeWithoutHeader(text).TrimEnd('\n');
 
     /// <summary>
     /// The file a live module has on the other side: the name this product writes, or, for a

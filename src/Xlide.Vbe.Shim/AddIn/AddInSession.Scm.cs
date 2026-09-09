@@ -956,7 +956,7 @@ internal sealed partial class AddInSession
 
     private static ScmStatusReply BareStatus(ScmGather g, string state, string detail, string version) =>
         new(detail, g.Display, g.ProjectId, state, g.Folder, string.Empty, version, string.Empty, string.Empty,
-            string.Empty, string.Empty, string.Empty, 0, 0, g.Dirty, null, [], [], [], [], null, string.Empty,
+            string.Empty, string.Empty, string.Empty, 0, 0, false, g.Dirty, null, [], [], [], [], null, string.Empty,
             string.Empty, g.SuggestedFolder, ScmWords.Covers);
 
     /// <summary>
@@ -1133,6 +1133,26 @@ internal sealed partial class AddInSession
         return files;
     }
 
+    /// <summary>Phase timings for one log line: "status 14ms, rows 8ms, ...".</summary>
+    private sealed class ScmLaps
+    {
+        private readonly StringBuilder _said = new();
+        private long _since = Stopwatch.GetTimestamp();
+
+        public void Lap(string what)
+        {
+            if (_said.Length > 0)
+            {
+                _said.Append(", ");
+            }
+
+            _said.Append(what).Append(' ').Append((long)Stopwatch.GetElapsedTime(_since).TotalMilliseconds).Append("ms");
+            _since = Stopwatch.GetTimestamp();
+        }
+
+        public override string ToString() => _said.ToString();
+    }
+
     /// <summary>The last commit that touched the folder, parents and all; null before the first.</summary>
     private static GitCommit? LastCommit(ScmRepo repo)
     {
@@ -1155,16 +1175,29 @@ internal sealed partial class AddInSession
     /// <summary>The whole picture: git's state, the rows, the folder, the history's head.</summary>
     private static ScmStatusReply ReadStatus(ScmGather g, ScmRepo repo, string detail)
     {
+        // Each phase timed, because a status is the read behind every refresh and the one
+        // whose cost was found by measuring rather than reading (lessons 76): the git calls log
+        // themselves, and this line says what the time between them went to.
+        var laps = new ScmLaps();
+
         var state = GitStatus.Parse(
             Git(repo.Git, repo.Root, GitDeadline, "status", "--porcelain=v2", "--branch", "-z", "--", repo.Rel).StdOut);
+        laps.Lap("status");
 
         // The local branches and the remotes' in one read, so a branch only a remote has since
         // the last fetch is offered as well; a checkout of one makes the local branch tracking it.
         var branches = GitBranches.Choices(GitBranches.Parse(
             Git(repo.Git, repo.Root, GitDeadline, "for-each-ref", $"--format={GitBranches.Format}", "refs/heads", "refs/remotes").StdOut));
+        laps.Lap("branches");
 
-        var rows = ScmRows.Compute(g.Live, HeadFiles(repo), g.Renames);
-        var outside = ScmRows.Outside(g.Live, FolderFiles(g.Folder));
+        var headFiles = HeadFiles(repo);
+        laps.Lap("head files");
+        var rows = ScmRows.Compute(g.Live, headFiles, g.Renames);
+        laps.Lap("rows");
+        var folderFiles = FolderFiles(g.Folder);
+        laps.Lap("folder");
+        var outside = ScmRows.Outside(g.Live, folderFiles);
+        laps.Lap("outside");
         var conflicts = state.Conflicts.Select(path => Path.GetFileName(path)).ToArray();
 
         var identity = repo.Identity.Value;
@@ -1172,13 +1205,16 @@ internal sealed partial class AddInSession
             : conflicts.Length > 0 ? "conflicted"
             : "ready";
         var primary = GitRemotes.Primary(repo.Remotes.Value);
+        laps.Lap("identity and remotes");
         var last = LastCommit(repo);
+        laps.Lap("last commit");
+        Log.Info($"scm: status phases: {laps}");
 
         return new ScmStatusReply(
             detail, g.Display, g.ProjectId, word, g.Folder, repo.Root, repo.Git.Version,
             state.Head, state.Oid ?? string.Empty, state.Upstream ?? string.Empty,
             primary?.Name ?? string.Empty, primary?.Url ?? string.Empty,
-            state.Ahead, state.Behind, g.Dirty, identity,
+            state.Ahead, state.Behind, state.UpstreamGone, g.Dirty, identity,
             [.. rows.Select(RowOf)],
             [.. outside.Select(RowOf)],
             [.. branches.Select(branch => new ScmBranchRow(branch.Name, branch.Current, branch.Upstream, branch.Remote ?? string.Empty))],
@@ -1222,7 +1258,9 @@ internal sealed partial class AddInSession
             return $"{shortHead} is a merge; undo it with git";
         }
 
-        if (state.Upstream is { Length: > 0 } upstream && state.Ahead == 0)
+        // An upstream whose remote branch is gone prints no counts, and zero ahead would then be
+        // a lie: nothing holds the commit any more, and undoing it diverges from nothing.
+        if (state.Upstream is { Length: > 0 } upstream && !state.UpstreamGone && state.Ahead == 0)
         {
             return $"{shortHead} is already on {upstream}; undoing it here would only make the branch diverge";
         }
@@ -1348,18 +1386,24 @@ internal sealed partial class AddInSession
             return ScmError($"{g.Module} is not in {reference}");
         }
 
+        var laps = new ScmLaps();
         var left = at is null ? string.Empty : Code(at.Value.Text);
         var right = g.LiveCode is null ? string.Empty : Code(g.LiveCode);
+        laps.Lap("code");
         var rows = DiffRows(left, right);
+        laps.Lap("rows");
         var detail = at is null ? $"{g.Module} is not in {reference}; every line is live"
             : g.LiveCode is null ? $"{g.Module} is not in the project; every line is at {reference}"
             : $"{g.Module} at {reference} against the editor";
 
-        return withText
+        var json = withText
             ? System.Text.Json.JsonSerializer.Serialize(
                 new ScmTextReply(detail, g.Module, reference, left, rows), ScmJsonContext.Default.ScmTextReply)
             : System.Text.Json.JsonSerializer.Serialize(
                 new ScmDiffReply(detail, g.Module, reference, rows), ScmJsonContext.Default.ScmDiffReply);
+        laps.Lap("json");
+        Log.Info($"scm: {g.Action} phases, {rows.Length} row(s): {laps}");
+        return json;
     }
 
     private static string BlameReply(ScmGather g, ScmRepo repo)
@@ -1392,14 +1436,21 @@ internal sealed partial class AddInSession
             return ScmError($"blame failed: {blamed.Words}");
         }
 
-        var map = GitBlame.MapToLive(GitBlame.ParsePorcelain(blamed.StdOut), at.Value.Text, g.LiveCode);
-        return System.Text.Json.JsonSerializer.Serialize(
+        var laps = new ScmLaps();
+        var parsed = GitBlame.ParsePorcelain(blamed.StdOut);
+        laps.Lap("parse");
+        var map = GitBlame.MapToLive(parsed, at.Value.Text, g.LiveCode);
+        laps.Lap("map");
+        var json = System.Text.Json.JsonSerializer.Serialize(
             new ScmBlameReply(
                 $"{map.Lines.Count} committed line(s), {map.Uncommitted.Count} not",
                 g.Module, head,
                 [.. map.Lines.Select(line => new ScmBlameRow(line.Line, line.Hash, line.ShortHash, line.Author, line.When, line.Summary))],
                 [.. map.Uncommitted]),
             ScmJsonContext.Default.ScmBlameReply);
+        laps.Lap("json");
+        Log.Info($"scm: blame phases for {parsed.Count} line(s): {laps}");
+        return json;
     }
 
     // ---------------------------------------------------------------- the writes' pool halves

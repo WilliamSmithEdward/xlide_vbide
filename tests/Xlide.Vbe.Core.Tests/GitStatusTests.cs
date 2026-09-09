@@ -45,10 +45,26 @@ public sealed class GitStatusTests
         Assert.Equal("origin/main", state.Upstream);
         Assert.Equal(0, state.Ahead);
         Assert.Equal(0, state.Behind);
+        Assert.False(state.UpstreamGone);
         Assert.Empty(state.Conflicts);
 
         // Untracked files are not changes to anything committed, so they are not rows.
         Assert.Empty(state.Changed);
+    }
+
+    [Fact]
+    public void AnUpstreamWhoseRemoteBranchIsGoneHasNoCountsAndSaysSo()
+    {
+        // `git push origin --delete feature` elsewhere, then `git fetch --prune` here: the
+        // upstream line stays, the counts line goes. Zero ahead here must not read as "on the
+        // upstream", or the head's Undo would be refused as already pushed.
+        var state = GitStatus.Parse(Captured(
+            "# branch.oid 5bbbd77cafad268c3e2e1cc25f39859b4db2960c<NUL># branch.head feature<NUL>"
+            + "# branch.upstream origin/feature<NUL>"));
+
+        Assert.Equal("origin/feature", state.Upstream);
+        Assert.True(state.UpstreamGone);
+        Assert.Equal(0, state.Ahead);
     }
 
     [Fact]

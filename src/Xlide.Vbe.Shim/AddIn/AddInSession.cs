@@ -2680,7 +2680,7 @@ internal sealed partial class AddInSession : IDisposable
 
             // Declared out here because the call below is short-circuited: with no baseline there
             // is no diff to attempt and no window to hear about.
-            LineWindow? window = null;
+            IReadOnlyList<LineWindow>? windows = null;
 
             // TIMED, because this is the host thread and the numbers were guesses until they were
             // not. The two halves answer different questions: `found` is ours - comparing the
@@ -2688,7 +2688,7 @@ internal sealed partial class AddInSession : IDisposable
             // that is slow in the first is a bug here; one slow in the second is what the editor
             // charges for the module's size.
             var diffing = System.Diagnostics.Stopwatch.StartNew();
-            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text, out window);
+            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text, out windows);
             diffing.Stop();
 
             if (!wroteDiff)
@@ -2753,7 +2753,7 @@ internal sealed partial class AddInSession : IDisposable
             // outside the window, the count moves and the whole module is read as before. Any
             // mismatch at all falls back to the full read, so the checks below see the same text
             // they always did.
-            var checkedWindow = wroteDiff && (window is null || WindowCameBackIntact(module, window));
+            var checkedWindow = wroteDiff && (windows is null || windows.Count == 0 || WindowsCameBackIntact(module, windows));
 
             // Read straight back and remembered, but not pushed into the surface.
             //
@@ -2850,9 +2850,12 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             Log.Verbose($"write: {component} took {diffing.ElapsedMilliseconds}ms to compare"
-                        + (window is { } touched
-                            ? $" and wrote {touched.Count} line(s) at {touched.At} of {touched.TotalLines}"
-                            : wroteDiff ? " and had nothing to write" : " and is replacing the module"));
+                        + (windows is { Count: 1 } touched
+                            ? $" and wrote {touched[0].Count} line(s) at {touched[0].At} of {touched[0].TotalLines}"
+                            : windows is { Count: > 1 } several
+                                ? $" and wrote {several.Sum(one => one.Count)} line(s) in {several.Count} windows at "
+                                    + $"{string.Join(", ", several.Select(one => one.At))} of {several[0].TotalLines}"
+                                : wroteDiff ? " and had nothing to write" : " and is replacing the module"));
 
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
                      + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty)
@@ -2977,19 +2980,24 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private sealed record LineWindow(int At, int Count, int TotalLines, string Text);
 
-    private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out LineWindow? wrote)
+    private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out IReadOnlyList<LineWindow>? wrote)
     {
         const int LargestDiffLines = 400;
 
+        // How many windows one write may be before it is a replacement after all. Each is two
+        // calls into the editor; a replacement of a large module is seconds (lessons 77), so
+        // even thirty windows are the cheaper answer by far.
+        const int MostDiffWindows = 32;
+
         wrote = null;
 
-        var diff = Core.Editor.LineDiff.Between(baseline, text, LargestDiffLines);
-        if (diff.Change == Core.Editor.LineChange.Wholesale)
+        var windows = Core.Editor.LineDiff.Windows(baseline, text, LargestDiffLines, MostDiffWindows);
+        if (windows is null)
         {
             return false;
         }
 
-        if (diff.Change == Core.Editor.LineChange.Identical)
+        if (windows.Count == 0)
         {
             // The module already holds exactly this. Nothing is written, so there is nothing to
             // read back and nothing that could have been converted on the way in.
@@ -3005,77 +3013,117 @@ internal sealed partial class AddInSession : IDisposable
         // the first module of every fixture built through the door, leaving a workbook that
         // looked right and no longer exercised what it existed for (2026-08-07).
         var present = module.GetInt32("CountOfLines");
-        var removing = diff.Removing;
-        if (diff.At - 1 + removing > present)
-        {
-            removing = Math.Max(0, present - (diff.At - 1));
-        }
 
-        if (removing > 0)
+        // FROM THE LAST WINDOW TO THE FIRST. Every window is addressed in the baseline's
+        // numbering, and a window only moves the lines below it, so writing them bottom-up keeps
+        // every address true until it is used. A failure after another window has already gone
+        // in leaves the module between two texts, and the one honest recovery is the baseline
+        // put back whole.
+        for (var w = windows.Count - 1; w >= 0; w--)
         {
-            module.Invoke("DeleteLines", diff.At, removing);
-        }
+            var diff = windows[w];
+            var removing = diff.Removing;
+            if (diff.At - 1 + removing > present)
+            {
+                removing = Math.Max(0, present - (diff.At - 1));
+            }
 
-        // ON THE COUNT, not on whether the text is empty: one empty line is a line, and reading
-        // it as nothing to insert drops the blank line at the end of a text that ends with an
-        // ending - which is how a file on disk ends, so an import lost it.
-        if (diff.Inserting > 0)
-        {
             try
             {
-                module.Invoke("InsertLines", diff.At, diff.Text);
-            }
-            catch
-            {
-                // The lines just removed, back where they were. They are at most
-                // LargestDiffLines, and the window is already in hand, so this costs one call
-                // and no read at all.
-                if (removing > 0 && diff.Removed.Length > 0)
+                if (removing > 0)
+                {
+                    module.Invoke("DeleteLines", diff.At, removing);
+                }
+
+                // ON THE COUNT, not on whether the text is empty: one empty line is a line, and
+                // reading it as nothing to insert drops the blank line at the end of a text that
+                // ends with an ending - which is how a file on disk ends, so an import lost it.
+                if (diff.Inserting > 0)
                 {
                     try
                     {
-                        module.Invoke("InsertLines", diff.At, diff.Removed);
+                        module.Invoke("InsertLines", diff.At, diff.Text);
                     }
-                    catch (Exception putBack)
+                    catch
                     {
-                        Log.Error("write: a removed window could not be put back", putBack);
+                        // The lines just removed, back where they were. They are at most
+                        // LargestDiffLines, and the window is already in hand, so this costs one
+                        // call and no read at all.
+                        if (removing > 0 && diff.Removed.Length > 0)
+                        {
+                            try
+                            {
+                                module.Invoke("InsertLines", diff.At, diff.Removed);
+                            }
+                            catch (Exception putBack)
+                            {
+                                Log.Error("write: a removed window could not be put back", putBack);
+                            }
+                        }
+
+                        throw;
                     }
+                }
+            }
+            catch when (w < windows.Count - 1)
+            {
+                if (!PutModuleBack(module, baseline))
+                {
+                    Log.Error($"write: the module is left between two texts: {windows.Count - 1 - w} of {windows.Count} windows went in");
                 }
 
                 throw;
             }
         }
 
-        wrote = new LineWindow(diff.At, diff.Inserting, diff.TotalLines, diff.Text);
+        // Where each window stands NOW, for the read-back: the ones above it moved it by what
+        // they inserted less what they removed.
+        var placed = new List<LineWindow>(windows.Count);
+        var shift = 0;
+        foreach (var diff in windows)
+        {
+            placed.Add(new LineWindow(diff.At + shift, diff.Inserting, diff.TotalLines, diff.Text));
+            shift += diff.Inserting - diff.Removing;
+        }
+
+        wrote = placed;
         return true;
     }
 
     /// <summary>
-    /// Whether the module holds exactly the window that was just written to it, and nothing else
-    /// moved: the line count is what the write expected, and the window reads back character for
-    /// character. False for anything else - the editor tidied the text, converted a character it
-    /// cannot store, or added a line somewhere - and the caller then reads the whole module,
-    /// which is what it used to do unconditionally.
+    /// Whether the module holds exactly the windows that were just written to it, and nothing
+    /// else moved: the line count is what the write expected, and each window reads back
+    /// character for character. False for anything else - the editor tidied the text, converted
+    /// a character it cannot store, or added a line somewhere - and the caller then reads the
+    /// whole module, which is what it used to do unconditionally.
     /// </summary>
-    private static bool WindowCameBackIntact(DispatchObject module, LineWindow wrote)
+    private static bool WindowsCameBackIntact(DispatchObject module, IReadOnlyList<LineWindow> wrote)
     {
         try
         {
-            if (module.GetInt32("CountOfLines") != wrote.TotalLines)
+            if (wrote.Count > 0 && module.GetInt32("CountOfLines") != wrote[0].TotalLines)
             {
                 return false;
             }
 
-            if (wrote.Count == 0)
+            foreach (var window in wrote)
             {
                 // A pure deletion: the count above is the whole check.
-                return true;
+                if (window.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(
+                    module.GetStringIndexed("Lines", window.At, window.Count),
+                    window.Text,
+                    StringComparison.Ordinal))
+                {
+                    return false;
+                }
             }
 
-            return string.Equals(
-                module.GetStringIndexed("Lines", wrote.At, wrote.Count),
-                wrote.Text,
-                StringComparison.Ordinal);
+            return true;
         }
         catch (Exception ex)
         {

@@ -314,6 +314,12 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   on Enter or on the select losing focus, and Escape puts it back. A ref, name, email, URL or
   remote beginning with a dash is refused before git could read it as an option, and an undone
   commit's open comparison and unfolded state go with it.
+- **The rows compare without copying** (the same day, [lessons.md](lessons.md) finding 77).
+  Each status compared every module with the branch head and with its file by building four
+  normalised copies of each text; `ModuleSync.SameCode` walks both texts in place instead. An
+  upstream whose remote branch is gone reports `upstreamGone`, so zero ahead is not read as
+  "already pushed" and the head's Undo stays live. And the status, diff and blame log their
+  phases, which is how the measuring was done.
 
 - **An import writes one line terminator fewer than the file carries.** The export appends a
   newline to a module's text, as a text file should, and the applier wrote the file's whole body

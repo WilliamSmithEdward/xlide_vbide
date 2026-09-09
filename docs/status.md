@@ -142,7 +142,7 @@ ran in Excel and the places this product asks which host it is in were only ever
 way - which is how the test runner came to have never once run a test in Access
 ([lessons.md](lessons.md) finding 72). Word has a launcher of its own and no group yet.
 
-Counts move, so they are given as of this line rather than as standing facts: 614 unit tests,
+Counts move, so they are given as of this line rather than as standing facts: 640 unit tests,
 68 api routes of which 66 are driven by one of the 70 suites the gate runs, 2 left out on
 purpose.
 

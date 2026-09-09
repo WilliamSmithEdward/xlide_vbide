@@ -152,6 +152,223 @@ public readonly record struct LineDiff(
 
 
     /// <summary>
+    /// Every run of lines that differs, as windows in the BASELINE's numbering, ascending - to be
+    /// written from the last to the first, so that none moves the lines an earlier one is
+    /// addressed by. Empty when the texts agree; null when the change is too much to be edits
+    /// and the module is better replaced.
+    ///
+    /// <see cref="Between"/> is the whole answer while the change is one window, which is what a
+    /// pause in typing produces. It called everything else a replacement, and a replacement makes
+    /// the host's editor take the whole module again: measured 2026-09-09, two one-line edits far
+    /// apart cost 330ms at 4,500 lines, 1.3 seconds at 11,000 and 30 seconds at VBA's ceiling,
+    /// against 17 to 200ms for one edit - and two edits far apart is what a rename, a declaration
+    /// with its use, a replace-all or an agent's write produces. So the middle between the common
+    /// head and tail is split at ANCHORS, lines that occur exactly once on each side in the same
+    /// order (patience diff's idea), and what lies between consecutive anchors is a window of its
+    /// own once its own head and tail are trimmed. A gap no anchor can split that is still too
+    /// big for a window, or more windows than <paramref name="mostWindows"/>, is the replacement
+    /// it always was.
+    ///
+    /// This path splits both texts into lines, the allocation <see cref="Between"/> exists to
+    /// avoid, and pays it only once the one-window answer has failed - the rare write, never the
+    /// typing pause.
+    /// </summary>
+    public static IReadOnlyList<LineDiff>? Windows(string baseline, string text, int largestWindow, int mostWindows)
+    {
+        var one = Between(baseline, text, largestWindow);
+        if (one.Change == LineChange.Identical)
+        {
+            return [];
+        }
+
+        if (one.Change == LineChange.Window)
+        {
+            return [one];
+        }
+
+        var old = Lines(baseline);
+        var now = Lines(text);
+        var hunks = new List<(int OldStart, int OldEnd, int NewStart, int NewEnd)>();
+        if (!Hunks(old, now, 0, old.Length, 0, now.Length, largestWindow, hunks, 0) || hunks.Count > mostWindows)
+        {
+            return null;
+        }
+
+        var windows = new List<LineDiff>(hunks.Count);
+        foreach (var (oldStart, oldEnd, newStart, newEnd) in hunks)
+        {
+            windows.Add(new LineDiff(
+                LineChange.Window,
+                oldStart + 1,
+                oldEnd - oldStart,
+                newEnd - newStart,
+                newEnd > newStart ? string.Join("\r\n", now, newStart, newEnd - newStart) : string.Empty,
+                oldEnd > oldStart ? string.Join("\r\n", old, oldStart, oldEnd - oldStart) : string.Empty,
+                now.Length));
+        }
+
+        return windows;
+    }
+
+    /// <summary>The lines of a text, endings off, counted as <see cref="CountLines"/> counts them.</summary>
+    private static string[] Lines(string text)
+    {
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].EndsWith('\r'))
+            {
+                lines[i] = lines[i][..^1];
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// The differing runs between old[oldStart..oldEnd) and now[newStart..newEnd), appended in
+    /// order. False when a run too big for a window cannot be split at an anchor.
+    /// </summary>
+    private static bool Hunks(
+        string[] old, string[] now, int oldStart, int oldEnd, int newStart, int newEnd,
+        int largestWindow, List<(int OldStart, int OldEnd, int NewStart, int NewEnd)> hunks, int depth)
+    {
+        while (oldStart < oldEnd && newStart < newEnd && old[oldStart] == now[newStart])
+        {
+            oldStart++;
+            newStart++;
+        }
+
+        while (oldEnd > oldStart && newEnd > newStart && old[oldEnd - 1] == now[newEnd - 1])
+        {
+            oldEnd--;
+            newEnd--;
+        }
+
+        if (oldStart == oldEnd && newStart == newEnd)
+        {
+            return true;
+        }
+
+        if (oldEnd - oldStart <= largestWindow && newEnd - newStart <= largestWindow)
+        {
+            hunks.Add((oldStart, oldEnd, newStart, newEnd));
+            return true;
+        }
+
+        // Every level below splits at an anchor, so the depth is the number of anchors nested on
+        // one path; a text that needs more than this many is not one anybody edited by hand.
+        if (depth >= 64)
+        {
+            return false;
+        }
+
+        var anchors = Anchors(old, now, oldStart, oldEnd, newStart, newEnd);
+        if (anchors.Count == 0)
+        {
+            return false;
+        }
+
+        var (fromOld, fromNew) = (oldStart, newStart);
+        foreach (var (atOld, atNew) in anchors)
+        {
+            if (!Hunks(old, now, fromOld, atOld, fromNew, atNew, largestWindow, hunks, depth + 1))
+            {
+                return false;
+            }
+
+            fromOld = atOld + 1;
+            fromNew = atNew + 1;
+        }
+
+        return Hunks(old, now, fromOld, oldEnd, fromNew, newEnd, largestWindow, hunks, depth + 1);
+    }
+
+    /// <summary>
+    /// Lines that occur exactly once on each side of the ranges, paired, in the longest sequence
+    /// that keeps the same order on both sides - the lines an edit did not move.
+    /// </summary>
+    private static List<(int Old, int New)> Anchors(
+        string[] old, string[] now, int oldStart, int oldEnd, int newStart, int newEnd)
+    {
+        var oldSeen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var oldAt = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = oldStart; i < oldEnd; i++)
+        {
+            oldSeen[old[i]] = oldSeen.TryGetValue(old[i], out var seen) ? seen + 1 : 1;
+            oldAt[old[i]] = i;
+        }
+
+        var newSeen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var newAt = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var j = newStart; j < newEnd; j++)
+        {
+            newSeen[now[j]] = newSeen.TryGetValue(now[j], out var seen) ? seen + 1 : 1;
+            newAt[now[j]] = j;
+        }
+
+        // Candidates in old order; the longest increasing run of their new positions is the set
+        // that agrees on both sides.
+        var candidates = new List<(int Old, int New)>();
+        for (var i = oldStart; i < oldEnd; i++)
+        {
+            var line = old[i];
+            if (oldSeen[line] == 1 && newSeen.TryGetValue(line, out var count) && count == 1)
+            {
+                candidates.Add((i, newAt[line]));
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return candidates;
+        }
+
+        var tails = new List<int>();
+        var before = new int[candidates.Count];
+        var tailIndex = new List<int>();
+        for (var c = 0; c < candidates.Count; c++)
+        {
+            var value = candidates[c].New;
+            var lo = 0;
+            var hi = tails.Count;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) / 2;
+                if (tails[mid] < value)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+
+            before[c] = lo > 0 ? tailIndex[lo - 1] : -1;
+            if (lo == tails.Count)
+            {
+                tails.Add(value);
+                tailIndex.Add(c);
+            }
+            else
+            {
+                tails[lo] = value;
+                tailIndex[lo] = c;
+            }
+        }
+
+        var anchors = new List<(int Old, int New)>(tails.Count);
+        for (var c = tailIndex[^1]; c >= 0; c = before[c])
+        {
+            anchors.Add(candidates[c]);
+        }
+
+        anchors.Reverse();
+        return anchors;
+    }
+
+    /// <summary>
     /// The window found by comparing CHARACTERS, backed off to whole lines - or null when what
     /// that finds is too big to be an edit, which is both the genuinely-wholesale case and the
     /// case where the two texts disagree about how a line ends.

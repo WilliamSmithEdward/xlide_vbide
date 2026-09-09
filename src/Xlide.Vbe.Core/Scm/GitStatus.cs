@@ -8,12 +8,16 @@ namespace Xlide.Vbe.Core.Scm;
 /// <param name="Upstream">The tracked remote branch, or null when there is none.</param>
 /// <param name="Ahead">Commits the branch has that its upstream lacks.</param>
 /// <param name="Behind">Commits the upstream has that the branch lacks.</param>
+/// <param name="UpstreamGone">
+/// The upstream is configured but its ref is not there - the remote branch was deleted and
+/// pruned - so git printed no counts, and zero ahead does not mean the branch is on it.
+/// </param>
 /// <param name="Conflicts">Paths still unmerged.</param>
 /// <param name="Changed">
 /// Paths of ordinary and renamed changes, for the outside section's cross-check.
 /// </param>
 public sealed record GitBranchState(
-    string? Oid, string Head, string? Upstream, int Ahead, int Behind,
+    string? Oid, string Head, string? Upstream, int Ahead, int Behind, bool UpstreamGone,
     IReadOnlyList<string> Conflicts, IReadOnlyList<string> Changed);
 
 /// <summary>Reads `git status --porcelain=v2 --branch -z` output.</summary>
@@ -39,6 +43,7 @@ public static class GitStatus
         string? upstream = null;
         var ahead = 0;
         var behind = 0;
+        var counted = false;
         var conflicts = new List<string>();
         var changed = new List<string>();
 
@@ -66,7 +71,10 @@ public static class GitStatus
             }
             else if (entry.StartsWith(AheadBehindHeader, StringComparison.Ordinal))
             {
+                // Printed only when the upstream is set AND its ref resolves; an upstream whose
+                // remote branch was deleted and pruned has the upstream line and not this one.
                 (ahead, behind) = AheadBehind(entry[AheadBehindHeader.Length..]);
+                counted = true;
             }
             else if (entry[0] == '1')
             {
@@ -86,7 +94,7 @@ public static class GitStatus
             }
         }
 
-        return new GitBranchState(oid, head, upstream, ahead, behind, conflicts, changed);
+        return new GitBranchState(oid, head, upstream, ahead, behind, upstream is not null && !counted, conflicts, changed);
     }
 
     /// <summary>"+A -B" as git prints it.</summary>
