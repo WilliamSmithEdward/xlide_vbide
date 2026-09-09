@@ -28,6 +28,9 @@ side-by-side renderer the Changes pane uses. Below the rows, the history: commit
 opening to the modules it touched, each module to its comparison against the live text, with Open
 this version and Restore. A Blame toggle paints author, date and short hash at the end of every
 committed line of the active module, and marks lines changed since the last commit as uncommitted.
+The divider between the rows and the comparison drags, or takes the arrow keys: a third of the
+pane until it is moved, then the width it was left at, kept across reloads, between a floor the
+rows can still be read at and a ceiling that leaves the message box and the comparison their room.
 
 The branch is a select. Changing it is a checkout followed by an import into the project, refused
 while the workbook is dirty, the way git refuses a checkout over uncommitted work. Fetch, Pull and
@@ -86,9 +89,11 @@ first suggestion and otherwise a folder beside the workbook named after it.
 The folder is flat, because the export is flat. The repository root is whatever
 `git rev-parse --show-toplevel` answers from the folder: a folder inside an existing repository
 joins that repository at its relative path, so a workbook and its add-in can share one repository
-under two subfolders. With no repository above it, Initialize runs `git init` in the folder, sets
-`core.autocrlf` false so a module round-trips byte for byte, and writes a `.gitignore` for the
-export's lock and partial files. An existing repository's configuration is never touched.
+under two subfolders. With no repository above it, Initialize runs `git init` in the folder on a
+branch named `main` - GitHub's default, where a repository made here is most likely headed, unless
+a configured `init.defaultBranch` names another - sets `core.autocrlf` false so a module
+round-trips byte for byte, and writes a `.gitignore` for the export's lock and partial files. An
+existing repository's configuration is never touched.
 
 Two open projects never share a folder; the pane refuses to point a second project at a folder
 another open project already uses, because a true-up export of one would delete the other's
@@ -162,7 +167,7 @@ project. `by=` attributes writes, as everywhere.
 | `settings` | `folder=` | the status, after remembering the folder |
 | `forget` | | the status, after forgetting it |
 | `browse` | | the status, after the host's folder chooser (blocks; the pane's, not a harness's) |
-| `init` | | the status, after `git init` |
+| `init` | | the status, after `git init` on `main` (a configured `init.defaultBranch` wins) |
 | `identity` | `name=`, `email=` | the status, after writing the repository's identity |
 | `remote` | `url=`, `remote=` (origin when absent) | the status, after `git remote add`, or `set-url` when the name exists |
 | `commit` | `message=`; body: module names, one per line; empty means every row | ScmCommitReply |
@@ -211,9 +216,10 @@ The `status` and `covers` sentences are the pane's own words and the route's, fr
 and `remote`, the remote line's button; `{file}` points the pane at another open file through the
 select's own change; `{tick, on}` ticks a row; `{message}` types the message; `{module}` opens a
 row's comparison; `{commit}` opens a commit; `{branch}` picks a branch through the select; `{url}`
-types the remote URL, unfolding the input when a remote is attached. `ui.scm` is the pane's state:
-`project`, `state`, `branch`, `remote`, `remoteUrl`, `rows`, `outside`, `commits`, `showing`,
-`message`, `busy`, `behind`.
+types the remote URL, unfolding the input when a remote is attached; `{width}` puts the divider
+where a drag to that many pixels would leave it. `ui.scm` is the pane's state: `project`,
+`state`, `branch`, `remote`, `remoteUrl`, `rows`, `outside`, `commits`, `showing`, `message`,
+`busy`, `behind`, `listWidth`.
 `act("blame", {which: toggle|on|off})` drives the editor layer and `ui.blame` reads it.
 
 ## Threading and the host
@@ -251,6 +257,14 @@ types the remote URL, unfolding the input when a remote is attached. `ui.scm` is
   first push no longer leaves the VBE for `git remote add`. The status carries the remote and its
   URL, the remote verbs are greyed until one is attached, and the same verb re-points a wrong
   paste with `set-url`.
+- **Initialize names the first branch `main`** (2026-09-09). git's own default is still `master`,
+  and the first live test pushed a `master` at a GitHub whose default is `main`. A configured
+  `init.defaultBranch` is the developer's and wins; a git without `--initial-branch` (before
+  2.28) falls back to its own name.
+- **The divider drags** (the same day). The two halves were a fixed grid, a third and two
+  thirds, and a long module name or a wide comparison had no way to ask for more. It is the
+  Changes pane's rail divider now, with the floor, the ceiling and the arrow keys, and the width
+  is kept in the page's storage beside the dock sizes.
 
 - **An import writes one line terminator fewer than the file carries.** The export appends a
   newline to a module's text, as a text file should, and the applier wrote the file's whole body

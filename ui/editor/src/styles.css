@@ -6556,21 +6556,57 @@ body.objbrowser-page #objbrowser-card {
 }
 
 #scm-body {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 2fr;
+  display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
+/* A third of the pane until the divider is dragged, and never under the floor a drag may not
+   cross; then the width the drag left, in pixels, which ScmPane sets on the body and keeps across
+   reloads. The cap is for a pane narrower than the width was left in: the comparison side keeps
+   its room, and the next drag clamps against the width that then exists. */
 #scm-list {
+  flex: 0 0 var(--scm-list-width, max(180px, 33%));
+  max-width: max(180px, calc(100% - 260px));
+  min-width: 0;
   overflow: auto;
-  border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
   padding: 4px 0;
+}
+
+/* The divider, the Changes pane's: a grip that says it can be dragged, and the arrow keys for
+   anyone who cannot drag. It is the line between the halves, so the list draws none of its own. */
+#scm-splitter {
+  position: relative;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#scm-splitter:hover,
+#scm-splitter:focus-visible {
+  background: var(--vscode-focusBorder, #007fd4);
+  outline: none;
+}
+
+#scm-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 34px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 #scm-detail {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }

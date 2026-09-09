@@ -381,7 +381,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
 | Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder, point it at a project | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }` / `{ project }`; read it back on `ui.sync`, which carries `project` and `projects` |
-| Drive the Source Control pane: press refresh/commit/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the remote line's remote, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch, type the identity, type the remote URL, point it at a file | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ name, email }` / `{ url }` / `{ file }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm` |
+| Drive the Source Control pane: press refresh/commit/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the remote line's remote, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch, type the identity, type the remote URL, point it at a file, put the divider at a width | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ name, email }` / `{ url }` / `{ file }` / `{ width }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm`, whose `listWidth` is the rows' width as the divider leaves it |
 | Paint blame at the end of every committed line of the active module, or take it away | `act("blame", { which: "toggle" })`, `on`, `off`; read it back on `ui.blame`: `on`, `lines`, `uncommitted`, and `painted`, the decorations actually on the model, because the reading and the paint are two claims |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
@@ -459,6 +459,7 @@ await api.act("scmPane", { commit: "abc1234" }); // open a commit to the modules
 await api.act("scmPane", { commit: "abc1234", module: "Ledger" });  // a file under an opened commit
 await api.act("scmPane", { branch: "feature" }); // pick a branch through the select: a checkout
 await api.act("scmPane", { name: "Ada", email: "ada@example.com" });  // type the identity inputs
+await api.act("scmPane", { width: 320 });        // the rows' width, as a drag of the divider leaves it
 await api.act("scmPane", { url: "https://github.com/ada/book.git" });  // type the remote URL;
                                                 //   press remote attaches or re-points origin
 await api.act("blame", { which: "toggle" });     // the editor's blame layer: toggle, on, off
@@ -1552,7 +1553,7 @@ Restore. [source-control.md](source-control.md) is the design; this is how to dr
 
 ```js
 await api.scm({ action: "settings", folder: "C:\\src\\book" });  // remember the folder per project
-await api.scm({ action: "init" });                    // git init there: autocrlf off, .gitignore
+await api.scm({ action: "init" });                    // git init there, on main: autocrlf off, .gitignore
 await api.scm({ action: "identity", name: "Ada", email: "ada@example.com" });
 await api.scm({ action: "remote", url: "https://github.com/ada/book.git" });  // origin; the
                                                       //    first push sets the upstream

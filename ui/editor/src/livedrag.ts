@@ -47,7 +47,17 @@ export function installSplitterDrag(splitter: HTMLElement, drag: {
         }
 
         event.preventDefault();
-        splitter.setPointerCapture(event.pointerId);
+
+        // Capture keeps the drag alive when the pointer outruns a few pixels of divider, but it
+        // is a nicety: it throws for a pointer that is not down - a synthetic press from the dev
+        // surface, or one the browser has already let go of - and taking the listeners with it
+        // would turn a lost capture into a dead splitter. The Changes pane's rail found this
+        // first; the release below throws for the same pointers.
+        try {
+            splitter.setPointerCapture(event.pointerId);
+        } catch {
+            /* the drag still tracks through the listeners below */
+        }
         beginLiveDrag();
         let last = drag.positionOf(event);
 
@@ -58,7 +68,11 @@ export function installSplitterDrag(splitter: HTMLElement, drag: {
         };
 
         const end = (ended: PointerEvent): void => {
-            splitter.releasePointerCapture(ended.pointerId);
+            try {
+                splitter.releasePointerCapture(ended.pointerId);
+            } catch {
+                /* never captured; nothing to let go of */
+            }
             splitter.removeEventListener("pointermove", move);
             splitter.removeEventListener("pointerup", end);
             splitter.removeEventListener("pointercancel", end);

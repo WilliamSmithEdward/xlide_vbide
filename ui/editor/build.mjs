@@ -262,6 +262,7 @@ const INDEX_HTML = `<!doctype html>
       </div>
       <div id="scm-body">
         <div id="scm-list" role="list" aria-label="Changes, folder and history"></div>
+        <div id="scm-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the changes and history" title="Drag to resize the changes and history" tabindex="0"><div id="scm-grip"></div></div>
         <div id="scm-detail">
           <div id="scm-notice" role="status" aria-live="polite"></div>
           <textarea id="scm-message" rows="3" spellcheck="true" aria-label="Commit message" placeholder="Commit message"></textarea>

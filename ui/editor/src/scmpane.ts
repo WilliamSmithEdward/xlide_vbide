@@ -15,6 +15,7 @@
 
 import type { OpenFiles } from "./changespane.js";
 import { drawDiffRows, type SyncDiffLine } from "./diffview.js";
+import { installSplitterDrag } from "./livedrag.js";
 import { openModal } from "./modal.js";
 
 /** One module live against the branch head, as the host reports it. */
@@ -126,9 +127,16 @@ export interface ScmPaneProbe {
     blameOn: boolean;
     remote: string;
     remoteUrl: string;
+    /** The rows' width in pixels, as the divider leaves it. */
+    listWidth: number;
   };
   /** Types a URL into the remote line's input, unfolding it first when a remote is attached. */
   setRemoteUrl(url: string): boolean;
+  /**
+   * Puts the divider where a drag to that width would leave it, floor and ceiling applied.
+   * False for a width that is not a number, or while the pane has no width to measure against.
+   */
+  resizeList(width: number): boolean;
   /**
    * Presses a named control: refresh, commit, export, import, fetch, pull, push, blame, init,
    * abort, browse, use, identity, open, restore. False when it is not on screen or is disabled
@@ -284,6 +292,15 @@ type Showing =
 /** How many commits the history lists. The list says when there are more. */
 const LOG_LIMIT = 50;
 
+/** Where the rows' width is kept across reloads, once the divider has been dragged. */
+const LIST_STORAGE_KEY = "xlide.scm.v1";
+/** The narrowest the rows go: a module name and its status word still read. */
+const LIST_FLOOR = 180;
+/** What the other half keeps whatever the drag: the message box and a comparison worth reading. */
+const LIST_KEEP = 260;
+/** One arrow key's worth, the dock splitters' step. */
+const LIST_STEP = 24;
+
 let livePane: ScmPaneProbe | null = null;
 
 /** The Source Control pane's probe, or null before one has been built. */
@@ -305,6 +322,12 @@ export class ScmPane {
   private readonly blameButton: HTMLButtonElement;
   private readonly branch: HTMLSelectElement;
   private readonly file: HTMLSelectElement;
+  private readonly body: HTMLElement;
+  private readonly splitter: HTMLElement;
+
+  /** The rows' width once the divider has been dragged; null is the stylesheet's third. */
+  private listWidth: number | null = null;
+  private warnedAboutStorage = false;
 
   /** The stamp the rows were read at, against the newest the host has sent - see stamped(). */
   private drawnStamp = 0;
@@ -366,8 +389,11 @@ export class ScmPane {
     this.blameButton = root.querySelector("#scm-blame") as HTMLButtonElement;
     this.branch = root.querySelector("#scm-branch") as HTMLSelectElement;
     this.file = root.querySelector("#scm-file") as HTMLSelectElement;
+    this.body = root.querySelector("#scm-body") as HTMLElement;
+    this.splitter = root.querySelector("#scm-splitter") as HTMLElement;
 
     livePane = this.probe();
+    this.dragList();
 
     // A FILE CHOICE IS A DIFFERENT REPOSITORY, not a filter over one: every project remembers
     // its own folder. What is on screen is dropped first, so a comparison from the old file's
@@ -689,6 +715,103 @@ export class ScmPane {
 
   private drawBlameButton(): void {
     this.blameButton.setAttribute("aria-pressed", this.blame.on() ? "true" : "false");
+  }
+
+  /**
+   * The divider between the rows and the comparison: a drag, or the arrow keys, to say how much
+   * of the pane the rows and the history are worth.
+   *
+   * A THIRD until it is dragged, whatever the pane's width: the pane docks anywhere, and a pixel
+   * default that suits the bottom dock is most of a left one. Once dragged it is a width in
+   * pixels, kept across reloads the way the dock splitters' sizes are, between a floor a row can
+   * still be read at and a ceiling that leaves the message box and the comparison their room.
+   */
+  private dragList(): void {
+    this.splitter.setAttribute("aria-valuemin", String(LIST_FLOOR));
+    this.loadListWidth();
+
+    // The width the drag is asking for, accumulated from the press rather than read back off the
+    // list on each move: a list pinned at its ceiling would otherwise start shrinking the moment
+    // the pointer turned back, however far past the ceiling it had gone. Listeners run in the
+    // order they were added, so this one, added before the drag's own, sees the press first.
+    let wanted = 0;
+    this.splitter.addEventListener("pointerdown", () => {
+      wanted = this.list.getBoundingClientRect().width;
+    });
+    installSplitterDrag(this.splitter, {
+      positionOf: (event) => event.clientX,
+      apply: (delta) => {
+        wanted += delta;
+        this.placeList(wanted);
+      },
+      // No editor lives in this pane, so a drag's end has nothing to lay out.
+      settle: () => undefined,
+      persist: () => this.rememberListWidth(),
+    });
+
+    this.splitter.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowLeft" ? -LIST_STEP : event.key === "ArrowRight" ? LIST_STEP : 0;
+      if (step === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      this.placeList(this.list.getBoundingClientRect().width + step);
+      this.rememberListWidth();
+    });
+  }
+
+  /** The most the rows may take: what leaves the other half its room, and never under the floor. */
+  private listCeiling(): number {
+    return Math.max(LIST_FLOOR, this.body.clientWidth - LIST_KEEP);
+  }
+
+  private placeList(width: number): void {
+    // Rounded AFTER the clamp: the ceiling is measured, and a pinned width would otherwise be
+    // read out by a screen reader as 596.8000000000001 - the Changes pane's rail found this.
+    this.listWidth = Math.round(Math.min(Math.max(LIST_FLOOR, width), this.listCeiling()));
+    this.body.style.setProperty("--scm-list-width", `${this.listWidth}px`);
+    this.splitter.setAttribute("aria-valuenow", String(this.listWidth));
+    this.splitter.setAttribute("aria-valuemax", String(this.listCeiling()));
+  }
+
+  private loadListWidth(): void {
+    try {
+      const raw = localStorage.getItem(LIST_STORAGE_KEY);
+      const stored = raw ? (JSON.parse(raw) as { listWidth?: unknown }).listWidth : undefined;
+      if (typeof stored !== "number" || !Number.isFinite(stored)) {
+        return;
+      }
+
+      // Not clamped against the ceiling: the pane may be hidden while the page loads, and a body
+      // 0px wide would pin the width to the floor. The stylesheet caps the list on a pane
+      // narrower than the width was left in, and the next drag clamps against the width that
+      // then exists.
+      this.listWidth = Math.max(LIST_FLOOR, Math.round(stored));
+      this.body.style.setProperty("--scm-list-width", `${this.listWidth}px`);
+      this.splitter.setAttribute("aria-valuenow", String(this.listWidth));
+    } catch {
+      // Storage off, or holding something that is not ours: the stylesheet's third, as on a
+      // first run.
+    }
+  }
+
+  private rememberListWidth(): void {
+    if (this.listWidth === null) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(LIST_STORAGE_KEY, JSON.stringify({ listWidth: this.listWidth }));
+    } catch (error) {
+      // Storage can be full or off. The width will not survive the reload, which is survivable -
+      // but silently, "the divider keeps resetting" is a mystery with nothing behind it. Said
+      // once: this runs on every drag, and a broken store would otherwise fill the console.
+      if (!this.warnedAboutStorage) {
+        this.warnedAboutStorage = true;
+        console.warn("[xlide] the Source Control pane's divider could not be saved; it will not survive a reload", error);
+      }
+    }
   }
 
   private draw(): void {
@@ -1105,7 +1228,8 @@ export class ScmPane {
       case "noRepository": {
         text.textContent = `${state.folder} is not inside a git repository.`;
         const init = button("scm-init", "Initialize", () => void this.run({ action: "init" }));
-        init.title = "git init in the folder, with core.autocrlf off and a .gitignore for the export's lock files";
+        init.title = "git init in the folder on a branch named main, with core.autocrlf off and a .gitignore "
+          + "for the export's lock files";
         acts.appendChild(init);
         break;
       }
@@ -1438,6 +1562,7 @@ export class ScmPane {
         blameOn: this.blame.on(),
         remote: this.state?.remote ?? "",
         remoteUrl: this.state?.remoteUrl ?? "",
+        listWidth: Math.round(this.list.getBoundingClientRect().width),
       }),
       press: (control) => {
         switch (control) {
@@ -1555,6 +1680,15 @@ export class ScmPane {
         }
 
         box.value = url;
+        return true;
+      },
+      resizeList: (width) => {
+        if (!Number.isFinite(width) || this.body.clientWidth <= 0) {
+          return false;
+        }
+
+        this.placeList(width);
+        this.rememberListWidth();
         return true;
       },
     };

@@ -215,7 +215,7 @@ internal static class AgentGuide
             + "branch, the remote and its URL, the rows - every module live against the branch "
             + "head - the Folder section, the history's last commit and a suggested message from "
             + "the change log's rounds. settings&folder= remembers the folder, init runs git init "
-            + "in it, identity writes user.name and user.email, remote&url= attaches origin "
+            + "in it on a branch named main, identity writes user.name and user.email, remote&url= attaches origin "
             + "(remote= names another) or re-points it, commit saves, exports and commits the modules the body "
             + "names (all rows when empty) with message=, export writes the folder, import reads "
             + "the Folder rows the body names into the project, log lists commits (limit=, "

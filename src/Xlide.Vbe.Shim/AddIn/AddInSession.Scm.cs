@@ -910,7 +910,21 @@ internal sealed partial class AddInSession
     private static string Initialise(GitClient git, string folder)
     {
         Directory.CreateDirectory(folder);
-        var made = Git(git, folder, GitDeadline, "init");
+
+        // ON A BRANCH NAMED MAIN. git's own default is still master unless init.defaultBranch says
+        // otherwise, and GitHub's is main, which is where a repository made here is most likely
+        // headed: a first push from master leaves the developer with a branch GitHub does not
+        // treat as the default one. A name the developer configured is theirs, so git's plain
+        // init runs when one is set. A git older than 2.28 (2020) has no --initial-branch and
+        // refuses the option by name; the plain init, and its own name, is the fallback.
+        var configured = Git(git, folder, GitDeadline, "config", "--get", "init.defaultBranch");
+        var made = configured.Ok && configured.StdOut.Trim().Length > 0
+            ? Git(git, folder, GitDeadline, "init")
+            : Git(git, folder, GitDeadline, "init", "--initial-branch=main");
+        if (!made.Ok && made.Words.Contains("initial-branch", StringComparison.Ordinal))
+        {
+            made = Git(git, folder, GitDeadline, "init");
+        }
         if (!made.Ok)
         {
             throw new InvalidOperationException($"git init failed: {made.Words}");
@@ -928,7 +942,11 @@ internal sealed partial class AddInSession
             File.WriteAllText(ignore, GitIgnore.Content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
-        return $"initialised a repository in {folder}";
+        var head = Git(git, folder, GitDeadline, "symbolic-ref", "--short", "HEAD");
+        var branch = head.Ok ? head.StdOut.Trim() : string.Empty;
+        return branch.Length > 0
+            ? $"initialised a repository in {folder}, on {branch}"
+            : $"initialised a repository in {folder}";
     }
 
     private static ScmIdentityReply? ReadIdentity(GitClient git, string root)

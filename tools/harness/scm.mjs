@@ -206,6 +206,19 @@ try {
   check("and the state is now about identity or ready",
     ["noIdentity", "ready"].includes(initialised.state), true);
 
+  // GitHub's default name, where a repository made here is most likely headed - unless this
+  // machine's git has a name of its own configured, which is the developer's to keep.
+  let expectedBranch = "main";
+  try {
+    expectedBranch = execFileSync(gitExe, ["config", "--get", "init.defaultBranch"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || "main";
+  } catch {
+    // Unset: git exits 1, and the product's own default is the one to expect.
+  }
+  check("and the first branch is main, GitHub's default, unless init.defaultBranch names another",
+    initialised.branch, expectedBranch);
+  check("and the detail names it", (initialised.detail ?? "").endsWith(`, on ${expectedBranch}`), true);
+
   // Written whether or not the machine has a global identity, so every commit below carries a
   // name the blame check can hold it to.
   const named = await scm({ action: "identity", name: identity.name, email: identity.email });
@@ -273,6 +286,72 @@ try {
 
   check("the pane and the route agree about the rows", rowsOf(drawn), rowsOf(twoWrites));
   check("and about the branch", drawn.branch, trunk);
+
+  // ---- the divider between the rows and the comparison ----------------------------------------
+  //
+  // How much of the pane the rows and the history are worth is the reader's call, not the pane's.
+  // The floor and the ceiling are the pane's: rows at 20px are a control nobody can use, and rows
+  // that have eaten the message box and the comparison have taken the pane's other half with
+  // them. The drag starts from a KNOWN width, because the default is a third of the pane and a
+  // third is rarely a whole number of pixels; and the room comes from the frame that exists,
+  // because a fixed pull asserts more than a narrow window allows (the Changes pane's rail, #17).
+  const pull = async (by) => {
+    await api.ask(`(() => {
+      const bar = document.getElementById('scm-splitter');
+      const box = bar.getBoundingClientRect();
+      const y = box.top + box.height / 2;
+      const at = (type, x) => bar.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1,
+        clientX: x, clientY: y,
+      }));
+      const from = box.left + box.width / 2;
+      at('pointerdown', from);
+      at('pointermove', from + ${by});
+      at('pointerup', from + ${by});
+      return true;
+    })()`);
+    return (await paneShown()).listWidth;
+  };
+
+  const placed = await api.act("scmPane", { width: 240 });
+  check("the divider goes where the act asks, as a drag there would leave it",
+    [placed.did, (await paneShown()).listWidth], [true, 240]);
+  await api.ask(`document.getElementById('scm-splitter').dispatchEvent(`
+    + `new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))`);
+  check("and the arrow keys move it a step", (await paneShown()).listWidth, 264);
+
+  const ceiling = Number(await api.ask(
+    `Math.max(180, document.getElementById('scm-body').clientWidth - 260)`));
+  const room = Math.min(80, ceiling - 264);
+  check(`the pane is wide enough to have a drag to test (ceiling ${ceiling})`, room >= 20, true);
+  check("the divider drags", await pull(room), 264 + room);
+  check("and stops before the rows are too narrow to read", await pull(-4000), 180);
+  check("and before they have eaten the comparison", await pull(4000), ceiling);
+
+  const dividerRaw = await api.ask(`JSON.stringify((() => {
+    const bar = document.getElementById('scm-splitter');
+    let kept = null;
+    try {
+      kept = JSON.parse(localStorage.getItem('xlide.scm.v1') ?? 'null')?.listWidth ?? null;
+    } catch {
+      kept = null;
+    }
+    return {
+      role: bar.getAttribute('role'),
+      orient: bar.getAttribute('aria-orientation'),
+      now: Number(bar.getAttribute('aria-valuenow')),
+      grip: !!document.getElementById('scm-grip')?.offsetParent,
+      reachable: bar.tabIndex >= 0,
+      kept,
+    };
+  })())`);
+  const divider = JSON.parse(typeof dividerRaw === "string" ? dividerRaw : JSON.stringify(dividerRaw));
+  check("and says what it is, with a grip to say it can be pulled",
+    { role: divider.role, orient: divider.orient, grip: divider.grip, reachable: divider.reachable },
+    { role: "separator", orient: "vertical", grip: true, reachable: true });
+  check("reports where it stands", divider.now, ceiling);
+  check("and keeps it for the next load", divider.kept, ceiling);
+  await api.act("scmPane", { width: 300 });
 
   const tickedOn = await api.act("scmPane", { tick: "Ledger", on: true });
   const tickedOff = await api.act("scmPane", { tick: "Reports", on: false });

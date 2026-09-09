@@ -2136,8 +2136,9 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * file through the select's own change, `{tick, on}` ticks a Changes row, `{message}`
      * types the commit message, `{module}` opens a row's comparison, `{commit}` opens a commit
      * (with `{module}` as well, a file under it), `{branch}` picks a branch through the
-     * select, which is a checkout, `{name, email}` types the identity, and `{url}` types the
-     * remote URL the remote press then attaches. `ui.scm` is the read side.
+     * select, which is a checkout, `{name, email}` types the identity, `{url}` types the
+     * remote URL the remote press then attaches, and `{width}` puts the divider where a drag
+     * to that many pixels would leave it. `ui.scm` is the read side.
      */
     scmPane: (args) => {
       const pane = scmPaneProbe();
@@ -2218,9 +2219,16 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: "the remote line is not on screen; the repository is not ready" };
       }
 
+      if (args.width !== undefined) {
+        return pane.resizeList(Number(args.width))
+          ? { did: true, detail: `the rows take ${pane.state().listWidth}px, as a drag of the divider there would leave them` }
+          : { did: false, detail: "width must be a number of pixels, and the pane must be on screen to measure against" };
+      }
+
       return {
         did: false,
-        detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), branch, name and email, or url",
+        detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), "
+          + "branch, name and email, url, or width",
       };
     },
 
