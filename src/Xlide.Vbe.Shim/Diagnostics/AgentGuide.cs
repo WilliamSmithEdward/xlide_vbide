@@ -208,6 +208,27 @@ internal static class AgentGuide
             + "unwritten edits (naming them), and answers every module's outcome. A removed FORM "
             + "is not re-added - its design is not recorded - and a module whose text the log "
             + "aged out says so."),
+        new("scm", "GET|POST", "action=status|settings|forget|browse|init|identity|commit|export|import|log|diff|show|open|restore|blame|checkout|fetch|pull|push|abort, project=, module=, ref=, message=, folder=, name=, email=, limit=, by=",
+            "Source control: git behind the folder a project's modules are exported to, through "
+            + "the same brain the Source Control pane presses. Bare, the status: state (noGit, "
+            + "noProject, unsaved, noFolder, noRepository, noIdentity, conflicted, ready), the "
+            + "branch, the rows - every module live against the branch head - the Folder section, "
+            + "the history's last commit and a suggested message from the change log's rounds. "
+            + "settings&folder= remembers the folder, init runs git init in it, identity writes "
+            + "user.name and user.email, commit saves, exports and commits the modules the body "
+            + "names (all rows when empty) with message=, export writes the folder, import reads "
+            + "the Folder rows the body names into the project, log lists commits (limit=, "
+            + "module=), diff and show line a module's live text against ref= (HEAD when absent), "
+            + "open puts the text at ref= in a read-only tab, restore writes it into the module "
+            + "as a change-log round, blame maps the committed lines onto the editor's, checkout "
+            + "switches branch and imports, fetch/pull/push run git, abort ends a merge.",
+            "GET scm", true, DoorPolicy.HttpOnly,
+            "git runs on the pool thread and the host thread is crossed only to read and write "
+            + "the project, so it never blocks the editor; the inside door holds that very "
+            + "thread, which is why the route is HTTP only. Commit is refused with an empty "
+            + "message and with nothing to commit; checkout is refused while the workbook - or "
+            + "any open workbook in the same repository - is dirty, naming it; import and "
+            + "restore are refused outside design mode; browse blocks in the folder chooser."),
         new("workbook", "POST", "action=close&project=<name>&saveChanges=0|1",
             "Closes one open workbook, the host's own File Close with the save question answered "
             + "in the request. The ONE safe route for the gesture: an immediate-window line runs "

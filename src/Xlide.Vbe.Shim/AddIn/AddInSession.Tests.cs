@@ -565,6 +565,10 @@ internal sealed partial class AddInSession
             _changeLogs.Remove(id);
         }
 
+        // And the repository watcher: a closed workbook's folder is nobody's to watch, and the
+        // stamp it would tap the pane with is about a project the pane no longer lists.
+        ForgetScmState(liveProjectIds);
+
         return dropped;
     }
 

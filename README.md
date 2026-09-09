@@ -42,9 +42,9 @@ native code, so Excel never loads a .NET runtime on its account.
   history, scroll position, and squiggles.
 - Editor groups. Split right or down with Ctrl+\, drag a tab to a group's edge, and work in two
   modules at once.
-- Six tool panes that dock where you put them: Explorer, Properties, Problems, Immediate, Locals,
-  and Watch. Drag one by its title and a five-zone compass appears over the region under the
-  pointer. The arrangement persists.
+- Nine tool panes that dock where you put them: Explorer, Properties, Problems, Immediate,
+  Locals, Watch, Tests, Changes and Source Control. Drag one by its title and a five-zone compass
+  appears over the region under the pointer. The arrangement persists.
 - Search as one floating widget, scoped to the module, the workbook, or every open workbook. Find
   All lists every match with a preview, and Replace All applies as a single edit that one undo
   reverts.
@@ -75,6 +75,12 @@ native code, so Excel never loads a .NET runtime on its account.
   the text from before kept so you can read it - and restored from: any round, one module or the
   whole project, or Reject everything since you last accepted. A restore is recorded as a round
   like any other change, so it can itself be restored away.
+- A Source Control pane, backed by the git you already have. Your modules live against the
+  branch head; tick the ones to commit and type a message, pre-filled from what changed since the
+  last commit. History opens to the modules each commit touched, with Open this version and
+  Restore; blame paints author, date and hash at the end of every committed line; the branch is
+  a select; Fetch, Pull and Push are buttons. Git for Windows' own credential manager handles
+  signing in, and xlide never sees a credential.
 - Analyzer rules you can change. A searchable dialog, a right-click on any finding to suppress it
   here or turn it off on this machine, and the same switch on the lightbulb. Rules that mirror a
   VBE compile failure say so instead of offering a switch that would be ignored.

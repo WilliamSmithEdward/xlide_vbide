@@ -283,6 +283,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` marks the rounds so far as reviewed. Held in memory for the session: it writes no file anywhere. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
+| `scm` | `scm({action, project, module, ref, message, folder, name, email, limit, by, modules, timeoutMs})` | source control, one brain with the Source Control pane. Bare it answers the status: `state`, the folder and the repository root, the branch, `rows` (the LIVE project against the branch head), `outside` (folder files that differ from the live text), the branches, the last commit and a `suggestedMessage` from the change-log rounds since the last commit. `settings&folder=` remembers the folder, `init` makes a repository there, `identity` names the committer, `commit` saves, exports and commits the `modules` named (none means every changed row) with `git commit --only`, `import` writes Folder rows into the project, `log`/`diff`/`show` read history, `open` opens a past version in a read-only tab, `restore` writes one back as a change-log round, `blame` maps the committed lines onto the editor's, `checkout` refuses over a dirty workbook and imports once it is clean, `fetch`/`pull`/`push`/`abort` run git and answer its words. Acting verbs ride as POST and answer the status after acting; commit and import carry it under `status`. Needs git.exe on the machine, and answers `state: noGit` without it |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass`. **A FORM CARRIES THREE FILES**: its code, the binary sidecar the VBE's own exporter writes beside it, and `Name.form` - the design as xlide's markup, a row of its own that diffs and applies like any other. On import a `.form` goes through the markup's name-keyed diff (the same apply Ctrl+S makes), so an edit made in a text file reaches the control; a `.form` whose form is not in the project is skipped saying to add the form first |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` - and `form` is refused in Access, whose VBA has no UserForms. A name the project already holds is refused IN WORDS - the editor answers a duplicate with a bare `Unexpected HRESULT` naming neither the problem nor the module, which reads as the product having broken rather than as a name to change. A project stopped in the debugger refuses all three, saying so and naming the way out |
 | `defaults` | `controlDefaults(type)` | what a control of a KIND holds UNTOUCHED, by property: the inventory the markup projection compares against to print only what a developer changed. Measured from a bare instance of the coclass MSForms registers - `Forms.CommandButton.1` and the rest, the same ProgIDs the add route takes - so no workbook is opened, no form is created, nothing appears on screen, and no table of ours can rot against the MSForms this machine actually has. Two honest gaps it reports rather than papers over: a control that will not come up outside a container answers few properties or none (a MultiPage answers one), and a bare control's FONT is not the font it would wear on a form, which inherits the form's - so fonts are compared against the form, never against this |
@@ -378,6 +379,8 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
 | Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder, point it at a project | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }` / `{ project }`; read it back on `ui.sync`, which carries `project` and `projects` |
+| Drive the Source Control pane: press refresh/commit/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch, type the identity, point it at a file | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ name, email }` / `{ file }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm` |
+| Paint blame at the end of every committed line of the active module, or take it away | `act("blame", { which: "toggle" })`, `on`, `off`; read it back on `ui.blame`: `on`, `lines`, `uncommitted`, and `painted`, the decorations actually on the model, because the reading and the paint are two claims |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
 | Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
@@ -443,6 +446,18 @@ await api.act("changesPane", { round: 3, module: "Ledger", in: "full" });  // pi
                                                 //   onto one comparison, and driving one says
                                                 //   nothing about the other
 await api.act("changesPane", { press: "rail" }); // fold the card's snapshot rail away, or back
+await api.act("scmPane", { press: "refresh" });  // refresh, commit, export, import, fetch, pull,
+                                                //   push, blame: the pane's buttons; init, abort,
+                                                //   browse, use, identity: the empty states';
+                                                //   open, restore: the comparison head's
+await api.act("scmPane", { tick: "Ledger", on: true });        // tick a Changes row for the commit
+await api.act("scmPane", { message: "taught Ledger dates" });  // the commit message
+await api.act("scmPane", { module: "Ledger" });  // open a row's comparison against the branch head
+await api.act("scmPane", { commit: "abc1234" }); // open a commit to the modules it touched
+await api.act("scmPane", { commit: "abc1234", module: "Ledger" });  // a file under an opened commit
+await api.act("scmPane", { branch: "feature" }); // pick a branch through the select: a checkout
+await api.act("scmPane", { name: "Ada", email: "ada@example.com" });  // type the identity inputs
+await api.act("blame", { which: "toggle" });     // the editor's blame layer: toggle, on, off
 await api.act("toolbar", { command: "openAgent" });  // the agent card: the api's own switch
 await api.act("agentCard", { press: "toggle" }); // OPENS OR SHUTS THE API DOOR, for real, and
                                                 //   writes the choice to the settings file. The
@@ -461,6 +476,19 @@ ui.changes.behind;                // the log has moved on since these counts wer
 ui.changes.total;                 // rounds the log HOLDS. The `changes` route stops at
                                   //   `limit` (200 by default), so this is how a reader
                                   //   tells the newest 200 from all of them
+ui.scm;                           // the Source Control pane: project, state, detail, folder,
+                                  //   repository, branch, upstream, branches, dirty, files, rows,
+                                  //   ticked, outside, commits (each with its files and whether
+                                  //   it is open), conflicts, lastCommit, suggestedMessage,
+                                  //   showing, message, busy, behind, blameOn; null until the
+                                  //   pane is built
+ui.blame;                         // the editor's blame layer for the active model: on, lines,
+                                  //   uncommitted, painted (decorations actually on the model),
+                                  //   refused (the host's last refusal, which turned it off)
+// Headless, the demo page answers `scm` with state noGit; served as /index.html?scm=1 it holds a
+// fake repository - rows, a Folder row, commits, diff and show rows, blame, a commit, an import,
+// a checkout refused while dirty, and a past-version tab - so the pane can be driven without
+// a host (tools/harness/page-probe.mjs, from PowerShell).
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a
@@ -1508,6 +1536,77 @@ question:
 
 ```bash
 node tools\harness\change-log.mjs
+```
+
+### Source control
+
+A git repository behind the folder a project's modules are exported to, and a pane that works
+it. The rows are the project's modules LIVE against the branch head; a commit is save, then
+export, then `git commit --only` of the ticked rows' files; history opens to the modules each
+commit touched, each to its comparison against the live text, with Open this version and
+Restore. [source-control.md](source-control.md) is the design; this is how to drive it.
+
+```js
+await api.scm({ action: "settings", folder: "C:\\src\\book" });  // remember the folder per project
+await api.scm({ action: "init" });                    // git init there: autocrlf off, .gitignore
+await api.scm({ action: "identity", name: "Ada", email: "ada@example.com" });
+(await api.scm()).rows;                               // -> [{module, kind, file, status, from}]
+await api.scm({ action: "commit", message: "the fixture as built" });   // every changed row
+await api.scm({ action: "commit", message: "just Ledger", modules: ["Ledger"] });
+                                                      // -> {hash, short, committed, skipped,
+                                                      //    status}
+await api.scm({ action: "log" });                     // -> {commits: [{hash, short, author, when,
+                                                      //    subject, body, files}]}
+await api.scm({ action: "diff", module: "Ledger" });  // live against HEAD, sync diff rows
+await api.scm({ action: "show", module: "Ledger", ref: "abc1234" });  // the text then, rows vs live
+await api.scm({ action: "open", module: "Ledger", ref: "abc1234" });  // the read-only tab
+await api.scm({ action: "restore", module: "Ledger", ref: "abc1234", by: "claude" }); // {did, why}
+await api.scm({ action: "blame", module: "Ledger" }); // -> {lines: [{line, hash, short, author,
+                                                      //    when, summary}], uncommitted: [lines]}
+await api.scm({ action: "checkout", ref: "feature" });  // refused while the workbook is dirty
+await api.scm({ action: "import", modules: ["Account"] });  // a Folder row into the project
+```
+
+**The three copies stay in order**: the editor's text is never behind the workbook, and the
+workbook is never behind the repository. A save made through this editor writes the folder in
+true-up mode, so a developer with VS Code on the same folder sees a normal working tree; a save
+made from Excel's own window is not seen, and the folder catches up at the next save here or at
+Commit. Computing the rows writes nothing.
+
+**The rows compare code.** A file's attribute header and a form's design are compared at commit
+time by the export, not on every refresh, so an attribute-only change shows as clean in the pane
+until the next save or commit writes it. The reply's `covers` field says so.
+
+**The Folder section is the outside-change signal**: a checkout, a pull, an edit in another
+editor. The host watches the folder and the repository's HEAD and refs and taps the pane with a
+stamp; the pane re-reads a moment later if it is showing. Nothing imports silently: `import`
+does, through the sync import, which keeps tabs and the caret and applies annotations after.
+
+**Restore lands as a change-log round** labelled with the commit, through the ordinary module
+write, so the Changes pane can take it back. A form's restore is its code only, and `did` says
+so.
+
+**Blame runs on the committed file**, never the working copy, and maps its lines onto the
+editor's through the same diff that draws the rows: an equal pair carries the commit to a live
+line, every other live line is `uncommitted`. The page paints it as end-of-line text on the
+model and refetches when the model's version moves.
+
+**Remotes fail in words.** Fetch, pull and push run with `GIT_TERMINAL_PROMPT=0` under a 120s
+deadline, so a missing credential helper answers rather than hangs; Git for Windows' own
+credential manager is the login story, and xlide never sees a credential. A pull that conflicts
+leaves the folder `conflicted`, blocks Import, and offers `abort`.
+
+**What it costs**: a status reads every module's text on the host thread, then runs git a few
+times over the folder's path on the pool thread - the working tree, the head's files, the
+branches, the identity, the last commit. Every invocation is logged with its arguments, exit
+code and elapsed time, so a slow refresh names the command that was slow.
+
+`scm.mjs` pins it against a fixture of its own (`tools\New-ScmFixture.ps1`), initialising a
+repository in a temporary folder, committing, branching, blaming, restoring, importing, and
+putting the fixture back. It needs git.exe and fails naming it rather than skipping:
+
+```bash
+node tools\harness\scm.mjs
 ```
 
 ### Waiting, rather than sleeping

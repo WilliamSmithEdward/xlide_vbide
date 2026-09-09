@@ -22,7 +22,7 @@
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
@@ -92,17 +92,46 @@ function launchEdge(profile) {
     "--disable-gpu", "--disable-extensions", "about:blank",
   ]);
 
-  // The browser announces its DevTools endpoint on stderr; port 0 means the announcement is the
-  // only place the port exists.
+  // THE ENDPOINT IS READ FROM THE PROFILE AS WELL AS FROM STDERR. The browser announces its
+  // DevTools endpoint on stderr, and it also writes it to DevToolsActivePort in the user data
+  // dir. Port 0 means those two are the only places the port exists - and the first of them is
+  // not reliable: the msedge.exe a probe starts can hand off to a second process and exit at
+  // once, taking with it the stderr the announcement would have come over. Every probe in one
+  // session failed that way with nothing heard, while the browser it had started ran on under a
+  // dead parent (2026-09-08). The file is written by whichever process IS the browser, so it is
+  // polled too, and the launcher's own exit is not read as the browser's.
+  const portFile = join(profile, "DevToolsActivePort");
   return new Promise((settle, reject) => {
     let heard = "";
+    let done = false;
+    const finish = (wsUrl) => {
+      if (done) { return; }
+      done = true;
+      clearInterval(poll);
+      settle({ edge, wsUrl });
+    };
+
     edge.stderr.on("data", (chunk) => {
       heard += chunk.toString();
       const said = heard.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (said) { settle({ edge, wsUrl: said[1] }); }
+      if (said) { finish(said[1]); }
     });
-    edge.on("exit", () => reject(new Error(`the browser exited before announcing DevTools: ${heard}`)));
-    setTimeout(() => reject(new Error(`no DevTools announcement in 15s: ${heard}`)), 15000).unref();
+
+    const poll = setInterval(() => {
+      try {
+        const [port, path] = readFileSync(portFile, "utf8").split(/\r?\n/);
+        if (port?.trim() && path?.trim()) { finish(`ws://127.0.0.1:${port.trim()}${path.trim()}`); }
+      } catch {
+        // Not written yet.
+      }
+    }, 100);
+
+    setTimeout(() => {
+      if (done) { return; }
+      done = true;
+      clearInterval(poll);
+      reject(new Error(`no DevTools announcement in 15s: ${heard}`));
+    }, 15000).unref();
   });
 }
 
@@ -165,6 +194,7 @@ export async function runPageProbe({ label, drive, serve, after, path = "/", nee
   const profile = mkdtempSync(join(tmpdir(), `${label}-`));
   let edge = null;
   let server = null;
+  let closeBrowser = null;
 
   try {
     if (!findEdge()) { throw new Error("Edge is not installed at either standard path"); }
@@ -179,6 +209,17 @@ export async function runPageProbe({ label, drive, serve, after, path = "/", nee
     edge = launched.edge;
 
     const { socket, send, once } = await connect(launched.wsUrl);
+
+    // THROUGH THE PROTOCOL, because a kill reaches only the process that was spawned, and when
+    // that was a launcher the browser it handed off to outlived every probe of the session -
+    // one hundred and forty headless processes were standing by the end of it (2026-09-08).
+    closeBrowser = async () => {
+      try {
+        await Promise.race([send("Browser.close"), new Promise((settle) => setTimeout(settle, 2000))]);
+      } catch {
+        // Already gone, or never answered: the kill below is the other half.
+      }
+    };
 
     // Attach to a blank target first and navigate under Page events, so the drive only runs once
     // the document it drives has finished loading - evaluating during the navigation ran in a
@@ -210,6 +251,7 @@ export async function runPageProbe({ label, drive, serve, after, path = "/", nee
 
     console.log(JSON.stringify(verdict));
     process.exitCode = verdict.pass ? 0 : 1;
+    await closeBrowser();
     socket.close();
   } catch (failure) {
     console.log(JSON.stringify({
@@ -217,6 +259,7 @@ export async function runPageProbe({ label, drive, serve, after, path = "/", nee
       checks: [{ name: "probe ran", ok: false, detail: String(failure.message ?? failure) }],
     }));
     process.exitCode = 1;
+    if (closeBrowser) { await closeBrowser(); }
   } finally {
     edge?.kill();
     server?.close();

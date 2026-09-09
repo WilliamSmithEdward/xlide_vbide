@@ -468,3 +468,35 @@ for the analyzer's predeclared-class seed, the drift findings and the api until 
 again after a save. Alternatives weighed: the Procedure Attributes dialog is modal and would need
 synthetic input, which this product never does; editing vbaProject.bin in place while the
 workbook is open is not a thing a sane program does.
+
+## 18. Source control is git.exe behind the export folder
+
+The Source Control pane puts a git repository behind the folder a project's modules are exported
+to, and the product runs the git.exe already on the machine rather than carrying one. Git for
+Windows installs per user without administrator rights, which is how xlide installs, and its Git
+Credential Manager is the whole login story: the first push or pull opens the host's own sign-in
+in a browser, the token lands in Windows Credential Manager, and xlide never sees a credential. A
+machine without git gets an empty state naming the download, and nothing else in the product
+changes. The repository's root is whatever `git rev-parse --show-toplevel` answers from the
+folder, so a folder inside an existing repository joins it at its relative path and an existing
+repository's configuration is never touched; only Initialize writes anything of its own
+(`core.autocrlf` off, so a module round-trips byte for byte, and a `.gitignore` for the export's
+lock and partial files). The folder is remembered per project as `Repository` in sync.json, a
+field of its own, because the sync dialog's `Folder` is re-pointed by every export and one export
+to a scratch folder would have moved the repository. Commit is save, then export, then
+`git commit --only` of the ticked modules' files, so files somebody staged outside are left
+alone; staging is per module and never per hunk, because a module is the unit VBA compiles and
+half a module staged is a commit that cannot build. Every invocation runs on the pool thread with
+terminal prompts disabled under a deadline and is killed with its tree on timeout, so nothing can
+hang waiting for a password in a hidden console, and every one is logged with its arguments,
+exit code and elapsed time. Alternatives weighed: bundling MinGit, which has no credential
+manager, so it could commit but never push, and bundling git plus a credential manager doubles
+the installer and makes xlide responsible for shipping git's security updates; the GitHub CLI as
+the base, which carries no git of its own and speaks only GitHub - it remains a natural optional
+layer for Publish and pull requests later; a git written in the engine's own JavaScript, which
+would have had to reimplement packfiles, the index, credential helpers and every edge of the
+working tree that git.exe already gets right, and would still not be the git a developer's other
+tools use on the same folder. Consequences: source control is exactly as present as git is; the
+workbook binary is never committed, because the repository holds source; a form's design is
+compared and written at commit rather than in the live rows; and a save made from Excel's own
+window is not exported until the next save through this editor.

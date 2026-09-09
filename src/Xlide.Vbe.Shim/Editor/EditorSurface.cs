@@ -264,6 +264,13 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>The Changes pane asking the change log something. Read-only, always.</summary>
     public Action<int, IReadOnlyDictionary<string, string>>? ChangesRequested { get; set; }
 
+    /// <summary>
+    /// The Source Control pane asking for a status, a commit, a comparison: (requestId, the
+    /// route's own arguments, the body - module names one per line). The sync shape, because a
+    /// commit and an import name rows the way an apply does.
+    /// </summary>
+    public Action<int, IReadOnlyDictionary<string, string>, string>? ScmRequested { get; set; }
+
     /// <summary>The agent card asking about the api door, or asking it to move.</summary>
     public Action<int, IReadOnlyDictionary<string, string>>? ApiRequested { get; set; }
 
@@ -755,6 +762,34 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new ChangesStampMessage("changesStamp", stamp),
             EditorMessageContext.Default.ChangesStampMessage));
+    }
+
+    /// <summary>Answers what the Source Control pane asked, with the scm route's own JSON.</summary>
+    public void ShowScmResult(int requestId, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ScmResultMessage("scmResult", requestId, json),
+            EditorMessageContext.Default.ScmResultMessage));
+    }
+
+    /// <summary>Tells the pane the folder or the repository has moved on. See ScmStampMessage.</summary>
+    public void ShowScmStamp(int stamp)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ScmStampMessage("scmStamp", stamp),
+            EditorMessageContext.Default.ScmStampMessage));
     }
 
     /// <summary>The api door's state, back to the card that asked.</summary>
@@ -2890,6 +2925,36 @@ internal sealed class EditorSurface : IDisposable
                             ? syncBodyElement.GetString() ?? string.Empty
                             : string.Empty;
                         SyncRequested?.Invoke(syncRequestId, syncArguments, syncBody);
+                    }
+
+                    break;
+
+                case "scm":
+                    if (document.RootElement.TryGetProperty("id", out var scmId)
+                        && scmId.TryGetInt32(out var scmRequestId))
+                    {
+                        // The sync message's unpacking: every string field but the id and the
+                        // body is the route's own argument, so the pane and the xlide api ask
+                        // the same question in the same words.
+                        var scmArguments = new Dictionary<string, string>(StringComparer.Ordinal);
+                        foreach (var scmField in document.RootElement.EnumerateObject())
+                        {
+                            if (scmField.Name is "type" or "id" or "body")
+                            {
+                                continue;
+                            }
+
+                            if (scmField.Value.ValueKind == JsonValueKind.String
+                                && scmField.Value.GetString() is { Length: > 0 } argument)
+                            {
+                                scmArguments[scmField.Name] = argument;
+                            }
+                        }
+
+                        var scmBody = document.RootElement.TryGetProperty("body", out var scmBodyElement)
+                            ? scmBodyElement.GetString() ?? string.Empty
+                            : string.Empty;
+                        ScmRequested?.Invoke(scmRequestId, scmArguments, scmBody);
                     }
 
                     break;

@@ -127,6 +127,8 @@ export interface ShellHandlers {
   testsShown(): void;
   /** The Changes pane came forward; it reads the change log, which it does at no other time. */
   changesShown(): void;
+  /** The Source Control pane came forward; it re-reads the repository's status. */
+  scmShown(): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -404,6 +406,9 @@ export class Shell {
       // The change log is READ when the pane is opened and not before: every count in it is a
       // comparison of two whole module texts, and that belongs nowhere near the write path.
       seat("changes", "Changes", [root.querySelector("#changes") as HTMLElement], () => handlers.changesShown()),
+      // Source control runs git, which is seconds rather than milliseconds: read when the pane
+      // is looked at and when the host taps it, never on the write path.
+      seat("scm", "Source Control", [root.querySelector("#scm") as HTMLElement], () => handlers.scmShown()),
     ];
 
     const dockOf = (side: string) => root.querySelector(`#dock-${side}`) as HTMLElement;

@@ -1,5 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
+import { DocumentStore, HISTORY_URI_SCHEME, docKeyOf, knownFace, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
 import { setSystemColours, type SystemColour } from "./colourpicker.js";
 import { setInstallPath } from "./helpdialog.js";
@@ -97,8 +97,10 @@ export type HostMessage =
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
   | { type: "changesResult"; id: number; json: string }
+  | { type: "scmResult"; id: number; json: string }
   | { type: "apiResult"; id: number; json: string }
   | { type: "changesStamp"; stamp: number }
+  | { type: "scmStamp"; stamp: number }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | ({ type: "setTests" } & SetTestsState)
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -577,6 +579,7 @@ export type ClientMessage =
   | { type: "outline"; id: number; module: string; project?: string }
   | ({ type: "sync"; id: number; body: string } & Record<string, string | number>)
   | ({ type: "changes"; id: number } & Record<string, string | number>)
+  | ({ type: "scm"; id: number; body: string } & Record<string, string | number>)
   | ({ type: "api"; id: number } & Record<string, string | number>)
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -777,6 +780,7 @@ export class EditorBridge {
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
   private readonly pendingChanges = new RequestTable<Record<string, unknown>>();
+  private readonly pendingScm = new RequestTable<Record<string, unknown>>();
   private readonly pendingApi = new RequestTable<Record<string, unknown>>();
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -1344,6 +1348,35 @@ export class EditorBridge {
    * point of the pane being asked rather than pushed.
    */
   changesStamped: ((stamp: number) => void) | undefined;
+
+  /**
+   * Asks the source control brain something, or tells it to do something: the same words the
+   * xlide api's `scm` route takes, with the body carrying module names one per line where an
+   * action wants them.
+   *
+   * The budget is long because the answer may run git and a save of the workbook before it -
+   * a push to a remote is bounded at two minutes host-side, and the page must outwait it rather
+   * than report a timeout over an action that then lands. Every value is posted as a string,
+   * because the host copies only string fields into the route's arguments.
+   */
+  requestScm(args: Record<string, string | number>, body = ""): Promise<Record<string, unknown>> {
+    const strings: Record<string, string> = {};
+    for (const [name, value] of Object.entries(args)) {
+      strings[name] = String(value);
+    }
+
+    return this.pendingScm.ask(
+      () => ({ error: "the host did not answer in time" }),
+      120000,
+      (id) => this.transport.post({ type: "scm", id, body, ...strings }));
+  }
+
+  /**
+   * Called when the host saw the repository or the export folder move: a save exported, a
+   * commit landed, a branch changed, a file was edited from outside. The pane and the blame
+   * layer re-read a moment later; nothing is pushed.
+   */
+  scmStamped: ((stamp: number) => void) | undefined;
 
   requestApi(args: Record<string, string>): Promise<Record<string, unknown>> {
     return this.pendingApi.ask(
@@ -1966,21 +1999,25 @@ export class EditorBridge {
         return;
       case "setModules": {
         // The open list is the models' truth too: a pane closed anywhere disposes its model
-        // here, undo history and all, the same moment its tab leaves the strip. Designer tabs
-        // ride the list wearing their face; their keys differ from the code panes', so the
-        // model store - which only ever holds code documents - is untouched by them.
-        const open: DocumentId[] = message.modules.map((module, index) => ({
-          module,
-          project: (message.projects ?? [])[index] ?? null,
-          ...((message.faces ?? [])[index] === "design" ? { face: "design" as const } : {}),
-        }));
+        // here, undo history and all, the same moment its tab leaves the strip. Designer and
+        // history tabs ride the list wearing their face; their keys differ from the code
+        // panes', so the model store - which only ever holds code documents - is untouched.
+        const open: DocumentId[] = message.modules.map((module, index) => {
+          const face = knownFace((message.faces ?? [])[index]);
+          return {
+            module,
+            project: (message.projects ?? [])[index] ?? null,
+            ...(face ? { face } : {}),
+          };
+        });
         this.documents.closeMissing(open.filter((id) => !id.face));
 
+        const activeFace = knownFace(message.activeFace);
         this.hostActive = message.active
           ? {
             module: message.active,
             project: message.activeProject ?? null,
-            ...(message.activeFace === "design" ? { face: "design" as const } : {}),
+            ...(activeFace ? { face: activeFace } : {}),
           }
           : null;
 
@@ -2209,6 +2246,20 @@ export class EditorBridge {
         this.changesStamped?.(message.stamp);
         return;
       }
+      case "scmResult": {
+        let answer: Record<string, unknown>;
+        try {
+          answer = JSON.parse(message.json) as Record<string, unknown>;
+        } catch {
+          answer = { error: "the host's answer could not be read" };
+        }
+        this.pendingScm.settle(message.id, answer);
+        return;
+      }
+      case "scmStamp": {
+        this.scmStamped?.(message.stamp);
+        return;
+      }
       case "apiResult": {
         let answer: Record<string, unknown>;
         try {
@@ -2394,8 +2445,10 @@ export class EditorBridge {
    * rather than global, so a probe cannot count them without this.
    */
   modelCensus(): { models: number; documents: number } {
+    // A past-version tab's model is not a document: it lives and dies with its tab, which the
+    // host lists, and counting it here would read every open history tab as a leaked module.
     return {
-      models: monaco.editor.getModels().length,
+      models: monaco.editor.getModels().filter((model) => model.uri.scheme !== HISTORY_URI_SCHEME).length,
       documents: this.documents.all().length,
     };
   }
@@ -3013,19 +3066,190 @@ export function demoTransport(): HostTransport {
   // 2026-08-12 while building the drag targets, where the demo's own inconsistency masqueraded
   // as a feature bug).
   const DEMO_WORKBOOK = "Book1.xlsm";
+
+  /*
+   * A REPOSITORY ON REQUEST, with `?scm=1`.
+   *
+   * Without it the demo answers noGit, which is the truth of a plain browser. With it the demo
+   * holds a small fake repository - two changed rows, a folder row, two commits, a blame - so
+   * the Source Control pane, the past-version tab and the blame layer can be driven headless
+   * without Excel or git. Past-version tabs ride the open list wearing their `history:<short>`
+   * face exactly as the host lists them, because that is the plumbing worth exercising.
+   */
+  const scmDemo = new URLSearchParams(location.search).get("scm") === "1";
+  const historyTabs: { module: string; short: string }[] = [];
+  let activeFace: string | null = null;
+
   const sendModules = (): void => {
-    if (activeModule !== null && !openModules.includes(activeModule)) {
+    if (activeModule !== null && !openModules.includes(activeModule)
+      && !historyTabs.some((tab) => tab.module === activeModule && activeFace === `history:${tab.short}`)) {
       activeModule = openModules[0] ?? null;
+      activeFace = null;
     }
 
+    const modules = [...openModules, ...historyTabs.map((tab) => tab.module)];
     send({
       type: "setModules",
-      modules: [...openModules],
-      projects: openModules.map(() => DEMO_WORKBOOK),
+      modules,
+      projects: modules.map(() => DEMO_WORKBOOK),
       active: activeModule,
       activeProject: activeModule === null ? null : DEMO_WORKBOOK,
-      dirty: openModules.map((name) => dirtyModules.has(name)),
+      activeFace,
+      dirty: [...openModules.map((name) => dirtyModules.has(name)), ...historyTabs.map(() => false)],
+      ...(historyTabs.length > 0
+        ? { faces: [...openModules.map(() => null), ...historyTabs.map((tab) => `history:${tab.short}`)] }
+        : {}),
     });
+  };
+
+  let demoRows = [
+    { module: "Module1", kind: "standard", file: "Module1.bas", status: "modified", from: null },
+    { module: "Module2", kind: "standard", file: "Module2.bas", status: "added", from: null },
+  ];
+  let demoOutside = [{ module: "Module2", kind: "standard", file: "Module2.bas", status: "folderNewer" }];
+  let demoBranch = "main";
+  const demoCommits: Record<string, unknown>[] = [
+    {
+      hash: "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1", short: "b2c3d4e", author: "Demo Developer",
+      email: "demo@example.com", when: "2026-09-07T10:00:00+10:00", subject: "Recalculate before describing",
+      body: "", files: [{ module: "Module1", file: "Module1.bas", status: "M" }],
+    },
+    {
+      hash: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", short: "a1b2c3d", author: "Demo Developer",
+      email: "demo@example.com", when: "2026-09-01T09:00:00+10:00", subject: "Add the sales import",
+      body: "The first cut.\n\nImports one sheet.", files: [{ module: "Module1", file: "Module1.bas", status: "A" }],
+    },
+  ];
+  const demoStatus = (): Record<string, unknown> => (scmDemo
+    ? {
+      detail: "ready",
+      project: DEMO_WORKBOOK,
+      projectId: DEMO_WORKBOOK,
+      state: "ready",
+      folder: "C:\\Demo\\Book1",
+      repository: "C:\\Demo\\Book1",
+      gitVersion: "git version 2.55.0.windows.1",
+      branch: demoBranch,
+      upstream: "",
+      ahead: 0,
+      behind: 0,
+      dirty: dirtyModules.size > 0,
+      identity: { name: "Demo Developer", email: "demo@example.com" },
+      rows: demoRows.map((row) => ({ ...row })),
+      outside: demoOutside.map((row) => ({ ...row })),
+      branches: [
+        { name: "main", current: demoBranch === "main", upstream: null },
+        { name: "feature", current: demoBranch === "feature", upstream: null },
+      ],
+      conflicts: [],
+      lastCommit: demoCommits[0]
+        ? {
+          hash: demoCommits[0].hash, short: demoCommits[0].short, author: demoCommits[0].author,
+          when: demoCommits[0].when, subject: demoCommits[0].subject,
+        }
+        : null,
+      suggestedMessage: demoRows.length > 0 ? "developer: Written Module1, Added Module2" : "",
+      covers: "the module code against the branch head; attributes and designs at commit time",
+    }
+    : {
+      detail: "the demo page has no git behind it",
+      project: DEMO_WORKBOOK,
+      projectId: DEMO_WORKBOOK,
+      state: "noGit",
+      folder: "",
+      repository: "",
+      gitVersion: "",
+      branch: "",
+      upstream: "",
+      ahead: 0,
+      behind: 0,
+      dirty: false,
+      identity: null,
+      rows: [],
+      outside: [],
+      branches: [],
+      conflicts: [],
+      lastCommit: null,
+      suggestedMessage: "",
+      covers: "",
+    });
+  const demoDiffRows = (module: string): unknown[] => [
+    { leftNumber: 1, rightNumber: 1, left: "Option Explicit", right: "Option Explicit", kind: "equal" },
+    { leftNumber: 2, rightNumber: 2, left: `' ${module} as committed`, right: `' ${module} as it stands`, kind: "changed" },
+    { leftNumber: null, rightNumber: 3, left: "", right: "Dim added As Long", kind: "added" },
+  ];
+  const demoScmAnswer = (message: { id: number; body: string } & Record<string, string | number>): Record<string, unknown> => {
+    const action = String(message.action ?? "status");
+    const module = String(message.module ?? "");
+    const ref = String(message.ref ?? "HEAD");
+    if (!scmDemo) {
+      return action === "blame" || action === "log" || action === "diff" || action === "show" || action === "restore"
+        ? { error: "the demo page has no git behind it" }
+        : demoStatus();
+    }
+
+    switch (action) {
+      case "log":
+        return { detail: "listed", commits: demoCommits.map((commit) => ({ ...commit })) };
+      case "diff":
+        return { detail: "compared", module, ref, rows: demoDiffRows(module) };
+      case "show":
+        return {
+          detail: "shown", module, ref,
+          text: `' ${module} at ${ref.slice(0, 7)}\n${moduleTexts[module] ?? ""}`,
+          rows: demoDiffRows(module),
+        };
+      case "open": {
+        const short = ref.slice(0, 7);
+        if (!historyTabs.some((tab) => tab.module === module && tab.short === short)) {
+          historyTabs.push({ module, short });
+        }
+        activeModule = module;
+        activeFace = `history:${short}`;
+        sendModules();
+        return demoStatus();
+      }
+      case "restore":
+        return { detail: `restored ${module} from ${ref.slice(0, 7)}`, module, ref, did: "written", why: null };
+      case "blame":
+        return {
+          detail: "blamed", module, head: demoCommits[0]?.short ?? "",
+          lines: [
+            { line: 1, hash: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", short: "a1b2c3d", author: "Demo Developer", when: "2026-09-01T09:00:00+10:00", summary: "Add the sales import" },
+            { line: 2, hash: "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1", short: "b2c3d4e", author: "Demo Developer", when: "2026-09-07T10:00:00+10:00", summary: "Recalculate before describing" },
+          ],
+          uncommitted: [3, 4],
+        };
+      case "commit": {
+        const named = message.body.split("\n").map((line) => line.trim().toLowerCase()).filter((line) => line.length > 0);
+        const committed = demoRows.filter((row) => named.length === 0 || named.includes(row.module.toLowerCase()));
+        if (committed.length === 0 || !String(message.message ?? "").trim()) {
+          return { error: "nothing to commit: tick a row and type a message" };
+        }
+        demoRows = demoRows.filter((row) => !committed.includes(row));
+        const hash = `c${Date.now().toString(16)}`.padEnd(40, "0").slice(0, 40);
+        demoCommits.unshift({
+          hash, short: hash.slice(0, 7), author: "Demo Developer", email: "demo@example.com",
+          when: new Date().toISOString(), subject: String(message.message), body: "",
+          files: committed.map((row) => ({ module: row.module, file: row.file, status: row.status === "added" ? "A" : "M" })),
+        });
+        return {
+          detail: `committed ${committed.length} module(s)`, hash, short: hash.slice(0, 7),
+          committed: committed.map((row) => row.module), skipped: [], status: demoStatus(),
+        };
+      }
+      case "import":
+        demoOutside = [];
+        return { detail: "imported", imported: ["Module2"], skipped: [], status: demoStatus() };
+      case "checkout":
+        if (dirtyModules.size > 0) {
+          return { error: `the workbook has unsaved changes; save it before checking out ${ref}` };
+        }
+        demoBranch = ref;
+        return demoStatus();
+      default:
+        return demoStatus();
+    }
   };
 
   // The demo's tree, held rather than sent once, so removing a component can take it out of both
@@ -3176,12 +3400,30 @@ export function demoTransport(): HostTransport {
           });
         }
 
-        if (openModules.includes(message.moduleName)) {
+        // A past-version tab activates by its face; the code pane by its name alone.
+        const wantedHistory = message.face && message.face.startsWith("history:")
+          ? historyTabs.find((tab) => tab.module === message.moduleName && `history:${tab.short}` === message.face)
+          : undefined;
+        if (wantedHistory) {
           activeModule = message.moduleName;
+          activeFace = message.face ?? null;
+        } else if (openModules.includes(message.moduleName)) {
+          activeModule = message.moduleName;
+          activeFace = null;
         }
         sendModules();
       }
-      if (message.type === "closeModule") {
+      if (message.type === "closeModule" && message.face && message.face.startsWith("history:")) {
+        const at = historyTabs.findIndex((tab) => tab.module === message.name && `history:${tab.short}` === message.face);
+        if (at >= 0) {
+          historyTabs.splice(at, 1);
+        }
+        if (activeFace === message.face) {
+          activeFace = null;
+          activeModule = openModules[0] ?? null;
+        }
+        sendModules();
+      } else if (message.type === "closeModule") {
         if (!message.action && dirtyModules.has(message.name)) {
           // The host holds a dirty close and asks; the page's modal answers.
           send({ type: "confirmClose", name: message.name, project: message.project ?? null });
@@ -3382,6 +3624,11 @@ export function demoTransport(): HostTransport {
           truncated: false,
           replaced: message.type === "replaceAll" ? 2 : 0,
         });
+      }
+      // No git behind a plain browser, and the pane says so in its own empty state rather than
+      // waiting out its budget: the demo answers noGit, or its fake repository under `?scm=1`.
+      if (message.type === "scm") {
+        send({ type: "scmResult", id: message.id, json: JSON.stringify(demoScmAnswer(message)) });
       }
       if (message.type === "updateSettings") {
         send({

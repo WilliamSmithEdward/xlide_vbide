@@ -458,6 +458,20 @@ public static class ModuleSync
         return string.Join("\n", kept);
     }
 
+    /// <summary>
+    /// The text an import writes into a module: the code without its header, and without the ONE
+    /// line terminator the export appended. An exported file ends with a newline, as a text file
+    /// should, and the editor's own import strips exactly that one; written whole, it became an
+    /// empty last line in the module, so a module grew a line on every round trip through the
+    /// folder and a checkout's blame reported the phantom line as uncommitted (2026-09-08). A
+    /// module that genuinely ends with an empty line keeps it: its file carries two terminators.
+    /// </summary>
+    public static string BodyForImport(string source)
+    {
+        var body = CodeWithoutHeader(source);
+        return body.EndsWith('\n') ? body[..^1] : body;
+    }
+
     /// <summary>True when the two texts are the same code, whatever their line endings.</summary>
     public static bool SameText(string left, string right) =>
         string.Equals(NormaliseEol(left), NormaliseEol(right), StringComparison.Ordinal);

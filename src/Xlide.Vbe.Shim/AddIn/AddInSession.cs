@@ -342,8 +342,11 @@ internal sealed partial class AddInSession : IDisposable
                     var stored = LoadSyncSettings();
                     if (syncFolder is not null || query.ContainsKey("exportMode") || query.ContainsKey("importMode"))
                     {
+                        // FROM WHAT WAS REMEMBERED, not a fresh record: a fresh one names three
+                        // fields and drops the fourth, the repository the Source Control pane
+                        // keeps beside them.
                         var was = stored.For(syncProjectId);
-                        var choice = new SyncChoice
+                        var choice = was with
                         {
                             Folder = syncFolder ?? was.Folder,
                             ExportMode = query.TryGetValue("exportMode", out var em) ? em : was.ExportMode,
@@ -460,7 +463,7 @@ internal sealed partial class AddInSession : IDisposable
 
                 // The folder and mode that were just used become the ones this project
                 // remembers, exactly as pressing Apply in the dialog does.
-                SaveSyncSettings(LoadSyncSettings().With(syncProjectId, new SyncChoice
+                SaveSyncSettings(LoadSyncSettings().With(syncProjectId, remembered with
                 {
                     Folder = folder,
                     ExportMode = importing ? remembered.ExportMode : ModuleSync.ExportModeFrom(syncMode ?? remembered.ExportMode).ToString(),
@@ -1247,9 +1250,18 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
+            // A past-version tab is the same kind of thing: the session's own state, listed by
+            // the host so the strip and the api agree, with nothing underneath in the object model.
+            if (IsHistoryFace(face))
+            {
+                ActivateHistoryTab(component, project, face);
+                return;
+            }
+
             // The developer asked for the CODE tab, which must take the active slot back even
             // when the native pane underneath was already this module and nothing else moves.
             _activeDesignerTab = null;
+            _activeHistoryTab = null;
             if (ShowModule(component, project) is { } missing)
             {
                 _editorSurface?.Notify(missing);
@@ -1380,6 +1392,13 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
+            // A past-version tab is read-only, so its close has no question to ask either.
+            if (IsHistoryFace(face))
+            {
+                CloseHistoryTab(component, project, face);
+                return;
+            }
+
             OnModuleCloseRequested(component, project, action);
         };
         _editorSurface.ComponentInsertRequested = InsertComponent;
@@ -1429,6 +1448,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
+        _editorSurface.ScmRequested = OnScmRequested;
         _editorSurface.ApiRequested = OnApiRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
@@ -1731,7 +1751,7 @@ internal sealed partial class AddInSession : IDisposable
             // nobody was looking at, and clicking a Sub under a form in the tree did nothing
             // visible at all (the owner, 2026-08-18). The code face has to take the slot first,
             // which is exactly what a click on the code tab does.
-            var designerHoldsTheSlot = _activeDesignerTab is not null;
+            var designerHoldsTheSlot = _activeDesignerTab is not null || _activeHistoryTab is not null;
 
             var alreadyShowing =
                 !designerHoldsTheSlot
@@ -1753,6 +1773,7 @@ internal sealed partial class AddInSession : IDisposable
                 // has navigated away from: with FormA's tab up, going to Module1 already put the
                 // code tab on screen and left Run applying FormA.
                 _activeDesignerTab = null;
+                _activeHistoryTab = null;
 
                 // A navigation can target a module the surface has never shown. The Show
                 // above opens it in the object model, but from the empty workspace that
@@ -2203,7 +2224,7 @@ internal sealed partial class AddInSession : IDisposable
         // touches nothing.
         if (command == VbeCommands.Command.Save && _settings.ApplyAttributesOnSave)
         {
-            ApplyAnnotationsBeforeSave();
+            ApplyAnnotationsBeforeSave(_shownProject);
         }
 
         if (command == VbeCommands.Command.Save && !skipDesignerApply && _activeDesignerTab is { } saveTab)
@@ -2392,6 +2413,12 @@ internal sealed partial class AddInSession : IDisposable
         {
             PublishModules();
             _resyncPanePolls = Math.Max(_resyncPanePolls, 3);
+
+            // SAVING EXPORTS. The folder a project keeps under source control always equals the
+            // last saved workbook, so somebody on the folder with another editor sees an ordinary
+            // working tree. Only when the project has a repository; a project under none is left
+            // exactly as it was.
+            ExportForSourceControl(_shownProject);
         }
 
         WatchDebugState();
@@ -5056,6 +5083,22 @@ internal sealed partial class AddInSession : IDisposable
             && string.Equals(shownTab.Module, oldName, StringComparison.OrdinalIgnoreCase))
         {
             _activeDesignerTab = (newName, shownTab.ProjectId);
+        }
+
+        // A past-version tab follows for the same reason: it is keyed by the module's name, and
+        // the text it shows is the module's history under whatever the module is called now.
+        for (var index = 0; index < _historyTabs.Count; index++)
+        {
+            if (string.Equals(_historyTabs[index].Module, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                _historyTabs[index] = _historyTabs[index] with { Module = newName };
+            }
+        }
+
+        if (_activeHistoryTab is { } shownHistory
+            && string.Equals(shownHistory.Module, oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            _activeHistoryTab = shownHistory with { Module = newName };
         }
 
         // The renamed module's code pane did not MOVE; its name changed. Left alone, the next
@@ -9390,6 +9433,13 @@ internal sealed partial class AddInSession : IDisposable
                 _activeDesignerTab = null;
             }
 
+            // Past-version tabs go with their workbook the same way.
+            _historyTabs.RemoveAll(tab => DisplayFromProjectId(tab.ProjectId) is not { Length: > 0 });
+            if (_activeHistoryTab is { } heldHistory && !_historyTabs.Contains(heldHistory))
+            {
+                _activeHistoryTab = null;
+            }
+
             // A NATIVE move takes the active slot back: the developer clicked a code pane, or
             // an activation landed one. Only a move TO A PANE counts - a transition to no
             // module at all is a pane closing or an empty workspace, and treating it as focus
@@ -9403,6 +9453,7 @@ internal sealed partial class AddInSession : IDisposable
                 if (nativeActive.Item1 is not null)
                 {
                     _activeDesignerTab = null;
+                    _activeHistoryTab = null;
                 }
             }
 
@@ -9412,7 +9463,7 @@ internal sealed partial class AddInSession : IDisposable
             // authority both ways: an empty open list with a module still shown IS the
             // empty workspace, and every close route passes through this publish. A standing
             // designer tab keeps the workspace: it is a tab, just not the host's.
-            if (modules.Count == 0 && _designerTabs.Count == 0 && hadDocuments)
+            if (modules.Count == 0 && _designerTabs.Count == 0 && _historyTabs.Count == 0 && hadDocuments)
             {
                 Log.Info("editor surface: the last module closed, showing the empty workspace");
                 _watchingEmpty = true;
@@ -9505,12 +9556,18 @@ internal sealed partial class AddInSession : IDisposable
                 .Select(tab => (tab.Module, Project: DisplayFromProjectId(tab.ProjectId)))
                 .ToList();
 
-            string[] names = [.. modules.Select(m => m.Name), .. designerRows.Select(d => d.Module)];
-            string?[] projects = [.. modules.Select(m => m.Project), .. designerRows.Select(d => d.Project)];
-            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Name, m.Project)), .. designerRows.Select(_ => false)];
-            string?[]? faces = designerRows.Count == 0
+            // Past-version tabs follow the designer rows, wearing the commit they show as their
+            // face. Read-only, so never dirty: nothing typed into one reaches a module.
+            var historyRows = _historyTabs
+                .Select(tab => (tab.Module, Project: DisplayFromProjectId(tab.ProjectId), Face: HistoryFaceOf(tab.Short)))
+                .ToList();
+
+            string[] names = [.. modules.Select(m => m.Name), .. designerRows.Select(d => d.Module), .. historyRows.Select(h => h.Module)];
+            string?[] projects = [.. modules.Select(m => m.Project), .. designerRows.Select(d => d.Project), .. historyRows.Select(h => h.Project)];
+            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Name, m.Project)), .. designerRows.Select(_ => false), .. historyRows.Select(_ => false)];
+            string?[]? faces = designerRows.Count == 0 && historyRows.Count == 0
                 ? null
-                : [.. modules.Select(_ => (string?)null), .. designerRows.Select(_ => (string?)"design")];
+                : [.. modules.Select(_ => (string?)null), .. designerRows.Select(_ => (string?)"design"), .. historyRows.Select(h => (string?)h.Face)];
 
             string? active;
             string? activeProject;
@@ -9520,6 +9577,12 @@ internal sealed partial class AddInSession : IDisposable
                 active = designer.Module;
                 activeProject = DisplayFromProjectId(designer.ProjectId);
                 activeFace = "design";
+            }
+            else if (_activeHistoryTab is { } history)
+            {
+                active = history.Module;
+                activeProject = DisplayFromProjectId(history.ProjectId);
+                activeFace = HistoryFaceOf(history.Short);
             }
             else
             {
@@ -10658,6 +10721,9 @@ internal sealed partial class AddInSession : IDisposable
             // costs nothing - a round is a divider, not a copy - and it means a log read tomorrow
             // is grouped the way the work actually went.
             CloseChangeRounds($"saved {display}");
+
+            // And the folder follows the save, exactly as it follows Ctrl+S.
+            ExportForSourceControl(ProjectIdFromDisplay(display));
             return true;
         }
         catch (Exception ex)
@@ -11819,6 +11885,9 @@ internal sealed partial class AddInSession : IDisposable
 
         _codePanes?.Dispose();
         _codePanes = null;
+
+        // The repository watchers tap the surface, so they go before it does.
+        DisposeScmWatches();
 
         // The application reference is held between reads, so by the time a session stops there is
         // almost always one in hand: WorkbookSaved takes it on every poll tick. Until now it was

@@ -1365,6 +1365,26 @@ internal sealed partial class AddInSession
 
         switch (request.Route)
         {
+            // SOURCE CONTROL, POOL-SIDE: git takes seconds and the host lane's budget is three,
+            // so the route crosses to the host thread only to read the project and to write it,
+            // and runs git between the crossings on this thread. Every argument is read HERE,
+            // discarded, because the argument audit attributes reads to the nearest route case
+            // and the real reads sit in the gather, which runs on the host.
+            case "scm":
+            {
+                request.Query.TryGetValue("action", out _);
+                request.Query.TryGetValue("project", out _);
+                request.Query.TryGetValue("module", out _);
+                request.Query.TryGetValue("ref", out _);
+                request.Query.TryGetValue("message", out _);
+                request.Query.TryGetValue("folder", out _);
+                request.Query.TryGetValue("name", out _);
+                request.Query.TryGetValue("email", out _);
+                request.Query.TryGetValue("limit", out _);
+                request.Query.TryGetValue("by", out _);
+                return ApiServer.ApiReply.Json(AnswerScmFromPool(request.Query, request.Body));
+            }
+
             // The agent front door. Pool-side and host-free on purpose: orientation must answer
             // even while the host thread is busy or wedged, which is exactly when a caller that
             // has never seen this api is most likely to be asking what it is looking at.

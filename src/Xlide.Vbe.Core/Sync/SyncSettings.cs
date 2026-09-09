@@ -14,6 +14,20 @@ public sealed record SyncChoice
 
     /// <summary>updateOnly or trueUpStandardClass.</summary>
     public string ImportMode { get; init; } = "updateOnly";
+
+    /// <summary>
+    /// The folder the Source Control pane exports to and commits from, or empty when the project
+    /// is not under source control. A field of its own rather than <see cref="Folder"/>: every
+    /// sync apply and every folder pick re-point that one, so one export to a scratch folder
+    /// would have moved the repository.
+    ///
+    /// SETTABLE, NOT INIT-ONLY, and that matters: every sync.json written before this field
+    /// existed lacks the key, and an init-only property makes the source generator assign its
+    /// default - null - for an absent key (ProductSettings.cs explains the mechanism). With a
+    /// setter the generator assigns only what the document names, so an old file reads as "not
+    /// under source control", which is the truth.
+    /// </summary>
+    public string Repository { get; set; } = string.Empty;
 }
 
 /// <summary>

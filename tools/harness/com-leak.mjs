@@ -29,6 +29,8 @@
  *   node tools\harness\com-leak.mjs 40      # more rounds, for a slower leak
  */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { open, wait, reporter, waitFor } from "./xlide-api.mjs";
 import { buildForm } from "./form-plan.mjs";
 
@@ -228,6 +230,27 @@ await repeat("moving the caret", 0, async (round) => {
 await repeat("reading the breakpoints", 0, async () => {
   await api.breakpoints();
 });
+
+// The source control status: every component's name, kind and text through ReadSource on the
+// host thread before git runs, and the workbook's saved flag - a walk the size of the project
+// tree, taken on every refresh of the pane. THE WALK ONLY HAPPENS FOR A PROJECT WITH A FOLDER,
+// so one is remembered for the row's duration and forgotten after: a folder that does not exist
+// answers "no repository" with nothing on disk, which is the answer that lets this row run on
+// whatever fixture is standing. The rest of the sweep never sees the folder.
+const scmFolder = join(tmpdir(), `xlide-leak-scm-${process.pid}`);
+const scmProject = (await api.projects()).projects[0]?.projectId;
+if (scmProject) {
+  await api.scm({ action: "settings", folder: scmFolder, project: scmProject }).catch(() => {});
+}
+try {
+  await repeat("reading the source control status", 0, async () => {
+    await api.scm({ project: scmProject });
+  });
+} finally {
+  if (scmProject) {
+    await api.scm({ action: "forget", project: scmProject }).catch(() => {});
+  }
+}
 
 // And the whole doctor pass, which touches nearly everything at once.
 await repeat("a doctor pass", 0, async () => {

@@ -658,4 +658,21 @@ public class ModuleSyncTests
 
         Assert.DoesNotContain(plan.Items, one => one.FileName.EndsWith(".frx"));
     }
+
+    [Fact]
+    public void AnImportStripsTheOneTerminatorTheExportAppended()
+    {
+        // The file the export writes: the header, the code, and one trailing newline. The module
+        // it came from had no empty last line, and must not gain one on the way back.
+        var file = "Attribute VB_Name = \"Ledger\"\r\nOption Explicit\r\nSub A()\r\nEnd Sub\r\n";
+
+        Assert.Equal("Option Explicit\nSub A()\nEnd Sub", ModuleSync.BodyForImport(file));
+
+        // A module that genuinely ended with an empty line keeps it: its file carries two.
+        var withBlank = "Attribute VB_Name = \"Ledger\"\r\nSub A()\r\nEnd Sub\r\n\r\n";
+        Assert.Equal("Sub A()\nEnd Sub\n", ModuleSync.BodyForImport(withBlank));
+
+        // And a file with no terminator at all is written as it is.
+        Assert.Equal("Sub A()\nEnd Sub", ModuleSync.BodyForImport("Attribute VB_Name = \"L\"\r\nSub A()\r\nEnd Sub"));
+    }
 }

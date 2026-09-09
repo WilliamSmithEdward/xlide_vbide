@@ -26,7 +26,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import { closeContextMenu } from "./contextmenu.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
-import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
+import { docKeyOf, historyShortOf, isDesignFace, isHistoryFace, knownFace, type DocumentId, type DocumentStore } from "./documents.js";
 import { groupHolding, prune, resizeAt, splitBeside, type TreeGroup, type TreeNode, type TreeSplit } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { installSplitterDrag } from "./livedrag.js";
@@ -45,12 +45,28 @@ export interface WorkspaceHandlers {
   /** The body a design-face tab shows - one per document, built on demand, reparented as the
    * tab moves. Null refuses the show (an id that is not a form's designer). */
   designerBody(id: DocumentId): HTMLElement | null;
-  /** A designer body just went on screen (mounted or re-mounted); it lays itself out. */
+  /** A designer or history body just went on screen (mounted or re-mounted); it lays itself out. */
   designerShown(body: HTMLElement): void;
-  /** The design-face keys still open after a host list landed. Views not named are dead -
-   * this is the ONE membership signal that cannot mistake a between-groups move for a close,
-   * because moves never pass through the host's list. */
+  /** The non-code face keys still open after a host list landed - designer and history tabs
+   * alike. Views not named are dead - this is the ONE membership signal that cannot mistake a
+   * between-groups move for a close, because moves never pass through the host's list. */
   designerRetain(openKeys: Set<string>): void;
+  /** The body a history-face tab shows: a module's text at a commit, read-only, built on
+   * demand and reparented as the tab moves. Null refuses the show. */
+  historyBody(id: DocumentId): HTMLElement | null;
+}
+
+/** What the strip and the api call a tab: the face said the same way in both places. */
+function labelOf(id: DocumentId): string {
+  if (isDesignFace(id)) {
+    return `${id.module} [Design]`;
+  }
+
+  if (isHistoryFace(id)) {
+    return `${id.module} @ ${historyShortOf(id.face)}`;
+  }
+
+  return id.module;
 }
 
 /** How far one arrow key moves a splitter. */
@@ -191,8 +207,10 @@ class EditorGroup {
       return;
     }
 
-    if (id.face === "design") {
-      const body = this.workspace.handlers.designerBody(id);
+    if (isDesignFace(id) || isHistoryFace(id)) {
+      const body = isDesignFace(id)
+        ? this.workspace.handlers.designerBody(id)
+        : this.workspace.handlers.historyBody(id);
       if (!body) {
         return;
       }
@@ -357,9 +375,9 @@ class EditorGroup {
       .filter((id): id is DocumentId => id !== undefined);
 
     for (const id of [...remembered, ...survivors]) {
-      // A designer tab can always show: its body is built on demand rather than waiting on
-      // text the host has not published.
-      if (id.face === "design" || this.workspace.documents.get(id.module, id.project)) {
+      // A designer or history tab can always show: its body is built on demand rather than
+      // waiting on text the host has not published.
+      if (isDesignFace(id) || isHistoryFace(id) || this.workspace.documents.get(id.module, id.project)) {
         this.show(id);
         return true;
       }
@@ -388,7 +406,7 @@ class EditorGroup {
 
     if (wasActive) {
       this.active = null;
-      if (id.face === "design") {
+      if (isDesignFace(id) || isHistoryFace(id)) {
         this.unmountDesigner();
       } else if (this.editor.getModel()) {
         this.editor.setModel(null);
@@ -437,7 +455,7 @@ class EditorGroup {
       const tab = document.createElement("button");
       tab.type = "button";
       tab.className = "tab" + (isActive ? " active" : "") + (dirty ? " dirty" : "")
-        + (id.face === "design" ? " design" : "");
+        + (isDesignFace(id) ? " design" : "") + (isHistoryFace(id) ? " history" : "");
       tab.dataset.module = id.module;
       tab.dataset.project = id.project ?? "";
       if (id.face) {
@@ -450,7 +468,8 @@ class EditorGroup {
       // Bracketed rather than dashed, because the workbook qualifies the name rather than
       // standing beside it as a second thing of equal weight. A designer tab says its face the
       // same way: the module worn a second way needs telling apart from its code tab above all.
-      const shown = id.face === "design" ? `${id.module} [Design]` : id.module;
+      // A history tab says its commit, because two of them may stand for one module.
+      const shown = labelOf(id);
       tab.textContent = collides && id.project ? `${shown} (${id.project})` : shown;
 
       // The tooltip always carries it, collision or not. Otherwise a bare tab offers no way at
@@ -587,7 +606,7 @@ export class Workspace {
         pending: group.pending ? { ...group.pending } : null,
         recent: group.shownOrder(),
         tabs: group.tabs.map(({ id, dirty }) => {
-          const shown = id.face === "design" ? `${id.module} [Design]` : id.module;
+          const shown = labelOf(id);
           return {
             module: id.module,
             project: id.project,
@@ -716,7 +735,7 @@ export class Workspace {
     this.setEmpty(open.length === 0);
 
     this.handlers.designerRetain(new Set(
-      open.filter((id) => id.face === "design")
+      open.filter((id) => isDesignFace(id) || isHistoryFace(id))
         .map((id) => docKeyOf(id.module, id.project, id.face))));
   }
 
@@ -1361,10 +1380,11 @@ export class Workspace {
       // WITH the face: a designer tab rebuilt without it is the same module's CODE identity,
       // and the click then asks the host to activate the code pane - which is exactly how
       // clicking back onto a designer tab did nothing (the developer, 2026-08-13).
+      const face = knownFace(tab.dataset.face);
       return {
         module: tab.dataset.module,
         project: tab.dataset.project || null,
-        ...(tab.dataset.face === "design" ? { face: "design" as const } : {}),
+        ...(face ? { face } : {}),
       };
     };
 
@@ -1501,10 +1521,11 @@ export class Workspace {
         return;
       }
 
+      const draggedFace = knownFace(tab.dataset.face);
       const id: DocumentId = {
         module: tab.dataset.module,
         project: tab.dataset.project || null,
-        ...(tab.dataset.face === "design" ? { face: "design" as const } : {}),
+        ...(draggedFace ? { face: draggedFace } : {}),
       };
       const startX = event.clientX;
       const startY = event.clientY;

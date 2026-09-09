@@ -246,6 +246,29 @@ const INDEX_HTML = `<!doctype html>
         <div id="changes-diff" aria-label="What changed"></div>
       </div>
     </div>
+    <div id="scm">
+      <div id="scm-actions" role="toolbar" aria-label="Source control">
+        <button id="scm-refresh" type="button" title="Read the repository again"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <button id="scm-commit" type="button" disabled title="Save, export, and commit the ticked modules with the message"><span class="codicon codicon-check" aria-hidden="true"></span><span class="scm-label-text">Commit</span></button>
+        <button id="scm-export" type="button" disabled title="Write every module to the folder (project to folder)"><span class="codicon codicon-arrow-down" aria-hidden="true"></span><span class="scm-label-text">Export</span></button>
+        <button id="scm-import" type="button" disabled title="Read the Folder rows into the project (folder to project)"><span class="codicon codicon-arrow-up" aria-hidden="true"></span><span class="scm-label-text">Import</span></button>
+        <button id="scm-fetch" type="button" disabled title="git fetch"><span class="codicon codicon-cloud-download" aria-hidden="true"></span><span class="scm-label-text">Fetch</span></button>
+        <button id="scm-pull" type="button" disabled title="git pull, then import what changed"><span class="codicon codicon-repo-pull" aria-hidden="true"></span><span class="scm-label-text">Pull</span></button>
+        <button id="scm-push" type="button" disabled title="git push"><span class="codicon codicon-repo-push" aria-hidden="true"></span><span class="scm-label-text">Push</span></button>
+        <button id="scm-blame" type="button" title="Show who last touched each line of the active module"><span class="codicon codicon-person" aria-hidden="true"></span><span class="scm-label-text">Blame</span></button>
+        <select id="scm-branch" class="scope-select" aria-label="Branch" hidden></select>
+        <select id="scm-file" class="scope-select scope-select-file" aria-label="Show the repository of"></select>
+        <span id="scm-project" aria-live="polite"></span>
+      </div>
+      <div id="scm-body">
+        <div id="scm-list" role="list" aria-label="Changes, folder and history"></div>
+        <div id="scm-detail">
+          <div id="scm-notice" role="status" aria-live="polite"></div>
+          <textarea id="scm-message" rows="3" spellcheck="true" aria-label="Commit message" placeholder="Commit message"></textarea>
+          <div id="scm-diff" aria-label="Comparison"></div>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-procedure"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
 </div>

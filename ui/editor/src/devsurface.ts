@@ -30,8 +30,9 @@ import { colourPickerState, pickColour } from "./colourpicker.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
-import { namesTheSameWorkbook } from "./documents.js";
+import { knownFace, namesTheSameWorkbook } from "./documents.js";
 import { changesPaneProbe } from "./changespane.js";
+import { scmPaneProbe, type ScmPaneProbe } from "./scmpane.js";
 import { agentDialogProbe } from "./agentdialog.js";
 import { extractDialogProbe } from "./extractdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
@@ -170,6 +171,10 @@ export interface UiSnapshot {
     showing: string | null;
     full: boolean;
   } | null;
+  /** The Source Control pane's state, or null before one has been built. */
+  scm: ReturnType<ScmPaneProbe["state"]> | null;
+  /** The blame layer for the model on screen: on, how many lines carry a hint, how many do not. */
+  blame: { on: boolean; lines: number; uncommitted: number; painted: number; refused: string | null };
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** Token sets refused because their offsets did not describe the text on screen. */
@@ -313,6 +318,11 @@ export interface DevSurfaceParts {
     goToPreviousMatch(): void;
   };
   bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
+  blame: {
+    blameOn(model: monaco.editor.ITextModel): {
+      on: boolean; lines: number; uncommitted: number; painted: number; refused: string | null;
+    };
+  };
   panes: {
     list(): { name: string; title: string; open: boolean; permanent: boolean }[];
     /** Moves a pane to a dock side, through the method a real drop calls. */
@@ -767,6 +777,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     currentLine: bridge.currentLineDrawn(),
     sync: syncDialogProbe()?.state() ?? null,
     changes: changesPaneProbe()?.state() ?? null,
+    scm: scmPaneProbe()?.state() ?? null,
+    blame: (() => {
+      const model = workspace.activeEditor().getModel();
+      return model ? parts.blame.blameOn(model) : { on: false, lines: 0, uncommitted: 0, painted: 0, refused: null };
+    })(),
     agent: agentDialogProbe()?.state() ?? null,
     extract: extractDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],
@@ -1476,9 +1491,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       // standing, and neither has happened by the time this line runs. The `act` route awaits a
       // promise, so the honest answer is reachable; the first version returned immediately and
       // said `closed Watcher` five times over a tab that never moved.
+      // The FACE too, as landed() compares it: a past-version tab or a designer tab beside its
+      // module's code tab leaves the strip while a name-and-workbook check still finds the
+      // code tab, and the close was reported as never answered (found in review, 2026-09-08).
       const held = () => workspace.snapshot().groups
         .some((group) => group.tabs.some((tab) =>
-          tab.module === before.module && tab.project === before.project));
+          tab.module === before.module && tab.project === before.project
+          && (tab.face ?? undefined) === (before.face ?? undefined)));
 
       return (async () => {
         const deadline = Date.now() + 2000;
@@ -1566,9 +1585,10 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
 
       const wantedModule = module.toLowerCase();
-      // The FACE is part of the identity: a form's code tab and designer tab share a name,
-      // and without this an activate could pick either. No face means the code tab.
-      const wantedFace = args.face === "design" ? "design" : undefined;
+      // The FACE is part of the identity: a form's code tab, designer tab and past-version
+      // tabs share a name, and without this an activate could pick any. No face means the
+      // code tab.
+      const wantedFace = knownFace(typeof args.face === "string" ? args.face : undefined);
       const open = workspace.snapshot().groups.flatMap((group) => group.tabs);
       const matches = open.filter((tab) => tab.module.toLowerCase() === wantedModule
         && (project === null || namesTheSameWorkbook(tab.project, project))
@@ -1611,10 +1631,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         picked = inShown;
       }
 
+      const pickedFace = knownFace(picked.face);
       workspace.pickTab({
         module: picked.module,
         project: picked.project,
-        ...(picked.face === "design" ? { face: "design" as const } : {}),
+        ...(pickedFace ? { face: pickedFace } : {}),
       });
 
       /*
@@ -2104,6 +2125,96 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return {
         did: false,
         detail: "nothing asked; pass press, file, expand, or module (with round, and in=full for the card's rail)",
+      };
+    },
+
+    /**
+     * Drives the Source Control pane through its own controls, so a suite proves the pane and
+     * not merely the route it shares a brain with: `{press}` clicks a named button (refresh,
+     * commit, export, import, fetch, pull, push, blame, init, abort, browse, use, identity,
+     * open, restore - the last presses the confirm too), `{file}` points it at another open
+     * file through the select's own change, `{tick, on}` ticks a Changes row, `{message}`
+     * types the commit message, `{module}` opens a row's comparison, `{commit}` opens a commit
+     * (with `{module}` as well, a file under it), `{branch}` picks a branch through the
+     * select, which is a checkout, and `{name, email}` types the identity. `ui.scm` is the
+     * read side.
+     */
+    scmPane: (args) => {
+      const pane = scmPaneProbe();
+      if (!pane) {
+        return { did: false, detail: "the Source Control pane has not been built yet" };
+      }
+
+      if (args.press !== undefined) {
+        const control = String(args.press);
+        return pane.press(control)
+          ? { did: true, detail: `${control} pressed` }
+          : {
+            did: false,
+            detail: `no control named ${control} is on screen and enabled; use refresh, commit, export, `
+              + "import, fetch, pull, push, blame, init, abort, browse, use, identity, open or restore",
+          };
+      }
+
+      if (args.file !== undefined) {
+        const file = String(args.file);
+        return pane.chooseFile(file)
+          ? { did: true, detail: `pointed at ${file} through the select's own change` }
+          : { did: false, detail: `${file} is not one of the open files the pane was given` };
+      }
+
+      if (args.tick !== undefined) {
+        const module = String(args.tick);
+        const on = args.on !== false && args.on !== "false" && args.on !== 0 && args.on !== "0";
+        return pane.tick(module, on)
+          ? { did: true, detail: `${module} ${on ? "ticked" : "unticked"}` }
+          : { did: false, detail: `no Changes row for ${module}` };
+      }
+
+      if (args.message !== undefined) {
+        const text = String(args.message);
+        return pane.setMessage(text)
+          ? { did: true, detail: "message typed" }
+          : { did: false, detail: "the message box is not on screen; there is no repository to commit to" };
+      }
+
+      if (args.commit !== undefined) {
+        const short = String(args.commit);
+        if (args.module !== undefined) {
+          const module = String(args.module);
+          return pane.showFile(short, module)
+            ? { did: true, detail: `showing ${module} at ${short}` }
+            : { did: false, detail: `no file ${module} is listed under commit ${short}; open the commit first` };
+        }
+
+        return pane.openCommit(short)
+          ? { did: true, detail: `commit ${short} clicked` }
+          : { did: false, detail: `no commit ${short} in the history` };
+      }
+
+      if (args.module !== undefined) {
+        const module = String(args.module);
+        return pane.show(module)
+          ? { did: true, detail: `showing ${module} against the branch head` }
+          : { did: false, detail: `no Changes row for ${module}` };
+      }
+
+      if (args.branch !== undefined) {
+        const branch = String(args.branch);
+        return pane.chooseBranch(branch)
+          ? { did: true, detail: `${branch} picked through the select, which is a checkout` }
+          : { did: false, detail: `${branch} is not a branch the select offers, or the select is disabled` };
+      }
+
+      if (args.name !== undefined || args.email !== undefined) {
+        return pane.setIdentity(String(args.name ?? ""), String(args.email ?? ""))
+          ? { did: true, detail: "identity typed; press identity to save it" }
+          : { did: false, detail: "the identity inputs are not on screen" };
+      }
+
+      return {
+        did: false,
+        detail: "nothing asked; pass press, file, tick (with on), message, module, commit (with module for a file), branch, or name and email",
       };
     },
 
@@ -3309,6 +3420,48 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       void found.run();
       return { did: true, detail: `ran ${action}` };
+    },
+
+    /**
+     * Blame on the module on screen: `which` is toggle, on or off. `ui.blame` reads it back.
+     * The editor's own action is what toggles; on and off press it only when the layer is not
+     * already there, so the act is idempotent where the action is not.
+     */
+    blame: (args) => {
+      const which = String(args.which ?? "toggle").toLowerCase();
+      if (which !== "toggle" && which !== "on" && which !== "off") {
+        return { did: false, detail: `which must be toggle, on or off; got ${which}` };
+      }
+
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      if (!model) {
+        return { did: false, detail: "no module is on screen to blame" };
+      }
+
+      const found = editor.getAction("xlide.blame.toggle");
+      if (!found) {
+        return { did: false, detail: "xlide.blame.toggle is not registered on this editor" };
+      }
+
+      const was = parts.blame.blameOn(model).on;
+      if ((which === "on" && was) || (which === "off" && !was)) {
+        return { did: true, detail: `blame was already ${which}` };
+      }
+
+      return Promise.resolve(found.run()).then(() => {
+        // A layer that went on and is off again answered the host's refusal in between: the
+        // action ran, and the words say why nothing is painted. Only a layer that never moved
+        // at all is a model that is nobody's document.
+        const after = parts.blame.blameOn(model);
+        if (after.on === was) {
+          return after.refused
+            ? { did: true, detail: `blame ran and the host refused it: ${after.refused}` }
+            : { did: false, detail: "the toggle ran but the layer did not move; the model is nobody's document" };
+        }
+
+        return { did: true, detail: `blame ${after.on ? "on" : "off"}` };
+      });
     },
 
     /**

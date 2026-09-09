@@ -380,6 +380,16 @@ export async function open({ pid, workbook } = {}) {
   return instances[0].api;
 }
 
+/**
+ * The `scm` actions that change something - the repository, the folder, the project or what the
+ * project remembers - and so ride as POST. Everything else the route does is a read and rides
+ * as GET, which is what lets the bare-GET walk in Test-DebugApi.ps1 call it safely.
+ */
+const WRITE_ACTIONS = new Set([
+  "settings", "forget", "browse", "init", "identity", "commit", "export", "import", "open",
+  "restore", "checkout", "fetch", "pull", "push", "abort",
+]);
+
 function clientFor(entry) {
   const base = `http://127.0.0.1:${entry.port}/${entry.token}`;
 
@@ -1438,6 +1448,48 @@ function clientFor(entry) {
         { timeout: 30000 }),
 
     /**
+     * Source control: git.exe behind the folder a project's modules are exported to, one brain
+     * with the Source Control pane. Bare `scm()` is the status - the project's modules live
+     * against the branch head as rows, the Folder section, the branches, the last commit and
+     * a suggested message - and every other action answers the status after acting, so a
+     * caller redraws from `reply.status ?? reply` exactly as the pane does. A refusal is an
+     * `{error}` and throws here like every other route's.
+     *
+     *   await api.scm();                                             // status
+     *   await api.scm({ action: "settings", folder: "C:\\src\\book" });   // remember the folder
+     *   await api.scm({ action: "forget" });                         // and forget it
+     *   await api.scm({ action: "browse" });            // the host's folder chooser: BLOCKS
+     *   await api.scm({ action: "init" });              // git init, autocrlf off, .gitignore
+     *   await api.scm({ action: "identity", name: "Ada", email: "ada@example.com" });
+     *   await api.scm({ action: "commit", message: "taught Ledger dates" });  // every row
+     *   await api.scm({ action: "commit", message: "just Ledger", modules: ["Ledger"] });
+     *   await api.scm({ action: "export" });            // project -> folder, no git
+     *   await api.scm({ action: "import", modules: ["Ledger"] });  // folder -> project;
+     *                                                         //   empty means every Folder row
+     *   await api.scm({ action: "log", limit: 20, module: "Ledger" });  // newest first, files
+     *   await api.scm({ action: "diff", module: "Ledger", ref: "HEAD" });  // live against ref
+     *   await api.scm({ action: "show", module: "Ledger", ref: "abc1234" });  // text then, rows
+     *   await api.scm({ action: "open", module: "Ledger", ref: "abc1234" });  // past-version tab
+     *   await api.scm({ action: "restore", module: "Ledger", ref: "abc1234", by: "claude" });
+     *   await api.scm({ action: "blame", module: "Ledger" });        // lines[], uncommitted[]
+     *   await api.scm({ action: "checkout", ref: "feature" });  // refused while dirty
+     *   await api.scm({ action: "fetch" });                     // pull and push the same way
+     *   await api.scm({ action: "abort" });                     // git merge --abort
+     *
+     * `modules` is the POST body, one name per line, and only a POST carries one: node's fetch
+     * refuses a GET with any body at all, an empty one included. `limit` is stringified by the
+     * query. The default budget is a minute because a commit saves the workbook, exports and
+     * runs git, and the remote actions run with terminal prompts disabled so they fail in
+     * words rather than hang - but a slow remote can still take a while.
+     */
+    scm: ({ action, project, module, ref, message, folder, name, email, limit, by, modules, timeoutMs = 60000 } = {}) =>
+      call(`scm${query({ action, project, module, ref, message, folder, name, email, limit, by })}`, {
+        method: WRITE_ACTIONS.has(action) ? "POST" : "GET",
+        ...(WRITE_ACTIONS.has(action) ? { body: (modules ?? []).join("\n") } : {}),
+        timeout: timeoutMs,
+      }),
+
+    /**
      * What an import or an export WOULD do, without doing any of it.
      *
      * The plan is the same object the import/export dialog draws, from the same service, so a row
@@ -1628,6 +1680,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "sync": return api.syncPlan(rest[0] ?? "export", { folder: rest[1], mode: rest[2] });
       case "syncApply": return api.syncApply(rest[0] ?? "export", { folder: rest[1], mode: rest[2], select: rest[3] ?? "checked" });
       case "syncSettings": return api.syncSettings({ folder: rest[0], exportMode: rest[1], importMode: rest[2] });
+      // scm                                           the status
+      // scm settings folder C:\src\book               the action, then its arguments by pairs
+      // scm commit message "taught Ledger" modules Ledger,Reports
+      // scm log limit 5 / scm diff module Ledger / scm blame module Ledger
+      case "scm": {
+        const pairs = Object.fromEntries(
+          rest.slice(1).reduce((all, value, at, list) =>
+            at % 2 === 0 ? [...all, [value, list[at + 1]]] : all, []));
+        return api.scm({
+          action: rest[0],
+          ...pairs,
+          modules: pairs.modules === undefined ? undefined : String(pairs.modules).split(","),
+        });
+      }
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, host: e.host, shown: e.state.shownProject, agent: e.agent }));
       // designer EntryForm                        the control tree
       // designer EntryForm markup                 the same form as markup text

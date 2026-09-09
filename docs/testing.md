@@ -7,7 +7,7 @@ most of the value is in probes that drive the real thing rather than tests of th
 
 ## The four kinds, and when each is right
 
-**Unit tests** (`tests/`, 259 of them, none need Excel). Pure logic with a real answer: the split
+**Unit tests** (`tests/`, 600 of them, none need Excel). Pure logic with a real answer: the split
 tree's arithmetic, the lexer against its corpus, registration plans, pixel maths. Fast enough to
 run on every gate. If a thing can be a unit test it should be, and if it cannot, that is usually a
 sign the logic is tangled with the host and worth extracting.
@@ -34,8 +34,18 @@ reader following it would have concluded the PowerShell probes were the whole of
 drive the same door from node through `xlide-api.mjs`, and they are where the behaviours that
 cost the most are pinned - where a squiggle lands after Format Module, whether the workbook, the
 surface and the analyzer hold the same text after every operation, what the Immediate window
-answers, whether an import refuses to overwrite unwritten edits, and whether the two sync
-planners still decide identically. `verify.ps1` groups them by the fixture each needs.
+answers, whether an import refuses to overwrite unwritten edits, whether the two sync
+planners still decide identically, and whether a commit through the Source Control pane takes
+the ticked module and leaves the rest. `verify.ps1` groups them by the fixture each needs.
+
+The source control suite (`scm.mjs`) is the one that needs a tool the others do not: git.exe,
+on PATH or in Git for Windows' standard folders. It runs against `ScmFixture.xlsm`
+(`tools\New-ScmFixture.ps1`), whose three modules name themselves in a string and differ in
+length so a blame or a comparison of the wrong module reads as the wrong module, and it
+initialises a repository in a temporary folder of its own - commits, branches, blames, restores,
+imports - and deletes it at the end. Without git it fails naming git rather than skipping: a
+suite excused when a tool is missing is a gate that reports green on a machine that cannot run
+the feature.
 
 ## The rule that matters most
 

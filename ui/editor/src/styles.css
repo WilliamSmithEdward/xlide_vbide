@@ -3396,6 +3396,24 @@ body.objbrowser-page #objbrowser-card {
   justify-content: center;
 }
 
+/* The blame hint, injected after a line's last character. Dim and italic so it reads as a
+   margin note over the code rather than as more code; the line-number grey is the colour the
+   editor already uses for "about the line, not of it". A line not yet committed says so in the
+   same voice, a shade warmer, because it is the one a developer is looking for. */
+.xlide-blame {
+  color: var(--vscode-editorLineNumber-foreground, #6e7681);
+  opacity: 0.8;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+.xlide-blame-uncommitted {
+  color: var(--vscode-editorGhostText-foreground, #8b949e);
+  opacity: 0.85;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
 
 
 /* The Error List's toolbar row: one toggle per severity, count always showing, pressed means
@@ -5305,6 +5323,21 @@ body.objbrowser-page #objbrowser-card {
   vertical-align: baseline;
 }
 
+/* A past-version tab wears a ring: the commit's dot on a graph, and not the designer's window.
+   Read-only text is told apart from the live module before its label is. */
+.tab.history::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.75;
+  vertical-align: baseline;
+  box-sizing: border-box;
+}
+
 /* ---- the designer split: stacked by default, the divider carries the controls ---- */
 
 .designer-view.stacked {
@@ -6453,4 +6486,419 @@ body.objbrowser-page #objbrowser-card {
 .panel-tab .tab-badge {
   margin-left: 6px;
   vertical-align: 1px;
+}
+
+/* ---- the Source Control pane ------------------------------------------------------------- */
+
+/* The Changes pane's shape, worn a third time: the rows on the left, what one of them means on
+   the right. The comparison rows are the sync dialog's renderer and the sync dialog's classes,
+   so a removed line looks the same in every place this product shows one. */
+#scm {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+#scm[hidden] {
+  display: none;
+}
+
+#scm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px 4px 10px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#scm-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+#scm-actions button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+#scm-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Blame is a toggle; pressed says so the way the full card's rail toggle says it. */
+#scm-actions #scm-blame[aria-pressed="true"] {
+  background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.22));
+  border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
+  opacity: 1;
+}
+
+#scm-branch {
+  width: 150px;
+}
+
+#scm-project {
+  margin-left: auto;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+#scm-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+#scm-list {
+  overflow: auto;
+  border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+  padding: 4px 0;
+}
+
+#scm-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* What the last action said. Empty most of the time, and takes no room then. */
+#scm-notice {
+  padding: 4px 10px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#scm-notice:empty {
+  display: none;
+}
+
+#scm-notice.scm-notice-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+  opacity: 1;
+}
+
+/* The message box: the sync dialog's input dressing, grown by the developer when a message
+   runs long. It hides itself with the rows when there is no repository to commit to. */
+#scm-message {
+  margin: 4px 10px;
+  padding: 4px 6px;
+  resize: vertical;
+  min-height: 2.6em;
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+#scm-message:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+#scm-message[hidden] {
+  display: none;
+}
+
+#scm-diff {
+  flex: 1;
+  overflow: auto;
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: 12px;
+}
+
+.scm-diff-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  opacity: 0.85;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+.scm-diff-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The two ways out of a past version, dressed as the strip's own buttons. */
+.scm-diff-head button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.scm-diff-head button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+}
+
+.scm-diff-head button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A section heading: Changes, Folder, History, with its count. */
+.scm-section {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+}
+
+.scm-section-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.scm-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 10px 2px 16px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scm-entry:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+/* The bar and the fill, the Changes pane's cue: a selection said only in colour is not said
+   to everybody. */
+.scm-entry-showing {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.28));
+  border-left-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* A row nothing happens on when clicked: the Folder section's, which Import and Export act on
+   as a whole. */
+.scm-entry-still {
+  cursor: default;
+}
+
+.scm-entry-still:hover {
+  background: none;
+}
+
+.scm-tick {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.scm-module {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scm-status {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* Git's own colours for what happened to a file, from the same variables the tree badges use.
+   Never colour alone: the word beside it says the same thing. */
+.scm-status-added,
+.scm-status-missingInFolder {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+}
+
+.scm-status-modified,
+.scm-status-folderNewer {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+}
+
+.scm-status-deleted,
+.scm-status-missingInProject {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+}
+
+.scm-status-renamed {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
+}
+
+/* A commit: the short hash in the round-number's grey, the subject taking the slack, the
+   author and day at the end. Its files unfold under it when it is opened. */
+.scm-commit {
+  padding: 1px 0;
+}
+
+.scm-commit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scm-commit-head:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+.scm-commit-open > .scm-commit-head {
+  border-left-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.scm-short {
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.scm-subject {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scm-when,
+.scm-author {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.scm-commit-file {
+  padding-left: 28px;
+}
+
+.scm-empty {
+  padding: 10px;
+  opacity: 0.7;
+}
+
+/* An empty state that offers a way on: the words, then a row of the controls that would move
+   the pane out of it. Inputs in it (the identity's name and email) wear the message box's
+   dressing. */
+.scm-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.scm-state-text {
+  opacity: 0.8;
+}
+
+.scm-state-detail {
+  opacity: 0.6;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.scm-state-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.scm-state input {
+  width: 100%;
+  max-width: 320px;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.scm-state label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.scm-conflict {
+  padding: 1px 0 1px 12px;
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: 12px;
+  color: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b);
+}
+
+/* The restore question and its outcome ride the same card the Changes pane's does. */
+#scm-restore-card {
+  width: min(520px, 90vw);
+}
+
+#scm-restore-consequence {
+  margin-top: 6px;
+}
+
+#scm-restore-card .modal-buttons {
+  margin-top: 14px;
+}
+
+#scm-restore-outcome {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* A past version's editor fills the group the way the designer does. */
+.history-view {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--xl-editor-bg, #1e1e1e);
+}
+
+.history-view > .history-editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }

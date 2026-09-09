@@ -28,17 +28,53 @@ function Invoke-FixtureLaunch {
     if (Test-Path $Path) { Remove-Item $Path -Force }
 
     Write-Host '1. Making an empty macro workbook.'
+    $before = @(Get-Process EXCEL -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
     $maker = New-Object -ComObject Excel.Application
     $maker.Visible = $false
     $maker.DisplayAlerts = $false
+    $makerPid = @(Get-Process EXCEL -ErrorAction SilentlyContinue |
+        Where-Object { $before -notcontains $_.Id } | ForEach-Object { $_.Id })
+    $books = $null
+    $blank = $null
     try {
-        $blank = $maker.Workbooks.Add()
+        $books = $maker.Workbooks
+        $blank = $books.Add()
         $blank.SaveAs($Path, 52)
         $blank.Close($false)
     }
     finally {
+        # EVERY WRAPPER IS RELEASED BEFORE QUIT, AND THE MAKER IS GONE BEFORE STEP 2 LOOKS.
+        # `$maker.Workbooks.Add()` left a wrapper for the Workbooks collection that nothing held,
+        # and when the collector finalised it after Quit had ended the server, releasing the dead
+        # proxy made DCOM start a NEW Excel to answer it - a hidden "Book1" appearing up to a
+        # minute later, which the launcher's -Fresh census rightly reads as a stranger's and
+        # refuses to close (2026-09-08: four builds in a row refused on an Excel this driver had
+        # summoned). So the wrappers go first, in reverse order, then Quit, then the collector,
+        # and any Excel step 1 brought into existence is waited for and stopped if it will not
+        # leave, because it is this driver's own whichever way it arrived.
+        foreach ($wrapper in @($blank, $books)) {
+            if ($null -ne $wrapper) {
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null
+            }
+        }
         try { $maker.Quit() } catch { }
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($maker) | Out-Null
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+        foreach ($id in $makerPid) {
+            $gone = Get-Process -Id $id -ErrorAction SilentlyContinue
+            if ($null -ne $gone -and -not $gone.WaitForExit(15000)) {
+                Write-Host "   the blank workbook's Excel (pid $id) did not quit; stopping it."
+                Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Start-Sleep -Seconds 2
+        Get-Process EXCEL -ErrorAction SilentlyContinue |
+            Where-Object { $before -notcontains $_.Id } |
+            ForEach-Object {
+                Write-Host "   an Excel this step summoned (pid $($_.Id)) is still standing; stopping it."
+                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
     }
 
     Write-Host '2. Opening it with the editor, which is what loads the add-in.'

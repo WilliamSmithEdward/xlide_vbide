@@ -73,7 +73,7 @@ import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
 import { tokensFitTheText } from "./semanticfit.js";
 import { openReferencesDialog } from "./referencesdialog.js";
 import { openExtractDialog } from "./extractdialog.js";
-import { DocumentStore, docKeyOf, docUriOf, namesTheSameWorkbook, type DocumentId } from "./documents.js";
+import { DocumentStore, docKeyOf, docUriOf, historyShortOf, historyUriOf, isDesignFace, isHistoryFace, namesTheSameWorkbook, type DocumentId } from "./documents.js";
 import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
@@ -95,6 +95,8 @@ const refreshRuleKeys: Array<() => void> = [];
  * machinery with itself is a loop nobody means. Upstream's quick fix excludes it the same way. */
 const SUPPRESSION_DIRECTIVE_CODE = "analysis-suppression-directive";
 import { ChangesPane } from "./changespane.js";
+import { ScmPane } from "./scmpane.js";
+import { Blame } from "./blame.js";
 import { openSyncDialog } from "./syncdialog.js";
 import { openAgentDialog } from "./agentdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
@@ -677,12 +679,17 @@ function boot(): void {
   // registered before it looks. Nothing host-driven runs before bridge.start().
   const bridge = new EditorBridge(transport ?? demoTransport(), documents);
 
+  // The blame layer asks the source control brain through the same channel the pane does, and
+  // paints only documents the store owns - a history tab's model is nobody's document.
+  const blame = new Blame((args) => bridge.requestScm(args), (model) => documents.idOf(model));
+
   let searchWidget: SearchWidget;
   let workspace: Workspace;
   // Declared before the workspace: its constructor announces the first active group, and the
   // callback below must find an undefined shell, not a const still in its dead zone.
   let shell: Shell | undefined;
   let changesPane: ChangesPane | undefined;
+  let scmPane: ScmPane | undefined;
 
   /** Everything a new group's editor gets, the moment the workspace creates it. */
   const wireEditor = (editor: monaco.editor.IStandaloneCodeEditor): void => {
@@ -690,6 +697,7 @@ function boot(): void {
     searchWidget.registerOn(editor);
     installTypingAutomation(editor, bridge);
     bookmarks.attach(editor);
+    blame.attach(editor);
     registerHostActions(editor, bridge);
     installMarginMenu(editor, bridge);
   };
@@ -791,6 +799,89 @@ function boot(): void {
     return view;
   };
 
+  /*
+   * A PAST VERSION'S TAB: a module's text at a commit, read-only, in an editor of its own.
+   *
+   * Host-listed with the face `history:<short>`, the way a designer tab is listed with `design`,
+   * so the strip, the `ui` route and the host agree about it and it survives every republish.
+   * The body is built on demand the first time the tab is shown and disposed when the host's
+   * list drops it, through the same retain callback the designer views use.
+   *
+   * NOT through wireEditor. That would attach breakpoint toggling, typing automation, bookmarks,
+   * host actions and the margin menu to text that is not the module's - and the model wears a
+   * scheme of its own so that nothing else in the page mistakes it for the live document.
+   */
+  interface HistoryView {
+    root: HTMLElement;
+    editor: monaco.editor.IStandaloneCodeEditor;
+    model: monaco.editor.ITextModel;
+    shown(): void;
+    layout(): void;
+    dispose(): void;
+  }
+
+  const historyViews = new Map<string, HistoryView>();
+
+  const historyViewFor = (id: DocumentId): HistoryView => {
+    const key = docKeyOf(id.module, id.project, id.face);
+    let view = historyViews.get(key);
+    if (view) {
+      return view;
+    }
+
+    const short = historyShortOf(id.face);
+    const root = document.createElement("div");
+    root.className = "history-view";
+    root.dataset.module = id.module;
+    root.dataset.project = id.project ?? "";
+    root.dataset.short = short;
+
+    const host = document.createElement("div");
+    host.className = "history-editor";
+    root.appendChild(host);
+
+    const model = monaco.editor.createModel("", VBA_LANGUAGE_ID, historyUriOf(id.module, id.project, short));
+    const editor = monaco.editor.create(host, {
+      ...editorOptions,
+      model,
+      readOnly: true,
+      domReadOnly: true,
+      readOnlyMessage: { value: `${id.module} @ ${short} is a past version. Restore it from the Source Control pane.` },
+      glyphMargin: false,
+    });
+
+    // The text arrives from the host, which reads it out of the repository; until it does, the
+    // tab is an empty read-only editor rather than a spinner nobody asked for.
+    void bridge.requestScm({
+      action: "show",
+      module: id.module,
+      ref: short,
+      ...(id.project ? { project: id.project } : {}),
+    }).then((answer) => {
+      if (model.isDisposed()) {
+        return;
+      }
+
+      const text = typeof answer.text === "string" ? answer.text : null;
+      model.setValue(text ?? `' ${typeof answer.error === "string" ? answer.error : "the host answered no text"}`);
+    });
+
+    view = {
+      root,
+      editor,
+      model,
+      shown: () => editor.layout(),
+      layout: () => editor.layout(),
+      dispose: () => {
+        editor.dispose();
+        model.dispose();
+        root.remove();
+      },
+    };
+    historyViews.set(key, view);
+    return view;
+  };
+
   workspace = new Workspace(editorArea, emptyView, documents, {
     createEditor: (groupBody) => {
       const editor = monaco.editor.create(groupBody, editorOptions);
@@ -812,7 +903,7 @@ function boot(): void {
      * rather than racing it.
      */
     close: (id, action) => {
-      const view = id.face === "design"
+      const view = isDesignFace(id)
         ? designerViews.get(docKeyOf(id.module, id.project, id.face))
         : undefined;
       if (view && !action && view.canvasSnapshot().dirty) {
@@ -839,8 +930,9 @@ function boot(): void {
     layoutChanged: () => {
       workspace?.editors().forEach((editor) => editor.layout());
       designerViews.forEach((view) => view.layout());
+      historyViews.forEach((view) => view.layout());
     },
-    designerBody: (id) => (id.face === "design" ? designerViewFor(id).root : null),
+    designerBody: (id) => (isDesignFace(id) ? designerViewFor(id).root : null),
     designerShown: (body) => {
       for (const view of designerViews.values()) {
         if (view.root === body) {
@@ -848,7 +940,15 @@ function boot(): void {
           return;
         }
       }
+      for (const view of historyViews.values()) {
+        if (view.root === body) {
+          view.shown();
+          return;
+        }
+      }
     },
+    // One membership signal for both kinds of page-built body: the keys carry the face, so a
+    // designer's and a history tab's never collide, and each map keeps only what is still open.
     designerRetain: (openKeys) => {
       for (const [key, view] of [...designerViews]) {
         if (!openKeys.has(key)) {
@@ -856,7 +956,14 @@ function boot(): void {
           view.dispose();
         }
       }
+      for (const [key, view] of [...historyViews]) {
+        if (!openKeys.has(key)) {
+          historyViews.delete(key);
+          view.dispose();
+        }
+      }
     },
+    historyBody: (id) => (isHistoryFace(id) ? historyViewFor(id).root : null),
   });
   bridge.workspace = workspace;
 
@@ -1082,7 +1189,7 @@ function boot(): void {
      */
     editProperty: (component, name, value) => {
       const active = workspace.activeDocument();
-      const view = active?.face === "design"
+      const view = active && isDesignFace(active)
         ? designerViews.get(docKeyOf(active.module, active.project, active.face))
         : undefined;
       if (view && view.spells(component, name) && view.writeProperty(component, name, value)) {
@@ -1107,6 +1214,7 @@ function boot(): void {
     trace: (text) => bridge.trace(text),
     testsShown: () => bridge.testsAction("show"),
     changesShown: () => changesPane?.shown(),
+    scmShown: () => scmPane?.shown(),
   });
   bridge.shell = shell;
 
@@ -1336,11 +1444,50 @@ function boot(): void {
   // lets the pane say that what it is showing has been overtaken.
   bridge.changesStamped = (stamp) => changesPane?.stamped(stamp);
 
+  // The Source Control pane: the same pull shape as the Changes pane, over git. Its Blame
+  // button presses the editor layer's own toggle for the module on screen, so the button and
+  // the context menu item and the api's act are one action.
+  scmPane = new ScmPane(
+    document.querySelector("#scm") as HTMLElement,
+    (args, body) => bridge.requestScm(args, body),
+    () => ({
+      names: (shell?.currentProjects() ?? []).map((one) => one.name),
+      current: workspace.activeDocument()?.project ?? null,
+    }),
+    {
+      toggle: () => {
+        const model = workspace.activeEditor().getModel();
+        return model ? blame.toggle(model) : false;
+      },
+      on: () => {
+        const model = workspace.activeEditor().getModel();
+        return model ? blame.blameOn(model).on : false;
+      },
+    });
+  blame.onChanged = () => scmPane?.blameChanged();
+  blame.onError = (message) => scmPane?.blameFailed(message);
+
+  // The host's tap when the folder or the repository moved: a save exported, a commit landed,
+  // a branch changed, a file was edited from outside. The pane and the blame layer follow a
+  // moment later; neither is re-read on the write path.
+  bridge.scmStamped = (stamp) => {
+    scmPane?.stamped(stamp);
+    blame.stamped();
+  };
+
   // Both panes' Current Module scope follows the same tab, and the shell is where every road
   // to a changed active module already meets - the host's own setActive and the workspace's
-  // tab activation both land there.
-  shell.activeModuleChanged = (module, project) => testsPane.setActiveModule(module, project);
-  shell.projectsChanged = () => changesPane?.filesChanged();
+  // tab activation both land there. The Blame button follows the tab too, since it says whether
+  // blame is on for the module NOW on screen.
+  shell.activeModuleChanged = (module, project) => {
+    testsPane.setActiveModule(module, project);
+    scmPane?.blameChanged();
+  };
+  // Single-assignment callbacks: a third subscriber chains rather than replaces.
+  shell.projectsChanged = () => {
+    changesPane?.filesChanged();
+    scmPane?.filesChanged();
+  };
 
   // Asked once at boot, so a pane restored open by the saved layout holds its state - the
   // support chip included - without waiting for a run, a press, or the first analysis pass
@@ -2133,6 +2280,7 @@ function boot(): void {
     },
     search: searchWidget,
     bookmarks,
+    blame,
     providers: {
       hover: hoverProvider,
       completion: completionProvider,
@@ -2642,6 +2790,13 @@ function installMarginMenu(editor: monaco.editor.IStandaloneCodeEditor, bridge: 
           icon: "",
           label: "Clear All Breakpoints",
         }),
+      },
+      // The blame layer's own action, so the gutter offers it where a line's author is asked
+      // about: on the line's number.
+      {
+        label: "Toggle Blame",
+        enabled: editor.getAction("xlide.blame.toggle") !== null,
+        run: () => void editor.getAction("xlide.blame.toggle")?.run(),
       },
     ]);
   });

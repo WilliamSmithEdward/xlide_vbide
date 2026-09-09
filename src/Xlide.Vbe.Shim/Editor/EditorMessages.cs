@@ -967,6 +967,25 @@ public sealed record ChangesStampMessage(
     [property: JsonPropertyName("stamp")] int Stamp);
 
 /// <summary>
+/// The Source Control pane's answer, carried as the scm route's own JSON for the same reason the
+/// change log's is: one reply shape, read by the pane and the api alike.
+/// </summary>
+public sealed record ScmResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("json")] string Json);
+
+/// <summary>
+/// One number, meaning "the folder or the repository has moved on since you last read it": a
+/// save exported, a commit landed, or the watcher saw a checkout, a pull, or an edit made in
+/// another editor. Carries nothing else, because a status is git and a diff per module, and
+/// neither belongs on the write path.
+/// </summary>
+public sealed record ScmStampMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("stamp")] int Stamp);
+
+/// <summary>
 /// The project's own words for the tokenizer: names that denote types and names that denote
 /// procedures, so a name reads as what it is wherever it appears.
 /// </summary>
@@ -1044,6 +1063,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ChangesResultMessage))]
 [JsonSerializable(typeof(ApiResultMessage))]
 [JsonSerializable(typeof(ChangesStampMessage))]
+[JsonSerializable(typeof(ScmResultMessage))]
+[JsonSerializable(typeof(ScmStampMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceAnalysisRule))]

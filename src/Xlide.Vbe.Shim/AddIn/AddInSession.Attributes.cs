@@ -752,14 +752,15 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// Writes the annotations of every module of the shown workbook whose attributes do not yet
-    /// match, before a save. Only modules with drift of that kind are touched; a refusal is said
-    /// and the save goes on regardless, because a save the developer asked for is not something
-    /// an attribute may hold up.
+    /// Writes the annotations of every module of one workbook whose attributes do not yet match,
+    /// before a save. Only modules with drift of that kind are touched; a refusal is said and the
+    /// save goes on regardless, because a save the developer asked for is not something an
+    /// attribute may hold up. The project is named because a commit saves the project it was
+    /// asked about, which need not be the shown one.
     /// </summary>
-    private void ApplyAnnotationsBeforeSave()
+    private void ApplyAnnotationsBeforeSave(string? projectId)
     {
-        if (_shownProject is not { } projectId)
+        if (projectId is null)
         {
             return;
         }

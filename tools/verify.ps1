@@ -368,7 +368,7 @@ Step 'page probes (headless)' {
     # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
     # which drives the same file as one of its three legs. Listing it here too would launch
     # Edge twice for the same answer.
-    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'folders-page-probe.mjs', 'problems-badge-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs', 'drop-page-probe.mjs'
+    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'folders-page-probe.mjs', 'problems-badge-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs', 'drop-page-probe.mjs', 'scm-page-probe.mjs', 'scm-ready-page-probe.mjs'
     foreach ($probe in $probes) {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1
         if ($answer -notmatch '"pass":true') { throw "$probe did not pass" }
@@ -907,6 +907,16 @@ if ($Live) {
             # against that one - on the folder pair its LeakOwner's Post collides with the
             # fixture's Ledger.Post and the project stops compiling under it (2026-09-05).
             @{ Fixture = 'FolderFixture.xlsm + FolderTwinFixture.xlsm'; Suites = @('folders.mjs') }
+            # SOURCE CONTROL GETS ITS OWN WORKBOOK (tools\New-ScmFixture.ps1), because its suite
+            # commits, checks a branch out over the workbook, SAVES it, and imports into it -
+            # every one of which rewrites modules and the file on disk, which no fixture another
+            # suite reads could survive. The repository is not in the workbook: the suite
+            # initialises one in a temporary folder and deletes it at the end. It NEEDS git.exe,
+            # on PATH or in Git for Windows' standard folders, and it fails out loud naming git
+            # rather than skipping: a gate that excused a suite when a tool was missing would
+            # report green on a machine that cannot run the feature. Before the change log's
+            # group, which stays last for the leak sweep.
+            @{ Fixture = 'ScmFixture.xlsm'; Suites = @('scm.mjs') }
             # THE CHANGE LOG GETS ITS OWN WORKBOOK (tools\New-ChangeFixture.ps1), because its
             # suite edits modules and then asserts on what the log says was edited. Any fixture
             # another suite reads would be either useless for that or a landmine for the other

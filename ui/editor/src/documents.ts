@@ -17,11 +17,49 @@ import { VBA_LANGUAGE_ID } from "./vba.js";
 
 /** One open document's identity: the module, its workbook display name when known, and the
  * FACE when it is not the code pane - a form's designer tab is the same module worn a second
- * way, and the two are two tabs. */
+ * way, and the two are two tabs. `design` is the designer; `history:<short>` is the module's
+ * text at a commit, read-only, one tab per commit opened. */
 export interface DocumentId {
   module: string;
   project: string | null;
-  face?: "design";
+  face?: string;
+}
+
+/** The face prefix of a past-version tab; the short hash follows it. */
+export const HISTORY_FACE_PREFIX = "history:";
+
+/** Whether an id is a form's designer tab. */
+export function isDesignFace(id: { face?: string | null | undefined }): boolean {
+  return id.face === "design";
+}
+
+/** Whether an id is a module's past-version tab. */
+export function isHistoryFace(id: { face?: string | null | undefined }): boolean {
+  return typeof id.face === "string" && id.face.startsWith(HISTORY_FACE_PREFIX);
+}
+
+/** The face a past-version tab wears for a commit. */
+export function historyFaceOf(short: string): string {
+  return `${HISTORY_FACE_PREFIX}${short}`;
+}
+
+/** The short hash a history face names, or "" for any other face. */
+export function historyShortOf(face: string | null | undefined): string {
+  return typeof face === "string" && face.startsWith(HISTORY_FACE_PREFIX)
+    ? face.slice(HISTORY_FACE_PREFIX.length)
+    : "";
+}
+
+/**
+ * The face a host or a tab names, or undefined for the code pane.
+ *
+ * ONLY THE FACES THIS PAGE KNOWS. The host publishes null or "code" for a mirrored pane, and a
+ * dataset attribute reads back "" when absent; both are the code identity. A face this page has
+ * never heard of would otherwise become a tab nothing can show and nothing can close.
+ */
+export function knownFace(face: string | null | undefined): string | undefined {
+  const id = { face };
+  return isDesignFace(id) || isHistoryFace(id) ? face ?? undefined : undefined;
 }
 
 /** The identity two documents are the same by. Case-insensitive, the way the host compares. */
@@ -60,6 +98,21 @@ const fileNameOf = (path: string): string =>
 export function docUriOf(module: string, project: string | null | undefined): monaco.Uri {
   return monaco.Uri.parse(
     `xlide:/${encodeURIComponent((project ?? "").toLowerCase())}/${encodeURIComponent(module)}`);
+}
+
+/** The scheme a past-version tab's model wears, so nothing mistakes it for a live document. */
+export const HISTORY_URI_SCHEME = "xlide-history";
+
+/**
+ * The model URI for a module's text at a commit. A DIFFERENT scheme from the live documents',
+ * and a path whose LAST segment is the hash rather than the module: the change highlighter
+ * finds a module's model by the last path segment, and this store answers null for a model it
+ * does not own, so a history model is painted by nobody and announced as nobody's.
+ */
+export function historyUriOf(module: string, project: string | null | undefined, short: string): monaco.Uri {
+  return monaco.Uri.parse(
+    `${HISTORY_URI_SCHEME}:/${encodeURIComponent((project ?? "").toLowerCase())}`
+    + `/${encodeURIComponent(module)}/${encodeURIComponent(short)}`);
 }
 
 interface Entry {

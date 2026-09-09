@@ -280,7 +280,7 @@ internal static class ModuleSyncService
                     }
 
                     case SyncStatus.WillUpdate:
-                        if (write(item.ModuleName, ModuleSync.CodeWithoutHeader(item.PayloadSource), plan.ProjectId)
+                        if (write(item.ModuleName, ModuleSync.BodyForImport(item.PayloadSource), plan.ProjectId)
                             is { } updateRefused)
                         {
                             failed.Add(updateRefused);
@@ -579,7 +579,7 @@ internal static class ModuleSyncService
                 $"the editor imported {item.FileName} but no module named {item.ModuleName} appeared");
         }
 
-        var body = ModuleSync.CodeWithoutHeader(item.PayloadSource);
+        var body = ModuleSync.BodyForImport(item.PayloadSource);
         if (body.Length == 0)
         {
             return null;

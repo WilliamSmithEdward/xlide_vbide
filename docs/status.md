@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-06, at v0.14.2.
+Updated 2026-09-08, at v0.14.2.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -19,8 +19,9 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 ## Where it is
 
-- **The surface is the whole visible editor.** A toolbar, module tabs, and eight dockable panes:
-  Explorer, Properties, Problems, Immediate, Locals, Watch, Tests and Changes. The Object Browser
+- **The surface is the whole visible editor.** A toolbar, module tabs, and nine dockable panes:
+  Explorer, Properties, Problems, Immediate, Locals, Watch, Tests, Changes and Source Control.
+  The Object Browser
   is a floating themed window of xlide's own. Nothing native shows through the canvas.
 - **There is no menu bar.** All ten of the editor's menus are suppressed; a wrench at the head of
   the toolbar holds the five dialogs that are genuinely the editor's own. Everything the other
@@ -58,6 +59,17 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   module, and it writes an `Option Compare` line into every module it creates, which collided
   with one the generated runner declared and stopped the whole project compiling
   ([lessons.md](lessons.md) finding 72). It has a fixture and a live suite in the gate.
+
+- **Source control is git.exe behind the export folder.** A Source Control pane whose rows are
+  the project's modules live against the branch head; a commit that is save, then export, then
+  `git commit --only` of the ticked rows; history with Open this version and Restore, a restore
+  landing as a Changes round; blame at the end of every committed line of the active module; a
+  branch select whose change is a checkout followed by an import, refused over a dirty workbook;
+  and Fetch, Pull and Push that answer git's words. The folder is remembered per project as
+  `Repository` in sync.json, a field of its own. git is not bundled: Git for Windows installs per
+  user, its credential manager is the login story, and a machine without it gets an empty state
+  naming the download. One brain with the `scm` route, driven by `scm.mjs` against a fixture of
+  its own. [source-control.md](source-control.md).
 
 ## What is not done
 
@@ -130,8 +142,8 @@ ran in Excel and the places this product asks which host it is in were only ever
 way - which is how the test runner came to have never once run a test in Access
 ([lessons.md](lessons.md) finding 72). Word has a launcher of its own and no group yet.
 
-Counts move, so they are given as of this line rather than as standing facts: 533 unit tests,
-67 api routes of which 65 are driven by one of the 67 suites the gate runs, 2 left out on
+Counts move, so they are given as of this line rather than as standing facts: 600 unit tests,
+68 api routes of which 66 are driven by one of the 70 suites the gate runs, 2 left out on
 purpose.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and

@@ -36,4 +36,7 @@ public static class ProductIdentity
 
     /// <summary>File name of the language engine sidecar.</summary>
     public const string EngineFileName = "xlide-engine.exe";
+
+    /// <summary>File name of the git the Source Control pane looks for. Never bundled.</summary>
+    public const string GitFileName = "git.exe";
 }
