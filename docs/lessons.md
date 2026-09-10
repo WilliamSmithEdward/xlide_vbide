@@ -2332,3 +2332,23 @@ Abort are the merge's. And a pull that stops on a conflict used to answer an
 error with git's words in it; it answers the conflicted status now, which is
 what the pane draws Abort from. The suite has a colleague: a clone of its
 bare remote that commits and pushes, once to be pulled and once to conflict.
+
+## 80. Access was never dirty, so a checkout imported over an unsaved edit
+
+The dirty check and the save behind source control walked
+`Application.Workbooks`, which only Excel has. Word has `Documents` with the
+same members; Access has neither, a database being no document. Asking
+Access for Workbooks threw, the flag read as unknown, and unknown is taken as
+clean everywhere that matters - so in Access a checkout imported the branch
+head over an edit the developer had not saved, where Excel refuses and says
+so, and a commit never saved the database, leaving the file on disk behind
+the repository. Found by running the source control flow against the Access
+fixture on a hunch, after reading the one call that could only be Excel's.
+
+The host names its document collection now - Workbooks, Documents, or none -
+and where there is none the project's own `Saved` flag answers the question
+every caller was asking, and the editor's own Save, which is what Ctrl+S in
+the editor runs in every host, is the save. The Access suite commits its
+fixture to a scratch repository, makes an edit, is refused the checkout,
+saves, and commits. Word takes the Documents branch by symmetry and has no
+fixture to prove it on yet.

@@ -250,6 +250,11 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
 
 - COM is read on the host thread only: the live modules' code through `ProjectReader.ReadSource`,
   the workbook's saved flag, the display names. What crosses to the pool thread is strings.
+- The save and the dirty check are the host's. Excel answers them from `Workbooks` and Word
+  from `Documents`, with the same members; Access has neither, a database being no document,
+  so the project's own `Saved` flag says whether its modules need saving and the editor's own
+  Save is what saves them. Before that, Access read as never dirty and a checkout imported over
+  an unsaved edit that Excel refuses to touch ([lessons.md](lessons.md) finding 80).
 - git.exe runs on the pool thread through one runner: hidden window, both streams drained, UTF-8,
   `GIT_TERMINAL_PROMPT=0`, `--no-pager`, `-c core.quotepath=false`, a deadline per command (20
   seconds; 120 for the remote commands), killed with its tree on timeout. Every invocation is

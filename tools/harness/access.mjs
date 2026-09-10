@@ -25,6 +25,9 @@
  *
  * It puts back everything it changes, so a rerun starts where the first run did.
  */
+import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { open, wait, waitFor, reporter } from "./xlide-api.mjs";
 
 const api = await open();
@@ -125,6 +128,55 @@ try {
   await api.writeModule("Helpers", helpersText, BOOK, { by: "access.mjs" });
   helpersText = null;
   check("and it goes back", (await api.immediate("?Greeting()")).text === "hello from access");
+
+  // ---- source control, whose save and dirty checks are the host's ----
+  //
+  // Excel answers them from Workbooks and Word from Documents; Access has neither, a database
+  // being no document. The project's own Saved flag says whether its modules need saving and
+  // the editor's own Save is what saves them. Before this, Access answered "dirty: false" for
+  // ever, and a checkout imported over an unsaved edit that Excel refuses to touch (2026-09-09).
+  const scratch = join(tmpdir(), `xlide-access-scm-${process.pid}`);
+  rmSync(scratch, { recursive: true, force: true });
+  mkdirSync(scratch, { recursive: true });
+  const folder = realpathSync.native(scratch);
+  const scm = (args = {}) => api.scm({ ...args, project: BOOK });
+  try {
+    await scm({ action: "settings", folder });
+    await scm({ action: "init" });
+    await scm({ action: "identity", name: "Access Suite", email: "access@example.com" });
+    const first = await scm({ action: "commit", message: "the fixture", by: "access.mjs" });
+    check("the database's modules commit, saving on the way", (first.committed ?? []).includes("Helpers") && first.status?.dirty === false,
+      `${(first.committed ?? []).length} committed, dirty ${first.status?.dirty}`);
+
+    helpersText = (await api.readModule("Helpers", BOOK)).text ?? "";
+    await api.writeModule("Helpers", helpersText.replace("hello from access", "hello unsaved"), BOOK, { by: "access.mjs" });
+    const dirty = await waitFor("the project to read as dirty", async () => (await scm()).dirty === true, { budgetMs: 10000 })
+      .then(() => true).catch(() => false);
+    check("an unsaved module edit makes the project dirty", dirty);
+    const refused = await refusalOf(scm({ action: "checkout", ref: "HEAD" }));
+    check("and a checkout over it is refused, as it is in Excel", refused !== null && /unsaved|save/i.test(refused), refused ?? "went through");
+    check("with the edit still in the module", ((await api.readModule("Helpers", BOOK)).text ?? "").includes("hello unsaved"));
+
+    await api.command("save");
+    const clean = await waitFor("the save to clean the project", async () => (await scm()).dirty === false, { budgetMs: 10000 })
+      .then(() => true).catch(() => false);
+    check("the editor's own Save cleans it", clean);
+
+    const second = await scm({ action: "commit", message: "the edit", modules: ["Helpers"], by: "access.mjs" });
+    check("and the edit commits, the database clean",
+      (second.committed ?? []).includes("Helpers") && second.status?.dirty === false, `dirty ${second.status?.dirty}`);
+
+    // Put back through a commit too, which is the save-then-commit path over a dirty project.
+    await api.writeModule("Helpers", helpersText, BOOK, { by: "access.mjs" });
+    const third = await scm({ action: "commit", message: "put back", modules: ["Helpers"], by: "access.mjs" });
+    check("a commit over an unsaved edit saves the database itself first",
+      (third.committed ?? []).includes("Helpers") && third.status?.dirty === false, `dirty ${third.status?.dirty}`);
+    helpersText = null;
+  } finally {
+    await scm({ action: "forget" }).catch(() => {});
+    await wait(500);
+    rmSync(scratch, { recursive: true, force: true });
+  }
 
   const stats = await api.stats();
   check("no COM wrapper was leaked by any of it", stats.comWrappersLive < 100, `${stats.comWrappersLive} live`);

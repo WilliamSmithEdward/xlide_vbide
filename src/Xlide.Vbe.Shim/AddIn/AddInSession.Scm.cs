@@ -494,6 +494,7 @@ internal sealed partial class AddInSession
                 .Select(doc => $"{(doc.Project ?? string.Empty).ToLowerInvariant()}\0{doc.Module.ToLowerInvariant()}"),
             StringComparer.Ordinal);
 
+        var savedHere = false;
         if (action == "commit" && folder.Length > 0 && !unsaved)
         {
             // COMMIT IS SAVE, THEN EXPORT, THEN COMMIT. The annotations go first, as a save's
@@ -511,6 +512,8 @@ internal sealed partial class AddInSession
                     refusal = ScmError($"{display} could not be saved, so nothing was committed");
                     return null;
                 }
+
+                savedHere = true;
             }
             else
             {
@@ -518,7 +521,10 @@ internal sealed partial class AddInSession
             }
         }
 
-        var dirty = WorkbookSaved(display) == false;
+        // Just saved is clean, whatever the flag says this instant: it flips a beat after the
+        // save returns (the toolbar's save re-polls for the same reason), and a commit that had
+        // just saved the workbook answered "dirty" from the old value (Access, 2026-09-09).
+        var dirty = !savedHere && WorkbookSaved(display) == false;
         var inDesignMode = ProjectModeNow() == DesignMode;
 
         // The live modules, read AFTER anything above rewrote them, and after the typing has

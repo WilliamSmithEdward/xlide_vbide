@@ -9742,15 +9742,35 @@ internal sealed partial class AddInSession : IDisposable
     /// Ownership transfers - the caller disposes; exceptions propagate to the callers, whose
     /// recoveries differ on purpose.
     /// </summary>
+    /// <summary>
+    /// The host's collection of open documents, by the name the host gives it: Excel's Workbooks
+    /// and Word's Documents answer the same members - Name, Saved, Save. Access has none: a
+    /// database is not a document, its modules are saved into it by the editor's own Save, and
+    /// the project's own flag says whether they need to be (see <see cref="WorkbookSaved"/>).
+    /// Asking Access for Workbooks threw, the flag read as unknown, and a checkout over an
+    /// unsaved edit went through where Excel would have refused it (2026-09-09).
+    /// </summary>
+    private static string? HostDocumentsProperty => Engine.HostApp.Name switch
+    {
+        "excel" => "Workbooks",
+        "word" => "Documents",
+        _ => null,
+    };
+
     private DispatchObject? FindWorkbookByDisplay(string display)
     {
+        if (HostDocumentsProperty is not { } documents)
+        {
+            return null;
+        }
+
         _hostApp ??= HostApplication.Find();
         if (_hostApp is null)
         {
             return null;
         }
 
-        using var books = _hostApp.GetObject("Workbooks");
+        using var books = _hostApp.GetObject(documents);
         var count = books?.GetInt32("Count") ?? 0;
 
         for (var i = 1; i <= count; i++)
@@ -9778,7 +9798,21 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             using var book = FindWorkbookByDisplay(display);
-            return book?.GetBool("Saved");
+            if (book is not null)
+            {
+                return book.GetBool("Saved");
+            }
+
+            // A host with no document to ask - Access - is asked about the PROJECT instead: the
+            // editor's own flag for whether its modules have been saved since they changed,
+            // which is the question every caller here is asking anyway.
+            if (HostDocumentsProperty is null)
+            {
+                using var project = FindProjectByDisplayName(display);
+                return project?.GetBool("Saved");
+            }
+
+            return null;
         }
         catch (Exception)
         {
@@ -10817,13 +10851,28 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             using var book = FindWorkbookByDisplay(display);
-            if (book is null)
+            if (book is null && HostDocumentsProperty is not null)
             {
-                Log.Warn($"close: {display} is not among the application's workbooks");
+                Log.Warn($"close: {display} is not among the application's documents");
                 return false;
             }
 
-            book.Invoke("Save");
+            if (book is not null)
+            {
+                book.Invoke("Save");
+            }
+            else
+            {
+                // No document to save - Access - so the editor's own Save, which writes the
+                // project's modules into the database, the way Ctrl+S in the editor does.
+                var ran = VbeCommands.Execute(_editor, VbeCommands.Command.Save);
+                if (!ran.Ran)
+                {
+                    Log.Warn($"close: the editor's Save would not run for {display} ({ran.Detail})");
+                    return false;
+                }
+            }
+
             Log.Info($"close: saved {display}");
 
             // A SAVE IS A ROUND BOUNDARY. "When I last saved" is already how a developer thinks
