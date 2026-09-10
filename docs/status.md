@@ -58,14 +58,20 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   its `Application.Run` takes a bare procedure name where Excel wants the file and Word the
   module, and it writes an `Option Compare` line into every module it creates, which collided
   with one the generated runner declared and stopped the whole project compiling
-  ([lessons.md](lessons.md) finding 72). It has a fixture and a live suite in the gate.
+  ([lessons.md](lessons.md) finding 72). A database is no document, so source control's dirty
+  check and save are the project's own Saved flag and the editor's Save there (finding 80). It
+  has a fixture and a live suite in the gate.
 
 - **Source control is git.exe behind the export folder.** A Source Control pane whose rows are
   the project's modules live against the branch head; a commit that is save, then export, then
-  `git commit --only` of the ticked rows; history with Open this version and Restore, a restore
-  landing as a Changes round; blame at the end of every committed line of the active module; a
-  branch select whose change is a checkout followed by an import, refused over a dirty workbook;
-  and Fetch, Pull and Push that answer git's words. The folder is remembered per project as
+  `git commit --only` of the ticked rows, and Undo on the head's row that takes the commit back
+  into the rows and its message into the box; history with Open this version and Restore, a
+  restore landing as a Changes round; blame at the end of every committed line of the active
+  module; a branch select whose pick is a checkout followed by an import, refused over a dirty
+  workbook, ending in New branch... and listing the remote's branches after a fetch; Fetch and
+  Push that answer git's words, and a Pull with a checkout's shape - the merge, then the import
+  into every open project the repository holds, a conflict shown as the conflicted state. The
+  divider between the rows and the comparison drags. The folder is remembered per project as
   `Repository` in sync.json, a field of its own. git is not bundled: Git for Windows installs per
   user, its credential manager is the login story, and a machine without it gets an empty state
   naming the download. One brain with the `scm` route, driven by `scm.mjs` against a fixture of
