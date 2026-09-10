@@ -847,7 +847,10 @@ internal sealed partial class AddInSession
             case "restore":
                 return RestoreWork(g, repo);
 
-            case "fetch" or "pull" or "push":
+            case "pull":
+                return PullWork(g, repo);
+
+            case "fetch" or "push":
             {
                 var primary = GitRemotes.Primary(repo.Remotes.Value);
                 if (primary is null)
@@ -1775,6 +1778,75 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
+    /// Pull has a checkout's shape: refused over a dirty workbook, git, then an import into every
+    /// open project the repository holds. It HAS to import rather than report: the folder a pull
+    /// moves on is what a save's true-up export writes the project's text over, so a pull left
+    /// unimported was undone by the next save and the reversal offered as a commit (found by
+    /// reading, 2026-09-09; the button had promised the import from the start). Divergent
+    /// branches merge (`--no-rebase`), because the conflicted state and Abort are the merge's,
+    /// and git refuses a divergent pull outright until told which; a pull that stops on a
+    /// conflict answers that state rather than an error, which is what the pane draws Abort from.
+    /// </summary>
+    private ScmWork PullWork(ScmGather g, ScmRepo repo)
+    {
+        var primary = GitRemotes.Primary(repo.Remotes.Value);
+        if (primary is null)
+        {
+            return Answer(g, ScmError($"pull needs a remote, and {repo.Root} has none; attach one with the "
+                + "pane's Add remote, or scm?action=remote&url=<url>"), repo.Root);
+        }
+
+        if (g.Dirty)
+        {
+            return Answer(g, ScmError($"{g.Display} has unsaved changes; save it first, because the pull imports what "
+                + "it brings into the project"), repo.Root);
+        }
+
+        var sharing = new List<ScmOpenProject>();
+        foreach (var other in g.Others)
+        {
+            var theirRoot = RootOf(repo.Git, other.Repository);
+            if (theirRoot is null || !SamePath(theirRoot, repo.Root))
+            {
+                continue;
+            }
+
+            if (other.Dirty)
+            {
+                return Answer(g, ScmError($"{other.Display} shares this repository and has unsaved changes; save it first, "
+                    + "because the pull imports what it brings into it too"), repo.Root);
+            }
+
+            sharing.Add(other);
+        }
+
+        var before = ResolveCommit(repo, "HEAD");
+        var ran = repo.Git.RunAsync(repo.Root, ["pull", "--no-rebase"], GitRemoteDeadline).GetAwaiter().GetResult();
+
+        // The merge's words are on stdout - "Fast-forward", "CONFLICT (content)", "Already up to
+        // date" - and the fetch's on stderr, which is what Words prefers; a pull is about the
+        // merge, so its stdout comes first and stderr is the fallback for a fetch that failed.
+        var said = ran.StdOut.Trim().Length > 0 ? ran.StdOut.Trim() : ran.Words;
+        if (!ran.Ok)
+        {
+            var stopped = ReadStatus(g, repo, said);
+            return stopped.Conflicts.Length > 0
+                ? Answer(g, ScmStatusJson(stopped), repo.Root)
+                : Answer(g, ScmError($"pull failed: {ran.Words}"), repo.Root);
+        }
+
+        var words = said.Length > 0 ? said : "pull: nothing to report";
+        if (string.Equals(before, ResolveCommit(repo, "HEAD"), StringComparison.Ordinal))
+        {
+            return Answer(g, ScmStatusJson(ReadStatus(g, repo, words)), repo.Root);
+        }
+
+        var projects = new List<ScmOpenProject> { new(g.ProjectId, g.Display, g.Folder, g.Dirty) };
+        projects.AddRange(sharing);
+        return new ScmWork(g, string.Empty, ScmFollowUp.Checkout, repo.Root, [], projects, [], null, null, null, words);
+    }
+
+    /// <summary>
     /// What `git checkout` is given for the ref the pane or the route named. A local branch, a
     /// commit or a tag goes as it is. A branch only a remote has - named as the select names it,
     /// `origin/feature`, or bare as `feature` when exactly one remote has it - is checked out as
@@ -1981,16 +2053,26 @@ internal sealed partial class AddInSession
             _editorSurface?.FlushEdits();
             var display = DisplayFromProjectId(projectId) ?? projectId;
             Directory.CreateDirectory(folder);
+
+            // Phased, because this runs on the host thread on every save of a project under
+            // source control: the modules through COM, the folder from disk, the plan, the
+            // files written.
+            var laps = new ScmLaps();
             var live = ModuleSyncService.ReadLiveModules(project, _controlDefaults);
-            var plan = ModuleSync.PlanExport(projectId, display, folder, live, ModuleSyncService.ReadFolder(folder), ExportMode.TrueUp);
+            laps.Lap($"read {live.Count} module(s)");
+            var folderFiles = ModuleSyncService.ReadFolder(folder);
+            laps.Lap("folder");
+            var plan = ModuleSync.PlanExport(projectId, display, folder, live, folderFiles, ExportMode.TrueUp);
+            laps.Lap("plan");
             var chosen = new HashSet<string>(plan.Items.Where(item => item.Checked).Select(item => item.Id), StringComparer.Ordinal);
             var applied = ApplySyncHeld(
                 project, plan, chosen,
                 (component, text, owner) => WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true));
+            laps.Lap("apply");
 
             var detail = $"exported {display}: {applied.Changed.Count} written, {applied.Removed.Count} removed, "
                 + $"{applied.Failed.Count} failed";
-            Log.Info($"scm: {detail} in {(long)Stopwatch.GetElapsedTime(began).TotalMilliseconds}ms"
+            Log.Info($"scm: {detail} in {(long)Stopwatch.GetElapsedTime(began).TotalMilliseconds}ms ({laps})"
                 + (applied.Failed.Count > 0 ? $" ({string.Join("; ", applied.Failed)})" : string.Empty));
             _editorSurface?.ShowScmStamp(++_scmStamp);
             return detail;

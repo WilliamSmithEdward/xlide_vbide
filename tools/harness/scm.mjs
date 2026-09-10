@@ -706,6 +706,71 @@ try {
   const pulled = await scm({ action: "pull" });
   check("pull with nothing to pull says so in git's words", /up to date/i.test(pulled.detail ?? ""), true);
 
+  // ---- pull: what the remote has that the folder does not comes into the project -------------
+  //
+  // A pull has to import, not merely report: the folder it moves on is what a save's true-up
+  // export writes the project's text over, so a pull left unimported would be undone by the
+  // next save and the reversal offered as a commit. So it is a checkout's shape - refused over
+  // a dirty workbook, git, then the import - and a conflict is a state the pane draws Abort
+  // from, not an error. The colleague is a clone of the bare remote beside the folder.
+  const clone = `${folder}-clone`;
+  rmSync(clone, { recursive: true, force: true });
+  execFileSync(gitExe, ["clone", "--quiet", "--branch", `elsewhere-${process.pid}`, remote, clone],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const colleague = (...args) => execFileSync(gitExe, ["-C", clone, ...args], { encoding: "utf8" }).trim();
+  colleague("config", "user.name", "Colleague");
+  colleague("config", "user.email", "colleague@example.com");
+  const theirLedger = join(clone, "Ledger.bas");
+  const appendToTheirs = (line) => writeFileSync(
+    theirLedger, `${readFileSync(theirLedger, "utf8").replace(/\r?\n$/, "")}\r\n${line}\r\n`, "utf8");
+  appendToTheirs(`' pulled from a colleague ${process.pid}`);
+  colleague("commit", "-q", "-am", "a colleague's change");
+  colleague("push", "-q", "origin", `elsewhere-${process.pid}`);
+
+  await write("Reports", `${await held("Reports")}\r\n' dirty before the pull`, "developer");
+  const pullRefused = await scm({ action: "pull" }).then(() => "(answered)").catch((error) => error.message);
+  check("a pull over a dirty workbook is refused, because it imports", /unsaved|save/i.test(pullRefused), true);
+  await api.command("save");
+  await waitFor("the save to land", async () => (await scm()).dirty === false, { budgetMs: 30000 });
+
+  const brought = await scm({ action: "pull" });
+  check("a pull brings the colleague's commit and imports it into the project",
+    (await held("Ledger")).includes(`' pulled from a colleague ${process.pid}`), true);
+  check("so Ledger is clean against the head and the Folder section is empty",
+    [rowsOf(brought).filter((row) => row.startsWith("Ledger")), (brought.outside ?? []).length], [[], 0]);
+  check("and the detail says what was imported", /imported 1 into/.test(brought.detail ?? ""), true);
+  check("while the branch is level with the upstream again", [brought.ahead, brought.behind], [0, 0]);
+
+  // A conflict: the colleague and the developer change the same place. The pull stops, the
+  // status says conflicted and names the file, and Abort leaves the merge with the local
+  // commit standing.
+  appendToTheirs(`' the colleague again ${process.pid}`);
+  colleague("commit", "-q", "-am", "the colleague again");
+  colleague("push", "-q", "origin", `elsewhere-${process.pid}`);
+  await write("Ledger", `${await held("Ledger")}\r\n' mine, in the same place ${process.pid}`, "developer");
+  await scm({ action: "commit", message: "mine", modules: ["Ledger"], by: "scm.mjs" });
+  const conflicted = await scm({ action: "pull" });
+  check("a pull that conflicts answers the conflicted state rather than an error", conflicted.state, "conflicted");
+  check("naming the file", conflicted.conflicts, ["Ledger.bas"]);
+  check("in git's own words", /CONFLICT/.test(conflicted.detail ?? ""), true);
+  await paneIdle();
+  await api.act("scmPane", { press: "refresh" });
+  const drawnConflict = await waitFor("the pane to draw the conflicted state", async () => {
+    const pane = await paneShown();
+    return pane && pane.busy === false && pane.state === "conflicted" ? pane : false;
+  }, { budgetMs: 20000 });
+  check("and the pane draws it, with the file", drawnConflict.conflicts, ["Ledger.bas"]);
+  const abortPressed = await api.act("scmPane", { press: "abort" });
+  check("Abort presses", abortPressed.did, true);
+  const abandoned = await waitFor("the merge to be abandoned", async () => {
+    const now = await scm();
+    return now.state === "ready" ? now : false;
+  }, { budgetMs: 20000 });
+  check("and leaves the repository ready, the local commit standing",
+    [abandoned.state, git("log", "-1", "--format=%s")], ["ready", "mine"]);
+  check("with the module as the developer left it",
+    (await held("Ledger")).includes(`' mine, in the same place ${process.pid}`), true);
+
   // Then a remote that cannot answer, so the failure is git's own words at once rather than a
   // hang on a hidden prompt. With no remote at all the route refuses before git runs, which
   // proves nothing about the prompt; and git itself, asked to fetch with no remote, prints
@@ -799,7 +864,7 @@ try {
   }
 
   // GUARDED like every step above it: a throw here would take the verdict with it.
-  for (const gone of [folder, remote]) {
+  for (const gone of [folder, remote, `${folder}-clone`]) {
     const trouble = await removeWhenFree(gone);
     if (trouble !== null) {
       console.log(`     WARNING: ${gone} was left behind (${trouble})`);

@@ -2308,3 +2308,27 @@ and an import's is the merge state and the Folder section, which runs no
 git at all. And the repository watcher named HEAD and refs/ but not
 packed-refs, where `git gc` and a busy fetch put branches, so a branch moved
 that way was a checkout the pane never heard about.
+
+## 79. A pull that only reported was undone by the next save
+
+Found by reading, while looking for something else. The Pull button's title
+said "git pull, then import what changed", and the route ran git and
+reported. The pulled changes sat in the folder as Folder rows, waiting for
+Import. Nothing wrong yet - until the developer saved: a save under source
+control exports the project in true-up mode, which wrote the project's older
+text over the files the pull had just updated. The working tree then differed
+from the new head by exactly the reversal of the colleague's change, and the
+pane offered that reversal as a commit. The three copies rule - the editor
+never behind the workbook, the workbook never behind the repository - had
+been broken from the repository's side, and the export enforces the rule
+from the other side without asking which side moved.
+
+Pull is a checkout's shape now: refused while the workbook is dirty, git,
+then the import into every open project in the repository, the follow-up a
+checkout already had. Two more things from making it so. `git pull` on
+divergent branches refuses outright until told how to reconcile, since git
+2.27; the product merges (`--no-rebase`), because the conflicted state and
+Abort are the merge's. And a pull that stops on a conflict used to answer an
+error with git's words in it; it answers the conflicted status now, which is
+what the pane draws Abort from. The suite has a colleague: a clone of its
+bare remote that commits and pushes, once to be pulled and once to conflict.

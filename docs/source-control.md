@@ -37,7 +37,11 @@ while the workbook is dirty, the way git refuses a checkout over uncommitted wor
 New branch..., asks for a name and cuts one from the head, staying on the same commit, so nothing
 is imported and a dirty workbook is no bar. After a fetch, the branches only a remote has are
 listed under the remote's name; picking one checks it out as a local branch of that name tracking
-it. Fetch, Pull and Push are buttons that run git and report what it said.
+it. Fetch and Push are buttons that run git and report what it said. Pull is a checkout's shape:
+refused while the workbook is dirty, then git, then an import of what it brought into every open
+project in the repository - it has to import, because a save's true-up export writes the project's
+text over the folder, and a pull left unimported would be undone by the next save. A pull that
+stops on a conflict is the conflicted state, with Abort.
 
 The branch head's row in the history carries Undo, the pane's amend: the branch goes back one
 commit, the commit's changes return to the rows, and its message returns to the box to be edited
@@ -192,7 +196,8 @@ project. `by=` attributes writes, as everywhere.
 | `restore` | `module=`, `ref=` | ScmRestoreReply |
 | `blame` | `module=` | ScmBlameReply |
 | `checkout` | `ref=`: a local branch, a commit, or a remote's branch as `origin/name` (bare `name` when one remote has it), checked out as a local branch tracking it | the status, after checkout and import |
-| `fetch`, `pull`, `push` | | the status, with git's words in `detail` |
+| `fetch`, `push` | | the status, with git's words in `detail` |
+| `pull` | | the status after `git pull --no-rebase` and the import it brings; refused over a dirty workbook like `checkout`; a conflict answers the `conflicted` status rather than an error |
 | `abort` | | the status, after `git merge --abort` |
 
 ### Replies
@@ -314,6 +319,13 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   on Enter or on the select losing focus, and Escape puts it back. A ref, name, email, URL or
   remote beginning with a dash is refused before git could read it as an option, and an undone
   commit's open comparison and unfolded state go with it.
+- **Pull imports what it brings** (the same day, [lessons.md](lessons.md) finding 79). It ran
+  git and reported, and the button had promised the import from the start; a pull left
+  unimported was undone by the next save's true-up export and the reversal offered as a commit.
+  It refuses over a dirty workbook the way a checkout does, merges divergent branches
+  (`--no-rebase`, since git otherwise refuses a divergent pull until told how), and answers a
+  conflict as the conflicted state. The suite pulls a colleague's commit from a clone of its
+  bare remote, and a conflicting one.
 - **The rows compare without copying** (the same day, [lessons.md](lessons.md) finding 77).
   Each status compared every module with the branch head and with its file by building four
   normalised copies of each text; `ModuleSync.SameCode` walks both texts in place instead. An
