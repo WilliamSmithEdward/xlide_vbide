@@ -39,8 +39,9 @@ internal static partial class FormDesignService
         {
             using var collection = component.GetObject("Collection");
             using var project = collection?.GetObject("Parent");
-            var path = project?.GetString("FileName");
-            return string.IsNullOrWhiteSpace(path) ? null : path;
+            // Through the one reader every caller shares: Word names a saved project's file by
+            // its save-time temp, which is no baseline to read a form's design from.
+            return project is null ? null : Engine.ProjectReader.FileNameOf(project);
         }
         catch
         {

@@ -13,7 +13,8 @@
     ATTACHED THROUGH ITS WINDOW, not the running object table. A host publishes itself in the ROT
     lazily - ten to forty seconds after it is visibly ready. Asking the document pane (class
     `_WwG`) for its native object model answers in under a second and names the instance by
-    window, so there is no chance of adopting a different one.
+    window, so there is no chance of adopting a different one. That call lives in WordAttach.psm1,
+    shared with the fixture generator.
 
     THE EDITOR IS WHAT LOADS THE ADD-IN, not the host. ExecuteMso('VisualBasic') is Word running
     its own Developer > Visual Basic button - the same idMso as Excel's - and is not gated by
@@ -24,7 +25,7 @@
     Starts on the scratch document (created on first use).
 
 .EXAMPLE
-    tools\harness\Start-Word.ps1 -Document artifacts\fixtures\Something.docm -Fresh
+    tools\harness\Start-Word.ps1 -Document artifacts\fixtures\WordFixture.docm -Fresh
 #>
 [CmdletBinding()]
 param(
@@ -33,11 +34,20 @@ param(
 
     # Close the Words this harness started first - the ones holding a fixture or chaos document -
     # each by its own id. Word only, and every other Word stays, whoever started it: a stop by
-    # name ended other automations' hosts mid-statement (#24).
+    # name ended other automations' hosts mid-statement (#24). When one stays, the fixture starts
+    # in a process of its own.
     [switch] $Fresh,
 
     # Close EVERY Word the census saw, strangers included, each by id.
     [switch] $Force,
+
+    # Start a SEPARATE Word process rather than letting Word hand the document to the one already
+    # running. Word, like Excel, gives a document on its command line to a running instance, and
+    # the door would then be in a process this harness never started - the developer's own Word,
+    # with their own document open beside the fixture. `/w` is Word's own switch for a new
+    # instance, and it takes a document (measured 2026-09-10: the second document opened in a
+    # process of its own, titled with its own name, while the first Word stood).
+    [switch] $Separate,
 
     # Seconds to wait for the host's window to appear.
     [int] $TimeoutSeconds = 90
@@ -48,47 +58,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-Add-Type -Namespace XlideHarness -Name AttachWord -MemberDefinition @'
-[DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
-[DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
-[DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
-[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
-[DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IDispatch)] out object o);
-
-delegate bool EnumProc(IntPtr h, IntPtr l);
-
-// OBJID_NATIVEOM. Asking Word's document pane for its native object model yields the document
-// Window, and its Application, without going through the running object table.
-const uint NativeObjectModel = 0xFFFFFFF0u;
-
-public static object DocumentWindowOf(int processId)
-{
-    IntPtr pane = IntPtr.Zero;
-
-    EnumWindows((h, l) =>
-    {
-        int owner;
-        GetWindowThreadProcessId(h, out owner);
-        if (owner != processId) { return true; }
-
-        EnumChildWindows(h, (child, l2) =>
-        {
-            var name = new System.Text.StringBuilder(128);
-            GetClassNameW(child, name, 128);
-            if (name.ToString() == "_WwG") { pane = child; return false; }
-            return true;
-        }, IntPtr.Zero);
-
-        return pane == IntPtr.Zero;
-    }, IntPtr.Zero);
-
-    if (pane == IntPtr.Zero) { return null; }
-
-    var dispatch = new Guid("00020400-0000-0000-C000-000000000046");
-    object window;
-    return AccessibleObjectFromWindow(pane, NativeObjectModel, ref dispatch, out window) == 0 ? window : null;
-}
-'@
+Import-Module (Join-Path $PSScriptRoot 'WordAttach.psm1') -Force
 
 function Find-WordExecutable {
     $candidates = @(
@@ -113,12 +83,14 @@ if (-not $Document -or $Document.Count -eq 0) {
         Write-Host 'Making the scratch document.'
         $maker = New-Object -ComObject Word.Application
         $maker.DisplayAlerts = 0
+        $blank = $null
         try {
             $blank = $maker.Documents.Add()
             $blank.SaveAs2($scratch, 13)  # wdFormatXMLDocumentMacroEnabled
             $blank.Close($false)
         }
         finally {
+            if ($null -ne $blank) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($blank) | Out-Null }
             try { $maker.Quit() } catch { }
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($maker) | Out-Null
         }
@@ -150,14 +122,10 @@ if ($Fresh) {
     $ours = @()
     $theirs = @()
     foreach ($running in @(Get-Process WINWORD -ErrorAction SilentlyContinue)) {
-        $held = $null
-        try {
-            $itsWindow = [XlideHarness.AttachWord]::DocumentWindowOf($running.Id)
-            if ($null -ne $itsWindow) {
-                $held = @($itsWindow.Application.Documents | ForEach-Object { $_.FullName })
-            }
-        }
-        catch { $held = $null }
+        # Every wrapper the read takes is given back inside the module, while the process can
+        # still answer the release; a wrapper finalised after a kill makes DCOM start a fresh
+        # hidden host to answer it (2026-09-08).
+        $held = Get-WordDocumentPaths -ProcessId $running.Id
 
         if ($null -eq $held) {
             $theirs += "pid $($running.Id) (no document window this harness can read)"
@@ -170,6 +138,11 @@ if ($Fresh) {
             $theirs += "pid $($running.Id) ($what)"
         }
     }
+
+    # The collector runs NOW, with every Word still alive: a wrapper missed above is released
+    # while its server can still answer, rather than after the stop below.
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
 
     $stopping = @(if ($Force) { Get-Process WINWORD -ErrorAction SilentlyContinue | ForEach-Object { $_.Id } } else { $ours })
     foreach ($id in $stopping) {
@@ -185,10 +158,23 @@ if ($Fresh) {
     }
 
     if (-not $Force -and $theirs.Count -gt 0) {
-        # Word hands a document on its command line to an instance already running, so the
-        # launch below may not reach a window of its own while one of these stands.
         Write-Host ("Left standing, not this harness's to close:" + [Environment]::NewLine + '  ' +
             ($theirs -join ([Environment]::NewLine + '  ')))
+        # SEPARATE, or the fixture opens inside theirs: Word hands a document on its command line
+        # to an instance already running, and the door would then be in a process this harness
+        # never started.
+        $Separate = $true
+    }
+
+    # A killed Word leaves its owner file beside the document - `~$` and the name less its first
+    # letter or two - and the next open then reads as locked by another user, which makes the
+    # document read-only and every save in a suite a refusal. Stale by construction here: a Word
+    # holding one of these documents was this harness's and has just been closed.
+    foreach ($one in $Document) {
+        $leaf = Split-Path -Leaf $one
+        Get-ChildItem (Split-Path -Parent $one) -Filter '~$*.docm' -Force -ErrorAction SilentlyContinue |
+            Where-Object { $leaf.EndsWith($_.Name.Substring(2), [StringComparison]::OrdinalIgnoreCase) } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -202,16 +188,14 @@ foreach ($version in @('16.0', '15.0')) {
 
 # Quoted individually: a fixture path with a space in it becomes two arguments otherwise.
 $arguments = @($Document | ForEach-Object { '"{0}"' -f $_ })
-$process = Start-Process -FilePath (Find-WordExecutable) -ArgumentList $arguments -PassThru
+if ($Separate) { $arguments = @('/w') + $arguments }
 $names = ($Document | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
-Write-Host "Started Word as process $($process.Id) on $names."
+$apart = if ($Separate) { ', in a process of its own' } else { '' }
 
-$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-$window = $null
-while ($null -eq $window -and (Get-Date) -lt $deadline) {
-    $window = [XlideHarness.AttachWord]::DocumentWindowOf($process.Id)
-    if ($null -eq $window) { Start-Sleep -Milliseconds 50 }
-}
+$process = Start-Process -FilePath (Find-WordExecutable) -ArgumentList $arguments -PassThru
+Write-Host "Started Word as process $($process.Id) on $names$apart."
+
+$window = Get-WordDocumentWindow -ProcessId $process.Id -TimeoutSeconds $TimeoutSeconds
 if ($null -eq $window) { throw "Could not reach Word $($process.Id) through its window." }
 
 $word = $window.Application
@@ -220,8 +204,22 @@ $word.DisplayAlerts = 0
 # The editor is opened through Word's OWN ribbon command, not through $word.VBE, for exactly
 # Start-Excel.ps1's reason: Application.VBE is what the trust setting refuses, and ExecuteMso
 # is the host pressing its own button.
-$word.CommandBars.ExecuteMso('VisualBasic')
+$commandBars = $word.CommandBars
+$commandBars.ExecuteMso('VisualBasic')
 Write-Host 'Editor opened (through the ribbon command, which needs no VBA project trust).'
+
+# GIVEN BACK NOW, not left for the collector. The fixture generator runs this script in its own
+# process and stops the very Word it attached to when it is done; a wrapper finalised after that
+# kill makes DCOM start a fresh hidden Word to answer the release (2026-09-08). Everything after
+# this line talks to the door over HTTP and needs none of these.
+foreach ($wrapper in @($commandBars, $word, $window)) {
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wrapper) | Out-Null } catch { }
+}
+$commandBars = $null
+$word = $null
+$window = $null
+[GC]::Collect()
+[GC]::WaitForPendingFinalizers()
 
 # The doctor, BY PID: another live session - an Excel fixture beside this Word - is a designed
 # state, and the bare verb refuses to guess between instances.

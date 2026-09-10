@@ -60,7 +60,10 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   with one the generated runner declared and stopped the whole project compiling
   ([lessons.md](lessons.md) finding 72). A database is no document, so source control's dirty
   check and save are the project's own Saved flag and the editor's Save there (finding 80). It
-  has a fixture and a live suite in the gate.
+  has a fixture and a live suite in the gate, and so does Word now, which had a launcher and
+  nothing to open with it: its first fixture found that a Word project names Word's save-time
+  temp file as its own after every save, and every reader of a project's file goes through one
+  resolver for it (finding 81).
 
 - **Source control is git.exe behind the export folder.** A Source Control pane whose rows are
   the project's modules live against the branch head; a commit that is save, then export, then
@@ -140,13 +143,17 @@ and its host-supplied facts, knowledge routes, inline comment features, generate
 the headless page probes, the xlide api's route audit, the Release build, the unit tests, the
 check that Release ships the api shut, and the native publish. `-Live` adds four steps that need
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
-release rather than before a commit. All 27 take about eight and a half minutes.
+release rather than before a commit. All 27 take about eleven minutes, the Word and Access
+groups included.
 
 **The live tier is not all Excel any more.** Its first group opens an Access database
 (`tools\New-AccessFixture.ps1`) and runs `access.mjs` against it, because for a year every suite
 ran in Excel and the places this product asks which host it is in were only ever answered one
 way - which is how the test runner came to have never once run a test in Access
-([lessons.md](lessons.md) finding 72). Word has a launcher of its own and no group yet.
+([lessons.md](lessons.md) finding 72). Its second opens a Word document
+(`tools\New-WordFixture.ps1`) and runs `word.mjs`, which is where Word turned out to rename its
+project after every save (finding 81). Both close the session they opened, so the Excel groups
+after them find only Excel.
 
 Counts move, so they are given as of this line rather than as standing facts: 641 unit tests,
 68 api routes of which 66 are driven by one of the 70 suites the gate runs, 2 left out on

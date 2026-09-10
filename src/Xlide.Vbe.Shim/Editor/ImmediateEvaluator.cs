@@ -353,16 +353,11 @@ internal sealed partial class ImmediateEvaluator
     /// </summary>
     private static string? SafeFileName(DispatchObject? project)
     {
-        try
-        {
-            var full = project?.GetString("FileName");
-            return string.IsNullOrEmpty(full) ? null : Path.GetFileName(full);
-        }
-        catch (Exception)
-        {
-            // An unsaved project throws rather than answering empty. The unqualified name stands.
-            return null;
-        }
+        // Through the one reader every caller shares, which answers null for an unsaved project
+        // rather than throwing, and the document's own name for a Word project that names its
+        // save-time temp. The unqualified name stands on null.
+        var full = project is null ? null : Engine.ProjectReader.FileNameOf(project);
+        return string.IsNullOrEmpty(full) ? null : Path.GetFileName(full);
     }
 
     private static string Compose(string body, bool wantsValue)

@@ -585,7 +585,43 @@ if ($Live) {
         return $access
     }
 
+    # The Word document a group asks for, opened the way its own launcher opens one. THE PID THE
+    # LAUNCHER PRINTS, never the first WINWORD in the process list: that may be the developer's
+    # own Word with their own document up, and in that state the launcher gives the fixture a
+    # process of its own (`/w`), so the census is the only thing that knows which one is the
+    # gate's.
+    function Use-WordFixture([string] $fixture) {
+        $document = Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())
+        $said = @(& (Join-Path $repoRoot 'tools\harness\Start-Word.ps1') -Document $document -Fresh *>&1)
+        $said | Out-Host
+        $started = $said | ForEach-Object { "$_" } | Select-String 'pid=(\d+)' | Select-Object -Last 1
+        $word = if ($started) { Get-Process -Id ([int]$started.Matches[0].Groups[1].Value) -ErrorAction SilentlyContinue }
+        if (-not $word) { throw "Word did not start on $fixture" }
+
+        return $word
+    }
+
     function Invoke-SuiteGroup([string] $fixture, [string[]] $suites, [string] $hostName = 'excel') {
+        if ($hostName -eq 'word') {
+            # CLOSED WHEN THE GROUP ENDS, like the Access group and for the same reason: nothing
+            # later in this plan closes a Word, and a session left running would still be
+            # answering when a later step connects without naming a pid. Its owner file goes
+            # with it, or the next open of the document reads as locked by another user.
+            $word = Use-WordFixture $fixture
+            try {
+                return Invoke-Aimed $word.Id { Invoke-SuiteList $suites }
+            }
+            finally {
+                Stop-Process -Id $word.Id -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+                $document = Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())
+                $leaf = Split-Path -Leaf $document
+                Get-ChildItem (Split-Path -Parent $document) -Filter '~$*.docm' -Force -ErrorAction SilentlyContinue |
+                    Where-Object { $leaf.EndsWith($_.Name.Substring(2), [StringComparison]::OrdinalIgnoreCase) } |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+        }
+
         if ($hostName -eq 'access') {
             # CLOSED WHEN THE GROUP ENDS, unlike the Excel groups, whose next -Fresh launch closes
             # the last one. Nothing later in this plan closes an Access, so a session left running
@@ -681,22 +717,31 @@ if ($Live) {
         # exercised by it alone; the palette probe is the only live coverage the Object Browser
         # has - its summons, real-data panes, member navigation, and the native browser staying
         # retired (both triaged 2026-08-12).
-        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1', 'objbrowser-live-probe.mjs', 'Test-ResizeFollow.ps1') {
-            $answer = if ($probe.EndsWith('.mjs')) {
-                node (Join-Path $repoRoot "tools\harness\$probe") 2>&1
-            } else {
-                powershell -NoProfile -ExecutionPolicy Bypass `
-                    -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
-            }
-            $answer | Out-Host
-            $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
-            if ("$verdict" -notmatch 'PASS') {
-                # Name the checks, not just the file. A summary that says only "did not pass"
-                # sends the reader back through the scrollback for the one line that matters,
-                # and at the end of a run that line has usually scrolled away (2026-08-06).
-                $broken = @($answer | Select-String '\s+FAIL' | ForEach-Object { $_.Line.Trim() })
-                $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
-                throw "$probe did not pass$named"
+        # AIMED, like every other live step: these probes connect bare, and a bare connection
+        # refuses to guess between two live sessions. Every Excel of the harness's is closed by
+        # the launch above, but a Word or an Access with the editor open - the developer's own,
+        # or a fixture session left standing by a builder - is a second door, and the step failed
+        # on "several xlide sessions are live" with nothing wrong in any of them (2026-09-10, a
+        # Word fixture session beside the gate's Excel). XLIDE_PID reaches the PowerShell probes
+        # through the child process's environment and the node probe through its own client.
+        Invoke-Aimed $excel.Id {
+            foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1', 'objbrowser-live-probe.mjs', 'Test-ResizeFollow.ps1') {
+                $answer = if ($probe.EndsWith('.mjs')) {
+                    node (Join-Path $repoRoot "tools\harness\$probe") 2>&1
+                } else {
+                    powershell -NoProfile -ExecutionPolicy Bypass `
+                        -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
+                }
+                $answer | Out-Host
+                $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
+                if ("$verdict" -notmatch 'PASS') {
+                    # Name the checks, not just the file. A summary that says only "did not pass"
+                    # sends the reader back through the scrollback for the one line that matters,
+                    # and at the end of a run that line has usually scrolled away (2026-08-06).
+                    $broken = @($answer | Select-String '\s+FAIL' | ForEach-Object { $_.Line.Trim() })
+                    $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
+                    throw "$probe did not pass$named"
+                }
             }
         }
         'xlide api, split workspace, churn'
@@ -743,6 +788,15 @@ if ($Live) {
             # Excel ones is how four steps once reported "several instances are live" with nothing
             # wrong in any of them (2026-09-05).
             @{ Fixture = 'AccessFixture.accdb'; Host = 'access'; Suites = @('access.mjs') }
+
+            # WORD RUNS SECOND, AND ALONE, for Access's reasons and one of its own: Word's Normal
+            # template is a project in every session, so this is the one group in which the
+            # editor holds two projects for one file - and the one place a write aimed at "the
+            # active project" could land in the developer's own template. Its document is built
+            # by tools\New-WordFixture.ps1; its launcher closes only the Words this harness
+            # started and gives the fixture a process of its own beside anyone else's Word; the
+            # group closes the session it opened (2026-09-10).
+            @{ Fixture = 'WordFixture.docm'; Host = 'word'; Suites = @('word.mjs') }
 
             # module-sync writes into a temporary folder of its own and takes back every module it
             # adds. Its last section is the one worth having: it applies the same import through

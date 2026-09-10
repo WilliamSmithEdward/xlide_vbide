@@ -2,6 +2,7 @@ using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Vba;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Interop;
 
 namespace Xlide.Vbe.Shim.Engine;
 
@@ -102,16 +103,9 @@ internal static class ProjectReader
     {
         var name = project.GetString("Name") ?? "VBAProject";
 
-        try
+        if (FileNameOf(project) is { } fileName)
         {
-            if (project.GetString("FileName") is { Length: > 0 } fileName)
-            {
-                return (fileName.ToLowerInvariant(), Path.GetFileName(fileName));
-            }
-        }
-        catch (Exception)
-        {
-            // Unsaved: the property raises rather than answering empty.
+            return (fileName.ToLowerInvariant(), Path.GetFileName(fileName));
         }
 
         // Unsaved. The name alone is not an identity, so it is qualified by the object's own.
@@ -119,6 +113,137 @@ internal static class ProjectReader
         return identity == 0
             ? (name, name)
             : ($"{name.ToLowerInvariant()}#{identity:x}", name);
+    }
+
+    /// <summary>
+    /// The last real file name each project answered, by the project's COM identity, so that
+    /// Word's temp name after a save can be answered with the name it stands for. Host thread
+    /// only, like everything else here. A project whose file is renamed for real - a Save As -
+    /// answers the new name itself and overwrites its entry.
+    /// </summary>
+    private static readonly Dictionary<nint, string> RealNames = new();
+
+    /// <summary>
+    /// The document a project was saved as, or null when it never was.
+    ///
+    /// ONE READER FOR EVERY CALLER, because Word answers this wrong after a save. Word saves a
+    /// document by writing the new bytes beside it, renaming the original to `~WRLnnnn.tmp`,
+    /// renaming the new file into place and deleting the temp - and the project's FileName
+    /// follows the RENAME of the original, so after every save it names a temp file that no
+    /// longer exists, and a different one after the next save (~WRL0001.tmp, then ~WRL0003.tmp,
+    /// measured 2026-09-10, lessons.md finding 81). Read raw, that renamed the tree's project
+    /// after every save, restarted the analysis under a new path, forgot the source control
+    /// folder, and made the document unaddressable by its own name.
+    ///
+    /// So the last real name a project answered is remembered against its COM identity, and a
+    /// temp name answers with it. A project saved before it was ever read - a save between the
+    /// editor opening and the first walk - has no memory to fall back on and is resolved through
+    /// the host's Documents: Word writes the temp beside the document, so the one document in
+    /// that folder is the one. Two documents in one folder and no memory is the case that stays
+    /// wrong, and it stays wrong the way it always was.
+    /// </summary>
+    public static string? FileNameOf(DispatchObject project)
+    {
+        string? fileName;
+        try
+        {
+            fileName = project.GetString("FileName");
+        }
+        catch (Exception)
+        {
+            // Unsaved: the property raises rather than answering empty.
+            return null;
+        }
+
+        if (fileName is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        if (HostApp.Name != "word")
+        {
+            return fileName;
+        }
+
+        var identity = ComIdentityOf(project);
+        if (!WordSaveTemp.Matches(fileName))
+        {
+            if (identity != 0)
+            {
+                RealNames[identity] = fileName;
+            }
+
+            return fileName;
+        }
+
+        if (identity != 0 && RealNames.TryGetValue(identity, out var remembered))
+        {
+            return remembered;
+        }
+
+        var beside = WordDocumentBeside(fileName);
+        if (beside is null)
+        {
+            Log.Warn($"project: Word names its project's file {Path.GetFileName(fileName)}, its save-time temp, "
+                + "and no document of the host's sits alone beside it; the temp name stands");
+            return fileName;
+        }
+
+        Log.Info($"project: Word names its project's file {Path.GetFileName(fileName)}, its save-time temp; "
+            + $"resolved to {Path.GetFileName(beside)}, the one document beside it");
+        if (identity != 0)
+        {
+            RealNames[identity] = beside;
+        }
+
+        return beside;
+    }
+
+    /// <summary>
+    /// The one open document in the folder Word's temp sits in, through the host's own Documents
+    /// collection - or null when there is none, or more than one, or the host cannot be reached.
+    /// </summary>
+    private static string? WordDocumentBeside(string tempPath)
+    {
+        var folder = Path.GetDirectoryName(tempPath);
+        if (string.IsNullOrEmpty(folder))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var host = HostApplication.Find();
+            using var documents = host?.GetObject("Documents");
+            var count = documents?.GetInt32("Count") ?? 0;
+
+            string? found = null;
+            for (var i = 1; i <= count; i++)
+            {
+                using var document = documents!.GetItem(i);
+                var full = document?.GetString("FullName");
+                if (full is null
+                    || !string.Equals(Path.GetDirectoryName(full), folder, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (found is not null)
+                {
+                    // Two beside it is a guess, and a guess here renames somebody's project.
+                    return null;
+                }
+
+                found = full;
+            }
+
+            return found;
+        }
+        catch (Exception)
+        {
+            // The host would not answer; the temp name stands until the next read.
+            return null;
+        }
     }
 
     /// <summary>
@@ -223,18 +348,7 @@ internal static class ProjectReader
     /// Not <see cref="Identity"/>'s id, which is lowercased for comparison and falls back to a
     /// name plus a COM pointer when there is no file. This wants the real path or nothing.
     /// </summary>
-    public static string? SavedPathOf(DispatchObject project)
-    {
-        try
-        {
-            return project.GetString("FileName") is { Length: > 0 } fileName ? fileName : null;
-        }
-        catch (Exception)
-        {
-            // Unsaved: the property raises rather than answering empty.
-            return null;
-        }
-    }
+    public static string? SavedPathOf(DispatchObject project) => FileNameOf(project);
 
     /// <summary>
     /// The canonical IUnknown pointer for an object, which is COM's own definition of identity:

@@ -148,6 +148,21 @@ Access keeps one database per process, so there is no joining several on a comma
 alone among the hosts, does not write a module created through the object model into the file
 when the file is saved, so a session closed without that leaves the modules behind.
 
+```powershell
+tools\harness\Start-Word.ps1 -Document artifacts\fixtures\WordFixture.docm -Fresh
+node tools\harness\word.mjs
+```
+
+Word's document is built by `tools\New-WordFixture.ps1`, through the door like the others, and it
+names the document on every write: Word's Normal template is a VBA project in every session, so
+the editor holds two projects for one document and "the active project" is a real question there.
+The launcher's `-Fresh` closes only the Words this harness started, and when somebody else's Word
+is up the fixture opens in a process of its own (`/w`, or `-Separate`), so the door is in the
+process whose pid the launcher printed. The fixture is also where Word turned out to rename its
+project after every save - the project's `FileName` names Word's `~WRLnnnn.tmp` - which every
+reader of a project's file now goes through one resolver for ([lessons.md](lessons.md) finding
+81).
+
 ### The door must be found
 
 Each session writes `%LOCALAPPDATA%\xlide_vbide\xlide-api-<pid>.json` with its port, token and
@@ -2566,7 +2581,7 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
 | The xlide api | **no** | The door runs inside the add-in's own process and calls the same objects |
 | `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` - Excel running its own ribbon button - not through `$excel.VBE` |
-| `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG`, same ribbon command, scratch.docm by default - Word testing without a hand on the mouse |
+| `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG` (shared with the fixture generator through `WordAttach.psm1`), same ribbon command, scratch.docm by default; `-Fresh` closes only this harness's Words and `-Separate` (`/w`) gives the fixture a process of its own beside anyone else's Word (2026-09-10) |
 | Building a fixture | **no** | `api.component()` adds, renames and removes from inside |
 | Reading a module back | **no** | `api.readModule()` reads the real object model, from inside |
 | Running a procedure | **no** | `Application.Run` is not gated (measured) |

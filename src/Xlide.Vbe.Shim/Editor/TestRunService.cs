@@ -964,15 +964,11 @@ internal static partial class TestRunService
 
     private static string? SafeFileName(DispatchObject? project)
     {
-        try
-        {
-            var full = project?.GetString("FileName");
-            return string.IsNullOrEmpty(full) ? null : Path.GetFileName(full);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
+        // Through the one reader every caller shares, which answers null for an unsaved project
+        // rather than throwing, and the document's own name for a Word project that names its
+        // save-time temp.
+        var full = project is null ? null : Engine.ProjectReader.FileNameOf(project);
+        return string.IsNullOrEmpty(full) ? null : Path.GetFileName(full);
     }
 
     /// <summary>True when the project has left design mode - a test left something running.</summary>

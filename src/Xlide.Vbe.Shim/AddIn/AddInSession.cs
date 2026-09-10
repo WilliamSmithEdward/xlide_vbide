@@ -10083,16 +10083,11 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private static string WorkbookDisplayName(DispatchObject project)
     {
-        try
+        // Through the one reader every caller shares: Word names a saved project's file by its
+        // save-time temp, and a display read raw would match nothing after the first save.
+        if (ProjectReader.FileNameOf(project) is { } fileName)
         {
-            if (project.GetString("FileName") is { Length: > 0 } fileName)
-            {
-                return Path.GetFileName(fileName);
-            }
-        }
-        catch (Exception)
-        {
-            // Unsaved: the property raises rather than answering empty.
+            return Path.GetFileName(fileName);
         }
 
         // A workbook never saved still has a name - the one the host gave it. "Book1" is what

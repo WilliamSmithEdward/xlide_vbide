@@ -187,9 +187,10 @@ tools\verify.ps1 -Deep             # four more; the tier to run before a release
 
 The live tiers drive real hosts against fixtures in `artifacts\fixtures`, which are build output
 rather than checked in. Each has a generator in `tools` - `New-TestFixture.ps1`,
-`New-AccessFixture.ps1` and the rest - and they need a **Debug** build registered first, because
-they are built through the local api door rather than through the VBA project object model, which
-means "Trust access to the VBA project object model" does not have to be on.
+`New-AccessFixture.ps1`, `New-WordFixture.ps1` and the rest - and they need a **Debug** build
+registered first, because they are built through the local api door rather than through the VBA
+project object model, which means "Trust access to the VBA project object model" does not have
+to be on.
 
 ### The installer
 

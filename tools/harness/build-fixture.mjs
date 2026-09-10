@@ -8,9 +8,10 @@
  *
  *   node build-fixture.mjs <plan.json>
  *
- * The plan is JSON - { modules: [{ name, kind, code }], sheetCode, openAtEnd } - because module
- * text is full of quotes, doubled quotes and CRLFs, and a file crosses once where a command line
- * would be escaped through two shells.
+ * The plan is JSON - { project, modules: [{ name, kind, code }], sheetCode, openAtEnd } - because
+ * module text is full of quotes, doubled quotes and CRLFs, and a file crosses once where a command
+ * line would be escaped through two shells. `project` names the file the components go into and
+ * may be left out where the host holds one project; Word holds two by construction (below).
  */
 
 import { readFileSync } from "node:fs";
@@ -27,6 +28,13 @@ if (!planPath) {
 // character that does not appear to be there.
 const plan = JSON.parse(readFileSync(planPath, "utf8").replace(/^﻿/, ""));
 const api = await open({});
+
+// THE FILE THE COMPONENTS GO INTO, when the host holds more than one project. Word keeps its
+// Normal template open beside every document, and "the active project" is whichever one the
+// editor last touched - unnamed, a fixture's modules could land in the developer's own
+// Normal.dotm and follow them to every document they open afterwards. Undefined where a plan
+// names nothing, which every route reads as the active project, the way it always did.
+const at = plan.project;
 
 const health = await api.doctor();
 if (!health.healthy) {
@@ -52,7 +60,7 @@ async function writeAndCheck(name, code) {
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await api.writeModule(name, code);
+      await api.writeModule(name, code, at);
     } catch (error) {
       // THE DOOR GAVE UP; THE HOST DID NOT.
       //
@@ -81,7 +89,7 @@ async function writeAndCheck(name, code) {
       let lines = 0;
       let asked = false;
       try {
-        const project = await api.project();
+        const project = await api.project(at);
         lines = project.components.find((component) => component.name === name)?.lines ?? 0;
         asked = true;
       } catch (error) {
@@ -110,7 +118,7 @@ async function writeAndCheck(name, code) {
 }
 
 for (const module of plan.modules) {
-  const added = await api.component("add", { kind: module.kind, name: module.name });
+  const added = await api.component("add", { kind: module.kind, name: module.name, project: at });
   const written = await writeAndCheck(added.name, module.code);
   const retried = written.attempts > 1 ? `  (took ${written.attempts} attempts)` : "";
   console.log(`  ${added.name.padEnd(14)} ${module.kind === 2 ? "class " : "module"}  ${written.lines} lines${retried}`);
@@ -123,11 +131,12 @@ for (const module of plan.modules) {
  * module can name by its controls is project surface, not designer decoration.
  */
 for (const form of plan.forms ?? []) {
-  const added = await api.component("add", { kind: 3, name: form.name });
+  const added = await api.component("add", { kind: 3, name: form.name, project: at });
 
   for (const control of form.controls ?? []) {
     await api.designerEdit("add", {
       module: added.name,
+      project: at,
       type: control.type,
       name: control.name,
       left: control.left ?? 24,
@@ -159,7 +168,7 @@ if (plan.workbookCode) {
  * can differ and would address nothing.
  */
 if (plan.sheetCode) {
-  const project = await api.project();
+  const project = await api.project(at);
   const sheet = project.components.find((component) => component.kind === "document"
     && component.name.toLowerCase() !== "thisworkbook");
 
@@ -177,7 +186,7 @@ if (plan.sheetCode) {
  * comes for free here, because adding a component through the door does not open a pane for it.
  */
 if (plan.openAtEnd) {
-  await api.caret(1, { module: plan.openAtEnd, column: 1 });
+  await api.caret(1, { module: plan.openAtEnd, column: 1, project: at });
   console.log(`  opened ${plan.openAtEnd}, and left the rest closed`);
 }
 
@@ -186,7 +195,7 @@ await api.command("save");
 // Read it back from the object model rather than trusting the writes: the editor rewrites what it
 // is given - it respells keywords and completes what it thinks is unfinished - so what is IN the
 // workbook is the only thing worth reporting.
-const built = await api.project();
+const built = await api.project(at);
 const written = built.components.filter((component) => component.lines > 0);
 console.log(`  saved; ${written.length} component(s) hold code`);
 

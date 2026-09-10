@@ -254,7 +254,10 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   from `Documents`, with the same members; Access has neither, a database being no document,
   so the project's own `Saved` flag says whether its modules need saving and the editor's own
   Save is what saves them. Before that, Access read as never dirty and a checkout imported over
-  an unsaved edit that Excel refuses to touch ([lessons.md](lessons.md) finding 80).
+  an unsaved edit that Excel refuses to touch ([lessons.md](lessons.md) finding 80). Word's
+  branch is proven on its own fixture, which is also where a Word project turned out to name
+  Word's save-time temp file as its own after every save; the document the checks look up by
+  name comes through the one resolver every reader of a project's file uses (finding 81).
 - git.exe runs on the pool thread through one runner: hidden window, both streams drained, UTF-8,
   `GIT_TERMINAL_PROMPT=0`, `--no-pager`, `-c core.quotepath=false`, a deadline per command (20
   seconds; 120 for the remote commands), killed with its tree on timeout. Every invocation is

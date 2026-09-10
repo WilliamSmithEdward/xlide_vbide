@@ -2350,5 +2350,52 @@ and where there is none the project's own `Saved` flag answers the question
 every caller was asking, and the editor's own Save, which is what Ctrl+S in
 the editor runs in every host, is the save. The Access suite commits its
 fixture to a scratch repository, makes an edit, is refused the checkout,
-saves, and commits. Word takes the Documents branch by symmetry and has no
-fixture to prove it on yet.
+saves, and commits. Word takes the Documents branch, proven on a fixture of
+its own the next day - which is where finding 81 came from.
+
+## 81. In Word, a project names its save-time temp after every save
+
+Word saves a document by writing the new bytes beside it, renaming the
+original to `~WRLnnnn.tmp`, renaming the new file into place and deleting
+the temp. The VBA project's `FileName` follows the RENAME of the original:
+after the first save of the Word fixture it read `~WRL0001.tmp`, a file that
+no longer existed, and after the next save `~WRL0003.tmp`. Excel and Access
+answer the document's path throughout. Found by the first build of a Word
+fixture (2026-09-10): the modules went in, the builder saved, and the
+install of XlideAssert scoped to `WordFixture.docm` answered "no open file
+called WordFixture.docm", because the tree had renamed the project the
+moment the save ran.
+
+Everything downstream keys on that name. The tree renamed its project after
+every save, the analysis started again under a path with no file behind it,
+the tests pane's keys moved, the source control folder remembered per
+project was forgotten, and the document could neither be addressed by its
+own name through the api nor matched among the host's Documents by the save
+and the dirty check - so in Word the whole of finding 80's fix held only
+until the first save.
+
+One reader answers a project's file name for every caller now
+(`ProjectReader.FileNameOf`); six places read the property raw before. For
+Word it remembers the last real name each project answered, by the
+project's COM identity, and answers a temp name with it. A project saved
+before it was ever read - a save between the editor opening and the first
+walk - has no memory and is resolved through the host's Documents, where the
+one document in the temp's folder is the one; two documents in one folder
+and no memory is the case left as it was, and it is logged. The Word suite
+saves through a commit, through the editor's Save and through a commit over
+an unsaved edit, and the project's name holds through all three.
+
+Two smaller things the same fixture taught. Word's Normal template is a VBA
+project in every session, so the editor lists two projects for one document,
+an unscoped install of the support module writes into both, and a fixture
+builder that names no project writes into the developer's own template: the
+builder and the suite name the document on every write, and the suite holds
+Normal to what it was. And the editor refuses the name of a UserForm removed
+earlier in the same session - the add takes, the rename to the name fails
+with a bare HRESULT - so a suite that adds and removes a form names it per
+run. And the gate's live probes connected bare, which refuses to guess
+between two live sessions: a Word left standing by the fixture builder
+failed them on "several xlide sessions are live" with nothing wrong in any
+of them, and a developer's own Word with the editor open would have done
+the same. They are aimed at the Excel the step launched, like every other
+live step.
