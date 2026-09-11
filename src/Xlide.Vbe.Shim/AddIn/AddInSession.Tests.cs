@@ -977,6 +977,7 @@ internal sealed partial class AddInSession
                     var reads = TestRunService.ReadStandardModules(project);
                     TestRunService.Run(
                         project, reads, tests, new TestRunService.Selection(null, null, []), failFast: false,
+                        holdPanes: HoldCodePanes,
                         starting: id =>
                         {
                             _testsCurrent = id;

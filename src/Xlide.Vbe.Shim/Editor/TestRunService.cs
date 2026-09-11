@@ -647,7 +647,8 @@ internal static partial class TestRunService
         Selection selection,
         bool failFast,
         Action<string> starting,
-        Action<TestResult> landed)
+        Action<TestResult> landed,
+        Func<IDisposable>? holdPanes = null)
     {
         var results = new List<TestResult>();
         var chosen = discovered.Where(test => Selected(test, selection)).ToList();
@@ -696,7 +697,7 @@ internal static partial class TestRunService
                     throw new InvalidOperationException("The project would not answer its components.");
                 }
 
-                RemoveGeneratedRunModules(staging);
+                RemoveGeneratedRunModules(staging, holdPanes);
                 AddModule(staging, runnerName, BuildRunnerModule(runnable));
                 AddModule(staging, DispatchModuleName, BuildDispatchModule(modules));
 
@@ -790,7 +791,7 @@ internal static partial class TestRunService
                 using var teardown = project.GetObject("VBComponents");
                 if (teardown is not null)
                 {
-                    RemoveGeneratedRunModules(teardown);
+                    RemoveGeneratedRunModules(teardown, holdPanes);
                 }
             }
             catch (Exception ex)
@@ -948,7 +949,13 @@ internal static partial class TestRunService
         return code?.GetInt32("CountOfLines") ?? -1;
     }
 
-    private static void RemoveGeneratedRunModules(DispatchObject components)
+    /// <summary>
+    /// Removes this runner's scaffolding, each Remove under the session's pane-tracker hold when
+    /// one is lent: the editor pumps messages inside Remove, and the tracker's hook reading the
+    /// panes and the component list out of an editor mid-change is the VBE7 access violation
+    /// that every other remove has been held against since 0.15.1 (CodePaneTracker.Hold).
+    /// </summary>
+    private static void RemoveGeneratedRunModules(DispatchObject components, Func<IDisposable>? holdPanes)
     {
         var count = components.GetInt32("Count");
         for (var i = count; i >= 1; i--)
@@ -957,7 +964,10 @@ internal static partial class TestRunService
             var name = candidate?.GetString("Name") ?? string.Empty;
             if (candidate is not null && IsRunScaffolding(name))
             {
-                components.InvokeWithObject("Remove", candidate);
+                using (holdPanes?.Invoke())
+                {
+                    components.InvokeWithObject("Remove", candidate);
+                }
             }
         }
     }

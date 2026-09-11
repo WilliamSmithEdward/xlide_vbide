@@ -373,7 +373,15 @@ internal sealed partial class ImmediateEvaluator
             + "End Function\r\n";
     }
 
-    private static void Remove(DispatchObject components)
+    /// <summary>
+    /// The session's pane-tracker hold, taken around each Remove of the scratch module: the
+    /// editor pumps messages inside Remove, and the tracker's hook reading panes out of an editor
+    /// mid-change is the VBE7 access violation every other remove is held against
+    /// (CodePaneTracker.Hold). Null holds nothing, which is what an evaluator with no tracker gets.
+    /// </summary>
+    public Func<IDisposable>? HoldPanes { get; set; }
+
+    private void Remove(DispatchObject components)
     {
         try
         {
@@ -383,7 +391,10 @@ internal sealed partial class ImmediateEvaluator
                 using var candidate = components.GetItem(i);
                 if (candidate?.GetString("Name") == ScratchModule)
                 {
-                    components.InvokeWithObject("Remove", candidate);
+                    using (HoldPanes?.Invoke())
+                    {
+                        components.InvokeWithObject("Remove", candidate);
+                    }
                 }
             }
         }

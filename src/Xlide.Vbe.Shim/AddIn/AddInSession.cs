@@ -6926,6 +6926,10 @@ internal sealed partial class AddInSession : IDisposable
         {
             evaluator = _immediate = new ImmediateEvaluator(_editor);
 
+            // Its scratch module is removed under the same pane-tracker hold as every other
+            // remove this product makes (CodePaneTracker.Hold).
+            evaluator.HoldPanes = HoldCodePanes;
+
             // "? name" in break mode is answered from the Locals ghost (#21): the row the panel
             // shows for that name, read the way the panel reads it. A fresh read is asked for so
             // a value that moved on the last step is the one printed, and the latest landed

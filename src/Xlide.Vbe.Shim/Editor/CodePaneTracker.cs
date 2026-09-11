@@ -483,6 +483,13 @@ internal sealed class CodePaneTracker : IDisposable
         _heldDestroy = false;
         _heldStir = false;
 
+        // Said, so a held remove can be seen to have been held: the hold changes nothing visible
+        // when it works, and a remove that skipped it looks exactly the same until it crashes.
+        Log.Verbose("code panes: hold released"
+            + (refresh || frame || destroy || stir
+                ? $", replaying what it heard:{(refresh ? " refresh" : "")}{(frame ? " frame" : "")}{(destroy ? " destroy" : "")}{(stir ? " stir" : "")}"
+                : ", nothing heard while held"));
+
         if (refresh)
         {
             Refresh();
