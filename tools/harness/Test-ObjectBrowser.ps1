@@ -60,16 +60,21 @@ Test-Seam 'the page carries scopes, the group pull, and the details pane' (Join-
     'objbrowser-scope', 'pullWhole', 'objbrowser-splitter', 'objbrowser-detail-signature')
 Test-Seam 'built bundle carries the palette page' (Join-Path $repo 'ui\editor\dist\editor.js') @(
     'objbrowser-scope', 'Pick a type on the left')
-Test-Seam 'the dev doors are gated to Debug' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\ApiServer.cs') @(
-    '^#if DEBUG', 'ApiReply', '\\"api\\":')
+# THE DOOR SHIPS IN EVERY BUILD NOW, shut in Release unless the agent card opens it - the phrase
+# the gate reads out of the binary. It was gated to Debug when these seams were written, and they
+# went on asking for an `#if DEBUG` that no longer exists (found 2026-09-10).
+Test-Seam 'the api door is in the server, in every build' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\ApiServer.cs') @(
+    'ApiReply', '\\"api\\":')
+Test-Seam 'and a Release build keeps it shut unless told otherwise' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
+    'keeps the door shut unless told otherwise')
 Test-Seam 'the dev build asks for the DevTools protocol' (Join-Path $repo 'src\Xlide.Vbe.Shim\WebView\WebView2Surface.cs') @(
     'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'DevToolsPort', 'MessageTap')
 Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'case "log"', 'case "messages"', 'case "capture"', 'case "breakpoint"', 'case "immediate"')
 Test-Seam 'the api carries the locals, watches, problems, module, and stats routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'case "locals"', 'case "watches"', 'case "problems"', 'case "module"', 'case "stats"')
-Test-Seam 'the perf counters exist and are Debug-gated' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\PerfCounters.cs') @(
-    '^#if DEBUG', 'PlacementFull', 'Marshal', 'RaiseToAtLeast')
+Test-Seam 'the perf counters exist' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\PerfCounters.cs') @(
+    'PlacementFull', 'Marshal', 'RaiseToAtLeast')
 
 $published = Join-Path $repo 'artifacts\publish\Xlide.Vbe.Shim\debug_win-x64\ui\editor\dist\editor.js'
 if (Test-Path $published) {
