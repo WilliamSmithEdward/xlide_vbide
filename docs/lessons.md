@@ -2438,3 +2438,22 @@ candidate the bulb decided against with the planner's words, because a check
 built on an absence passes on a round trip that never came back; every new
 "not offered" check in the live suites asserts the reason too. The new
 engine suite went 12 of 21 red on a build that approved every candidate.
+
+Measured at scale the same day, the first cut was dear. On a 63,000-line
+module a caret on a local cost 159ms and a procedure's header 94ms, every
+time the caret settled, on the engine's one thread. A CPU profile put 15s of
+16s in the reference search: for a local that can only be used in its own
+seven-line procedure it stripped, scanned and classified the whole module,
+Inline and Make-a-parameter each asked it the identical question, and the
+engine's lineAt split the whole module into an array for every row it
+returned. referencesFor now remembers its answers by exactly what was asked
+- cleared whenever the workbook's symbols change, so no old workbook stays
+alive - lineStarts is remembered by text and lineAt slices its one line, and
+the symbols are built only when a planner reaches for them, which Inline and
+Make-a-parameter do only after a word has proved to be a local. The warm
+question is under a millisecond at any size. What is left is the first
+question after an edit: 24ms on a keyword and about 85ms on a local at
+14,000 lines, 100ms and 340ms at 63,000. The keyword's share is the parse the
+analysis pass makes anyway; the rest is the analyzer's own symbol index and
+reference scan, both whole-module, and scoping a local's references to its
+procedure is the analyzer's change to make.

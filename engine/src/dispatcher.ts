@@ -811,10 +811,11 @@ export class Dispatcher {
             return { verdicts: refusingEvery(candidates, 'This module is not one the engine holds.') };
         }
 
-        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        // A way to build the symbols, not the symbols: most carets are answered before a planner
+        // needs them, and an edit makes building them the dearest part of the question.
         return {
             verdicts: refactoringVerdicts(
-                symbols,
+                () => this.symbolsFor(params.projectId, params.moduleName, source),
                 this.seededModules.get(params.projectId) ?? [],
                 params.projectId,
                 params.moduleName,

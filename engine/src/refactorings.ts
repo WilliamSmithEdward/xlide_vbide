@@ -8,10 +8,12 @@
  * check written for the bulb would drift from its planner the first time a refusal was added to
  * one and not the other.
  *
- * Cheap enough for every caret move: the analyzer memoises its parse on the text itself and the
- * project's symbols are memoised on the strings they were built from, so between keystrokes the
- * planners work on structures already built. Most candidates end at a planner's first question -
- * is there a local of that name here - which is where a keyword under the caret stops.
+ * Cheap enough for every caret move. The analyzer memoises its parse on the text itself, and the
+ * workbook's symbols are built only when a planner reaches for them: every edit invalidates them,
+ * and building them for a 63,000-line module cost 170ms, which the first caret settle after each
+ * keystroke paid even on a keyword (measured 2026-09-10). Inline and Make-a-parameter refuse a
+ * keyword or any other non-local before they need symbols, so they are handed a way to build
+ * them rather than the symbols themselves.
  */
 
 import type { ProjectSymbols } from './navigation';
@@ -24,22 +26,32 @@ import { inlineVariableFor } from './inlineVariable';
 import { introduceParameterFor } from './introduceParameter';
 import { moveToModuleOffered } from './moveToModule';
 
+/** The workbook's symbols, or the way to build them when a planner first needs them. */
+export type SymbolsWhenNeeded = ProjectSymbols | (() => ProjectSymbols);
+
 /** The most one caret raises; more is a malformed request rather than a busy line. */
 const MOST_CANDIDATES = 16;
 
 /** Each candidate's verdict, at the candidate's own position in the request. */
 export function refactoringVerdicts(
-    symbols: ProjectSymbols,
+    symbols: SymbolsWhenNeeded,
     seeded: readonly ModulePayload[],
     projectId: string,
     moduleName: string,
     source: string,
     candidates: readonly unknown[],
 ): RefactoringVerdict[] {
+    // Built at most once for the whole request, however many planners reach for them.
+    let built: ProjectSymbols | null = typeof symbols === 'function' ? null : symbols;
+    const symbolsNow = (): ProjectSymbols => {
+        built ??= (symbols as () => ProjectSymbols)();
+        return built;
+    };
+
     return candidates.slice(0, MOST_CANDIDATES).map((candidate) => {
         const kind = kindOf(candidate);
         try {
-            return { kind, refused: refusalOf(symbols, seeded, projectId, moduleName, source, candidate) };
+            return { kind, refused: refusalOf(symbolsNow, seeded, projectId, moduleName, source, candidate) };
         } catch (error) {
             // A planner that throws here would throw when its entry was chosen, too, and an entry
             // that fails on arrival is exactly what this exists to withhold.
@@ -55,7 +67,7 @@ export function refusingEvery(candidates: readonly unknown[], why: string): Refa
 }
 
 function refusalOf(
-    symbols: ProjectSymbols,
+    symbolsNow: () => ProjectSymbols,
     seeded: readonly ModulePayload[],
     projectId: string,
     moduleName: string,
@@ -69,17 +81,17 @@ function refusalOf(
     switch (kind) {
         case 'inlineVariable': {
             const offset = whole(asked.offset);
-            return offset === null ? missing : inlineVariableFor(symbols, moduleName, source, offset).refused ?? null;
+            return offset === null ? missing : inlineVariableFor(symbolsNow, moduleName, source, offset).refused ?? null;
         }
 
         case 'introduceParameter': {
             const offset = whole(asked.offset);
-            return offset === null ? missing : introduceParameterFor(symbols, moduleName, source, offset).refused ?? null;
+            return offset === null ? missing : introduceParameterFor(symbolsNow, moduleName, source, offset).refused ?? null;
         }
 
         case 'moveToModule': {
             const offset = whole(asked.offset);
-            return offset === null ? missing : moveToModuleOffered(symbols, moduleName, source, offset);
+            return offset === null ? missing : moveToModuleOffered(symbolsNow(), moduleName, source, offset);
         }
 
         case 'extractVariable': {
@@ -101,7 +113,7 @@ function refusalOf(
                 return missing;
             }
 
-            return extractMethodFor(symbols, moduleName, source, startLine, endLine, unusedName(source, 'Extracted'))
+            return extractMethodFor(symbolsNow(), moduleName, source, startLine, endLine, unusedName(source, 'Extracted'))
                 .refused ?? null;
         }
 
@@ -114,7 +126,7 @@ function refusalOf(
             const interfaceName = named(asked.interfaceName);
             return interfaceName === null
                 ? missing
-                : implementInterfaceFor(symbols, moduleName, source, interfaceName).refused ?? null;
+                : implementInterfaceFor(symbolsNow(), moduleName, source, interfaceName).refused ?? null;
         }
 
         default:

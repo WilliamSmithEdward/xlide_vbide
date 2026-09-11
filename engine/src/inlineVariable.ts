@@ -37,7 +37,7 @@ import type { InlineVariableResult, LocationPayload } from './protocol';
 const ATOMIC = /^(?:"(?:[^"]|"")*"|#[^#]*#|-?\d[\d.]*(?:[eE][+-]?\d+)?[&%@!#]?|(?:True|False|Nothing|Empty|Null)|[\p{L}_][\p{L}\p{M}\p{N}_]*(?:\.[\p{L}_][\p{L}\p{M}\p{N}_]*)*)$/u;
 
 export function inlineVariableFor(
-    symbols: ProjectSymbols,
+    symbolsWhenNeeded: ProjectSymbols | (() => ProjectSymbols),
     moduleName: string,
     source: string,
     offset: number,
@@ -92,6 +92,9 @@ export function inlineVariableFor(
     }
 
     const starts = lineStarts(source);
+    // Built only now: every refusal above is answered from the text alone, and the lightbulb asks
+    // about any word under the caret before it knows whether the word is a local.
+    const symbols = typeof symbolsWhenNeeded === 'function' ? symbolsWhenNeeded() : symbolsWhenNeeded;
     const uses = referencesFor(symbols, moduleName, source, offset, true)
         .filter((one) => one.module.toLowerCase() === moduleName.toLowerCase())
         .filter((one) => !(one.line === declared.line && one.column === declared.column))

@@ -137,8 +137,60 @@ export function definitionsFor(
         .filter(isLocation);
 }
 
-/** Every use of the identifier at an offset, across the workbook's modules. */
+/** The reference lookups asked most recently, all against one workbook's symbols: see referencesFor. */
+const referencesHeld: {
+    moduleName: string;
+    source: string;
+    offset: number;
+    includeDeclaration: boolean;
+    found: LocationPayload[];
+}[] = [];
+
+/** The symbols every held lookup was made against. */
+let referencesHeldFor: ProjectSymbols | null = null;
+
+/** Enough for the questions one caret raises and a few carets back. */
+const REFERENCES_HELD = 8;
+
+/**
+ * Every use of the identifier at an offset, across the workbook's modules.
+ *
+ * REMEMBERED by exactly what was asked. The lightbulb asks the same question twice for one caret
+ * - Inline and Make-a-parameter both count a local's uses - and again each time the caret settles
+ * there, and on a 63,000-line module one asking cost 80ms (profiled 2026-09-10). The dispatcher
+ * hands out the same symbols object until some module's text moves, so a new one clears
+ * everything held: an answer about the old text is no answer at all, and holding it would keep
+ * the old workbook alive. Each caller gets its own copy of the rows.
+ */
 export function referencesFor(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    source: string,
+    offset: number,
+    includeDeclaration: boolean,
+): LocationPayload[] {
+    if (referencesHeldFor !== symbols) {
+        referencesHeld.length = 0;
+        referencesHeldFor = symbols;
+    }
+
+    const held = referencesHeld.find((one) => one.offset === offset
+        && one.includeDeclaration === includeDeclaration
+        && one.moduleName === moduleName
+        && one.source === source);
+
+    const found = held?.found ?? referencesForUncached(symbols, moduleName, source, offset, includeDeclaration);
+    if (!held) {
+        referencesHeld.unshift({ moduleName, source, offset, includeDeclaration, found });
+        if (referencesHeld.length > REFERENCES_HELD) {
+            referencesHeld.pop();
+        }
+    }
+
+    return found.map((row) => ({ ...row }));
+}
+
+function referencesForUncached(
     symbols: ProjectSymbols,
     moduleName: string,
     source: string,
@@ -854,16 +906,65 @@ function replaceAll(
     return text;
 }
 
-/** One line of a module, trimmed, for a results list. Empty when the module is not held. */
+/**
+ * One line of a module, trimmed, for a results list. Empty when the module is not held.
+ *
+ * Sliced out between two line starts rather than by splitting the module: this runs once for
+ * every reference a lookup finds, and splitting a 63,000-line module into an array for each of
+ * them was a large share of what a lookup there cost (profiled 2026-09-10).
+ */
 function lineAt(source: string | undefined, line: number): string {
     if (source === undefined) {
         return '';
     }
-    return (source.split(LINE_BREAK)[line] ?? '').trim();
+
+    const starts = lineStarts(source);
+    const from = starts[line];
+    if (from === undefined) {
+        return '';
+    }
+
+    const next = starts[line + 1];
+    return source.slice(from, next === undefined ? source.length : next).trim();
 }
 
-/** Where each line begins, counting the three line endings VBA modules turn up with. */
+/** Line starts for the texts asked about most recently: see lineStarts. */
+const lineStartsHeld: { source: string; starts: number[] }[] = [];
+
+/** Enough for the modules one request touches, and few enough that nothing old stays alive. */
+const LINE_STARTS_HELD = 8;
+
+/**
+ * Where each line begins, counting the three line endings VBA modules turn up with.
+ *
+ * REMEMBERED for the few texts asked about most recently. The engine hands every request the
+ * same string for an unchanged module, so the comparison is usually a pointer, and a lookup in a
+ * large module asked for the starts once for every reference it found. The array is shared:
+ * callers read it and never change it.
+ */
 export function lineStarts(source: string): number[] {
+    for (let at = 0; at < lineStartsHeld.length; at += 1) {
+        const held = lineStartsHeld[at] as { source: string; starts: number[] };
+        if (held.source === source) {
+            if (at > 0) {
+                lineStartsHeld.splice(at, 1);
+                lineStartsHeld.unshift(held);
+            }
+
+            return held.starts;
+        }
+    }
+
+    const starts = countedLineStarts(source);
+    lineStartsHeld.unshift({ source, starts });
+    if (lineStartsHeld.length > LINE_STARTS_HELD) {
+        lineStartsHeld.pop();
+    }
+
+    return starts;
+}
+
+function countedLineStarts(source: string): number[] {
     const starts = [0];
     for (let at = 0; at < source.length; at++) {
         const character = source[at];

@@ -906,6 +906,10 @@ internal sealed class EngineClient : IAsyncDisposable
         "textDocument/canonicalCase" => CallKind.Interactive,
         "textDocument/smartEnter" => CallKind.Interactive,
         "textDocument/codeAction" => CallKind.Interactive,
+        // The lightbulb's other half, a pure read of the live text exactly as codeAction is. Left
+        // unnamed it was a BARRIER, so every caret settle queued behind whatever analysis pass
+        // was waiting and held every keystroke's completion behind itself (2026-09-10).
+        "textDocument/refactorings" => CallKind.Interactive,
         // A pure read of a build-time table; it depends on no seeded state and moves none.
         "analysis/rules" => CallKind.Interactive,
         "textDocument/loopSync" => CallKind.Interactive,

@@ -21,7 +21,7 @@ import { lineStarts, referencesFor, toLineColumn, type ProjectSymbols } from './
 import type { IntroduceParameterResult, LocationPayload } from './protocol';
 
 export function introduceParameterFor(
-    symbols: ProjectSymbols,
+    symbolsWhenNeeded: ProjectSymbols | (() => ProjectSymbols),
     moduleName: string,
     source: string,
     offset: number,
@@ -48,14 +48,10 @@ export function introduceParameterFor(
 
     /* ---- whose signature is this to change ------------------------------------------------------ */
 
-    const underscore = procedure.name.indexOf('_');
-    if (underscore > 0) {
-        const before = procedure.name.slice(0, underscore);
-        if (symbols.byModule.has(before.toLowerCase())) {
-            return refuse(`'${procedure.name}' is bound by its name to '${before}' - an event handler or an interface member - so its signature is not this project's to change.`);
-        }
-    }
-
+    // WHETHER IT IS A LOCAL AT ALL comes before whose signature this is. A keyword under the
+    // caret inside `Worksheet_Change` is not a local, which is the useful answer; asking about the
+    // binding first also needed the workbook's symbols, which the lightbulb asks without - and
+    // building them after every edit was the dearest part of its question (2026-09-10).
     const starts = lineStarts(source);
     const group = declarationOf(procedure, named, starts);
     if (!group) {
@@ -68,6 +64,16 @@ export function introduceParameterFor(
 
     if (group.group.declarations.length > 1) {
         return refuse(`'${group.declared}' shares its declaration with other names. Give it a line of its own first.`);
+    }
+
+    const symbols = typeof symbolsWhenNeeded === 'function' ? symbolsWhenNeeded() : symbolsWhenNeeded;
+
+    const underscore = procedure.name.indexOf('_');
+    if (underscore > 0) {
+        const before = procedure.name.slice(0, underscore);
+        if (symbols.byModule.has(before.toLowerCase())) {
+            return refuse(`'${procedure.name}' is bound by its name to '${before}' - an event handler or an interface member - so its signature is not this project's to change.`);
+        }
     }
 
     /* ---- what it is assigned, and whether that can travel --------------------------------------- */
