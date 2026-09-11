@@ -86,7 +86,21 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
 
   // A pane is resized by dragging a splitter, not only by resizing the window, so the element
   // itself is what has to be watched.
-  const observer = new ResizeObserver(() => update());
+  //
+  // A FRAME LATER, not inside the observer's own delivery: update() shows or hides an edge
+  // beside the strip, which resizes the strip being observed, and resizing it from inside the
+  // callback is what the browser reports as "ResizeObserver loop completed with undelivered
+  // notifications" - the page logged it as uncaught (2026-09-10). One frame is invisible, and
+  // the scroll listener and the direct calls still update at once.
+  let pendingFrame = 0;
+  const observer = new ResizeObserver(() => {
+    if (pendingFrame === 0) {
+      pendingFrame = requestAnimationFrame(() => {
+        pendingFrame = 0;
+        update();
+      });
+    }
+  });
   observer.observe(strip);
 
   update();
@@ -95,6 +109,10 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
     update,
     dispose(): void {
       observer.disconnect();
+      if (pendingFrame !== 0) {
+        cancelAnimationFrame(pendingFrame);
+        pendingFrame = 0;
+      }
       strip.removeEventListener("wheel", onWheel);
       strip.removeEventListener("scroll", update);
       for (const stop of held) stop();
