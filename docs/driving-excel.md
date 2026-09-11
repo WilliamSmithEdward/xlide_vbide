@@ -521,6 +521,10 @@ await api.act("backspace", { times: 1 });       // the one key `type` cannot sen
 await api.act("hover", { word: "Recalculate" });
 await api.act("completions", { line: 7, column: 12 });
 await api.act("quickFixes", { word: "Recalcualte" });
+// -> data: what the lightbulb shows there; withheld: each refactoring it asked the engine about
+//    and did not offer, {title, refused}, in the planner's own words. It reads the editor's own
+//    caret and selection, as the bulb does, so place them with caret() or act("select") first.
+await api.act("timeFeature", { what: "codeActions", line: 7, column: 12, n: 10 }); // the bulb's cost, timed in the page
 await api.act("definition", { word: "Recalculate" });   // where F12 would go, caret unmoved
 await api.act("references", { word: "Recalculate" });   // the list Find All References would show
 // -> data rows carry `kind`: read | write | readwrite, classified by the analyzer from the
@@ -533,6 +537,7 @@ await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHAN
 await api.undoRename();                                 // and puts it back
 
 await api.act("select", { startLine: 9, endLine: 14 });  // whole lines; `clear: 1` unselects
+await api.act("select", { startLine: 6, startColumn: 17, endLine: 6, endColumn: 26 });  // part of a line: an expression
 // -> the door could not make a selection at all until Extract Method needed one: `caret` moves
 //    the caret and selects nothing, and dragging is a gesture no request can perform. Anything
 //    that depends on there BEING a selection - the lightbulb's refactoring entry, for one - had

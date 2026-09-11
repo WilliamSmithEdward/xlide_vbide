@@ -67,7 +67,7 @@ import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/acti
 import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/contextkey.js";
 
 import "./styles.css";
-import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
+import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCodeAction, type HostCompletionItem, type HostLocation, type HostRefactorCandidate, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
 import { tokensFitTheText } from "./semanticfit.js";
@@ -276,6 +276,21 @@ function fieldOn(model: monaco.editor.ITextModel | null, line: number): string |
   // on every one of them offering to encapsulate the keyword.
   const name = declared[1] as string;
   return /^(?:Sub|Function|Property|Type|Enum|Const|Declare|Event)$/i.test(name) ? null : name;
+}
+
+/**
+ * The procedure a line declares, when the line is a procedure's header: where the lightbulb asks
+ * about moving it, the way a declaration line asks about its variable and an `Implements` line
+ * about its members. A `Declare` is not a procedure of this module's own and does not match.
+ */
+function procedureOn(model: monaco.editor.ITextModel | null, line: number): string | null {
+  if (!model || line < 1 || line > model.getLineCount()) {
+    return null;
+  }
+
+  const declared = /^\s*(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([\p{L}_][\p{L}\p{M}\p{N}_]*)/iu
+    .exec(model.getLineContent(line));
+  return declared ? (declared[1] as string) : null;
 }
 
 /** Encapsulate Field, from the lightbulb or the menu. Nothing to name: the property takes the
@@ -1729,9 +1744,25 @@ function boot(): void {
     return offRulesMemo;
   };
 
+  /** One refactoring a caret or a selection could mean, and the entry it becomes if it applies. */
+  type RefactorOffer = { candidate: HostRefactorCandidate; action: monaco.languages.CodeAction };
+
+  /** A refactoring the lightbulb asked about and did not offer, with the planner's own reason. */
+  type Withheld = { title: string; refused: string };
+
+  /**
+   * What the lightbulb shows, and beside it what it decided against. Monaco reads `actions`; the
+   * dev surface's `quickFixes` act reads `withheld` as well, so the api can tell an absence that
+   * was decided from a round trip that never came back.
+   */
+  type LightbulbList = monaco.languages.CodeActionList & { withheld: Withheld[] };
+
+  /** Every candidate's reason when the host sends no verdicts at all. */
+  const UNANSWERED = "The host did not answer, so nothing was offered that might not apply.";
+
   const codeActionProvider: monaco.languages.CodeActionProvider = {
-    provideCodeActions: async (model, range) => {
-      const none = { actions: [], dispose: () => { } };
+    provideCodeActions: async (model, range): Promise<LightbulbList> => {
+      const none: LightbulbList = { actions: [], withheld: [], dispose: () => { } };
       if (model !== bridge.hostActiveModel()) {
         return none;
       }
@@ -1742,7 +1773,8 @@ function boot(): void {
       // the developer opened it for, proposing to extract a line they had not selected.
       const editor = workspace.activeEditor();
       const selection = editor.getSelection();
-      const selected = model === editor.getModel() ? extractRange(selection) : null;
+      const onEditor = selection !== null && model === editor.getModel();
+      const selected = onEditor ? extractRange(selection) : null;
 
       // An `Implements` line is its own affordance: the one place a developer looks when they
       // want the members that line commits them to. A declaration line is the same for the
@@ -1754,21 +1786,135 @@ function boot(): void {
         .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
         .filter((marker) => monaco.Range.areIntersectingOrTouching(marker, range));
 
-      // Nothing to fix AND nothing to refactor. The early out is what keeps a caret move from
-      // costing a host round trip, and the refactoring has to be let past it: it answers a
-      // SELECTION rather than a finding, so gating it on there being a squiggle meant the one
-      // case it exists for - working code a developer wants to tidy - was the one case that
-      // offered nothing.
-      const onAWord = selection !== null && selection.isEmpty() && model === editor.getModel()
-        && model.getWordAtPosition(selection.getStartPosition()) !== null;
+      /*
+       * THE REFACTORINGS THE CARET COULD MEAN, each one a QUESTION rather than an entry.
+       *
+       * The shape rules below decide only what to ask: a word under the caret could be a local
+       * to inline or to make a parameter, a procedure's header line a procedure to move, a
+       * selection an expression or statements to extract. Whether any of them would go through
+       * is the engine's answer - each refactoring's own planner, run and thrown away - asked in
+       * one round trip before anything is offered. The bulb used to offer every one of them on
+       * shape alone and let the refusal arrive after the choice, so it lit on `End Function` to
+       * offer inlining a keyword (the owner's screenshot, 2026-09-10).
+       *
+       * The right-click menu still offers them wherever the caret is and still answers a refusal
+       * in words. That is the place to ask why not; the lightbulb is the place that speaks only
+       * when it can help.
+       */
+      const offers: RefactorOffer[] = [];
 
-      if (markers.length === 0 && !selected && !promised && !declaredField && !onAWord) {
+      // A selection within ONE line is an expression to name; a selection of whole lines is
+      // statements to lift. Both are asked about where both could apply, and the titles say
+      // which.
+      if (onEditor && !selection.isEmpty()) {
+        const from = model.getOffsetAt(selection.getStartPosition());
+        const to = model.getOffsetAt(selection.getEndPosition());
+        if (to > from) {
+          offers.push({
+            candidate: { kind: "extractVariable", startOffset: from, endOffset: to },
+            action: {
+              title: "Extract variable...",
+              kind: "refactor.extract.constant",
+              command: { id: EXTRACT_VARIABLE_COMMAND, title: "Extract variable", arguments: [from, to] },
+            },
+          });
+        }
+      }
+
+      if (selected) {
+        offers.push({
+          candidate: { kind: "extractMethod", startLine: selected.startLine, endLine: selected.endLine },
+          action: {
+            title: "Extract method...",
+            kind: "refactor.extract.function",
+            command: {
+              id: EXTRACT_METHOD_COMMAND,
+              title: "Extract method",
+              arguments: [selected.startLine, selected.endLine],
+            },
+          },
+        });
+      }
+
+      if (promised) {
+        offers.push({
+          candidate: { kind: "implementInterface", interfaceName: promised },
+          action: {
+            title: `Implement members of ${promised}`,
+            kind: "refactor.rewrite",
+            command: { id: IMPLEMENT_INTERFACE_COMMAND, title: "Implement interface", arguments: [promised] },
+          },
+        });
+      }
+
+      // A caret on a name, which is where inlining a local or making it a parameter is asked for.
+      if (onEditor && selection.isEmpty()) {
+        const word = model.getWordAtPosition(selection.getStartPosition());
+        if (word && !promised && !declaredField) {
+          const offset = model.getOffsetAt({ lineNumber: selection.startLineNumber, column: word.startColumn });
+          offers.push({
+            candidate: { kind: "introduceParameter", offset },
+            action: {
+              title: `Make '${word.word}' a parameter`,
+              kind: "refactor.rewrite",
+              command: { id: INTRODUCE_PARAMETER_COMMAND, title: "Introduce parameter", arguments: [offset] },
+            },
+          });
+          offers.push({
+            candidate: { kind: "inlineVariable", offset },
+            action: {
+              title: `Inline '${word.word}'`,
+              kind: "refactor.inline",
+              command: { id: INLINE_VARIABLE_COMMAND, title: "Inline variable", arguments: [offset] },
+            },
+          });
+        }
+      }
+
+      // A procedure's own header line, the way a declaration line answers for its variable and an
+      // `Implements` line for its members. Offered from anywhere inside a procedure, the move lit
+      // the bulb on every line of every procedure that could go, which says nothing about the
+      // line the caret is on. The right-click menu still reaches it from anywhere inside.
+      if (onEditor && procedureOn(model, selection.startLineNumber) !== null) {
+        const offset = model.getOffsetAt(selection.getStartPosition());
+        offers.push({
+          candidate: { kind: "moveToModule", offset },
+          action: {
+            title: "Move to module...",
+            kind: "refactor.move",
+            command: { id: MOVE_TO_MODULE_COMMAND, title: "Move to module", arguments: [offset] },
+          },
+        });
+      }
+
+      if (declaredField) {
+        offers.push({
+          candidate: { kind: "encapsulateField", fieldName: declaredField },
+          action: {
+            title: `Encapsulate '${declaredField}' in a property`,
+            kind: "refactor.rewrite",
+            command: { id: ENCAPSULATE_FIELD_COMMAND, title: "Encapsulate field", arguments: [declaredField] },
+          },
+        });
+      }
+
+      // Nothing to fix AND nothing to ask about. The early out is what keeps a caret move from
+      // costing a host round trip.
+      if (markers.length === 0 && offers.length === 0) {
         return none;
       }
 
-      const offered = markers.length === 0 ? [] : await bridge.requestCodeActions(
-        model.getOffsetAt(range.getStartPosition()),
-        model.getOffsetAt(range.getEndPosition()));
+      // Both questions at once: the fixes for what is flagged here, and the refactorings' verdicts.
+      const [offered, verdicts] = await Promise.all([
+        markers.length === 0
+          ? Promise.resolve<HostCodeAction[]>([])
+          : bridge.requestCodeActions(
+            model.getOffsetAt(range.getStartPosition()),
+            model.getOffsetAt(range.getEndPosition())),
+        offers.length === 0
+          ? Promise.resolve<(string | null)[] | null>([])
+          : bridge.requestRefactorings(offers.map((one) => one.candidate)),
+      ]);
 
       const actions: monaco.languages.CodeAction[] = offered.map((action) => {
         const start = model.getPositionAt(action.start);
@@ -1815,6 +1961,20 @@ function boot(): void {
         };
       });
 
+      // THE VERDICTS, by position. What the engine would carry out is offered, after the fixes and
+      // in the order the shapes were read; what it would refuse is withheld with the planner's own
+      // words; and an unanswered request withholds everything, because an entry nobody vouched
+      // for is the thing this exists to stop.
+      const withheld: Withheld[] = [];
+      offers.forEach((offer, at) => {
+        const verdict = verdicts === null || at >= verdicts.length ? UNANSWERED : verdicts[at];
+        if (verdict === null) {
+          actions.push(offer.action);
+        } else {
+          withheld.push({ title: offer.action.title, refused: verdict ?? UNANSWERED });
+        }
+      });
+
       /*
        * BESIDE the engine's edits, the machine-wide switch - a command, not an edit, because
        * turning a rule off everywhere changes a settings file and not this module's text.
@@ -1823,116 +1983,6 @@ function boot(): void {
        * renders: an entry that the engine would silently ignore is an entry that teaches people
        * the menu lies. The catalog is fetched once and remembered - it is a build-time table.
        */
-      /*
-       * AND THE REFACTORING, which is not a fix for anything: it is offered on the SELECTION
-       * rather than on a finding, so it has no diagnostics and it is the one entry here that
-       * asks a question before it changes anything.
-       *
-       * Whether the selection can actually be extracted is the engine's answer, not this one -
-       * a control-flow jump crossing the boundary is not visible from here. The entry appears
-       * for any selection of whole statements, and the dialog carries the refusal when there
-       * is one, which is where a developer can read it and reselect.
-       */
-      // A selection within ONE line is an expression to name; a selection of whole lines is
-      // statements to lift. Both are offered where both make sense, and the titles say which.
-      if (selection && !selection.isEmpty() && model === editor.getModel()) {
-        const from = model.getOffsetAt(selection.getStartPosition());
-        const to = model.getOffsetAt(selection.getEndPosition());
-        if (to > from) {
-          actions.push({
-            title: "Extract variable...",
-            kind: "refactor.extract.constant",
-            command: {
-              id: EXTRACT_VARIABLE_COMMAND,
-              title: "Extract variable",
-              arguments: [from, to],
-            },
-          });
-        }
-      }
-
-      if (selected) {
-        actions.push({
-          title: "Extract method...",
-          kind: "refactor.extract.function",
-          command: {
-            id: EXTRACT_METHOD_COMMAND,
-            title: "Extract method",
-            arguments: [selected.startLine, selected.endLine],
-          },
-        });
-      }
-
-      if (promised) {
-        actions.push({
-          title: `Implement members of ${promised}`,
-          kind: "refactor.rewrite",
-          command: {
-            id: IMPLEMENT_INTERFACE_COMMAND,
-            title: "Implement interface",
-            arguments: [promised],
-          },
-        });
-      }
-
-      // A caret on a local's own name, which is where inlining is asked for. Whether it CAN be
-      // inlined is the engine's answer - one assignment, an atomic value - so the entry appears on
-      // any bare word and the refusal explains, which is the same bargain the other three make.
-      if (selection && selection.isEmpty() && model === editor.getModel()) {
-        const word = model.getWordAtPosition(selection.getStartPosition());
-        if (word && !promised && !declaredField) {
-          actions.push({
-            title: `Make '${word.word}' a parameter`,
-            kind: "refactor.rewrite",
-            command: {
-              id: INTRODUCE_PARAMETER_COMMAND,
-              title: "Introduce parameter",
-              arguments: [model.getOffsetAt({
-                lineNumber: selection.startLineNumber, column: word.startColumn,
-              })],
-            },
-          });
-          actions.push({
-            title: `Inline '${word.word}'`,
-            kind: "refactor.inline",
-            command: {
-              id: INLINE_VARIABLE_COMMAND,
-              title: "Inline variable",
-              arguments: [model.getOffsetAt({
-                lineNumber: selection.startLineNumber, column: word.startColumn,
-              })],
-            },
-          });
-        }
-      }
-
-      // Offered from anywhere inside a procedure, which is what the caret being in one means.
-      // Whether the procedure can actually go - what it reaches for, where it would land - is the
-      // engine's answer, and its refusals name the member that would be stranded.
-      if (selection && model === editor.getModel()) {
-        actions.push({
-          title: "Move to module...",
-          kind: "refactor.move",
-          command: {
-            id: MOVE_TO_MODULE_COMMAND,
-            title: "Move to module",
-            arguments: [model.getOffsetAt(selection.getStartPosition())],
-          },
-        });
-      }
-
-      if (declaredField) {
-        actions.push({
-          title: `Encapsulate '${declaredField}' in a property`,
-          kind: "refactor.rewrite",
-          command: {
-            id: ENCAPSULATE_FIELD_COMMAND,
-            title: "Encapsulate field",
-            arguments: [declaredField],
-          },
-        });
-      }
-
       const turnOffable = await offRules();
       bridge.trace(`quickFixes: ${markers.length} marker(s), codes `
         + markers.map((m) => JSON.stringify(m.code)).join(",") + `; offable ${turnOffable.size}`);
@@ -1952,7 +2002,7 @@ function boot(): void {
         });
       }
 
-      return { actions, dispose: () => { } };
+      return { actions, withheld, dispose: () => { } };
     },
   };
 

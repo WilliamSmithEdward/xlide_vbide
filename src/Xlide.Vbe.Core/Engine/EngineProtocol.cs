@@ -146,6 +146,127 @@ public sealed record EngineCodeAction(
 public sealed record EngineCodeActions(
     [property: JsonPropertyName("actions")] EngineCodeAction[] Actions);
 
+/// <summary>
+/// One refactoring the lightbulb would offer, asked of the engine before it is offered
+/// (textDocument/refactorings). Which fields travel depends on the kind: an offset for the caret
+/// ones, a span for Extract Variable, lines for Extract Method, a name for Encapsulate Field and
+/// Implement Interface. Fields a kind does not use stay off the wire.
+/// </summary>
+public sealed record EngineRefactorCandidate(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("offset"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Offset = null,
+    [property: JsonPropertyName("startOffset"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartOffset = null,
+    [property: JsonPropertyName("endOffset"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndOffset = null,
+    [property: JsonPropertyName("startLine"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? StartLine = null,
+    [property: JsonPropertyName("endLine"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndLine = null,
+    [property: JsonPropertyName("fieldName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FieldName = null,
+    [property: JsonPropertyName("interfaceName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InterfaceName = null)
+{
+    /// <summary>The most one caret raises; the engine answers no more than this either.</summary>
+    public const int Most = 16;
+
+    /// <summary>
+    /// A page's candidates, checked at the boundary before they are relayed: a known kind, and the
+    /// fields that kind needs, in range. All or nothing - the verdicts come back by position, so a
+    /// candidate dropped from the middle would pair every later verdict with the wrong entry.
+    /// </summary>
+    public static bool TryReadAll(JsonElement array, out EngineRefactorCandidate[] candidates)
+    {
+        candidates = [];
+        if (array.ValueKind != JsonValueKind.Array || array.GetArrayLength() > Most)
+        {
+            return false;
+        }
+
+        var read = new List<EngineRefactorCandidate>(array.GetArrayLength());
+        foreach (var element in array.EnumerateArray())
+        {
+            if (TryRead(element) is not { } candidate)
+            {
+                return false;
+            }
+
+            read.Add(candidate);
+        }
+
+        candidates = [.. read];
+        return true;
+    }
+
+    private static EngineRefactorCandidate? TryRead(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty("kind", out var kindElement)
+            || kindElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var kind = kindElement.GetString();
+        switch (kind)
+        {
+            case "inlineVariable":
+            case "introduceParameter":
+            case "moveToModule":
+                return Whole(element, "offset") is { } offset
+                    ? new EngineRefactorCandidate(kind, Offset: offset)
+                    : null;
+
+            case "extractVariable":
+                return Whole(element, "startOffset") is { } startOffset
+                    && Whole(element, "endOffset") is { } endOffset
+                    && endOffset >= startOffset
+                    ? new EngineRefactorCandidate(kind, StartOffset: startOffset, EndOffset: endOffset)
+                    : null;
+
+            case "extractMethod":
+                return Whole(element, "startLine") is { } startLine and >= 1
+                    && Whole(element, "endLine") is { } endLine
+                    && endLine >= startLine
+                    ? new EngineRefactorCandidate(kind, StartLine: startLine, EndLine: endLine)
+                    : null;
+
+            case "encapsulateField":
+                return Named(element, "fieldName") is { } fieldName
+                    ? new EngineRefactorCandidate(kind, FieldName: fieldName)
+                    : null;
+
+            case "implementInterface":
+                return Named(element, "interfaceName") is { } interfaceName
+                    ? new EngineRefactorCandidate(kind, InterfaceName: interfaceName)
+                    : null;
+
+            default:
+                return null;
+        }
+    }
+
+    private static int? Whole(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt32(out var number)
+        && number >= 0
+            ? number
+            : null;
+
+    private static string? Named(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && value.GetString() is { Length: > 0 and <= 255 } text
+        && !string.IsNullOrWhiteSpace(text)
+            ? text
+            : null;
+}
+
+/// <summary>One candidate's answer: null Refused means the refactoring would go through as asked.</summary>
+public sealed record EngineRefactorVerdict(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>The verdicts for a lightbulb's candidates, in the order they were asked.</summary>
+public sealed record EngineRefactorings(
+    [property: JsonPropertyName("verdicts")] EngineRefactorVerdict[]? Verdicts);
+
 /// <summary>One module a rename rewrites: its name, what it says afterwards, and how many went.</summary>
 public sealed record EngineRenamedModule(
     [property: JsonPropertyName("module")] string Module,
@@ -364,6 +485,12 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineTextEdits))]
 [JsonSerializable(typeof(EngineCodeAction))]
 [JsonSerializable(typeof(EngineCodeActions))]
+// The lightbulb's candidates ride a request dictionary boxed, like the booleans below, so the
+// array's own type has to be named or it fails at run time on the first caret move.
+[JsonSerializable(typeof(EngineRefactorCandidate))]
+[JsonSerializable(typeof(EngineRefactorCandidate[]))]
+[JsonSerializable(typeof(EngineRefactorVerdict))]
+[JsonSerializable(typeof(EngineRefactorings))]
 [JsonSerializable(typeof(EngineSemanticToken))]
 [JsonSerializable(typeof(EngineSemanticTokens))]
 [JsonSerializable(typeof(EngineRenamedModule))]

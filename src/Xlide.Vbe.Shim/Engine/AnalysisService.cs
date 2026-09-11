@@ -601,6 +601,35 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine which of the lightbulb's candidates would go through in a module's live
+    /// text. Null when there is no engine, no address for the module, or no answer that lines up
+    /// with the candidates - the page then offers none of them, because an entry nobody vouched
+    /// for is exactly what the question is asked to prevent.
+    /// </summary>
+    public async Task<EngineRefactorVerdict[]?> RefactoringsAsync(
+        string moduleName,
+        EngineRefactorCandidate[] candidates,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .RefactoringsAsync(home.ProjectId, moduleName, home.ModuleType, candidates, cancellation)
+            .ConfigureAwait(false);
+
+        // By position or not at all: a short answer would pair a verdict with the wrong entry.
+        return result?.Verdicts is { } verdicts && verdicts.Length == candidates.Length ? verdicts : null;
+    }
+
+    /// <summary>
     /// Asks the engine where the identifier at an offset is declared, or everywhere in the
     /// workbook it is used. Empty when there is no engine, no address for the module, or nothing
     /// at that offset resolves.

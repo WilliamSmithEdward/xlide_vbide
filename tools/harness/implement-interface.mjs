@@ -128,6 +128,18 @@ try {
   check("asking again is refused rather than doubling the members",
     !again.did && /already implements every member/i.test(String(again.detail)), again.detail);
 
+  // And the lightbulb no longer offers it: the Implements line owes nothing now, and the bulb
+  // asks the planner before it lights rather than offering on the line's shape alone.
+  await api.caret(3, { module: IMPL, project: project.projectId, column: 5 });
+  await wait(300);
+  const owesNothing = await api.act("quickFixes", { line: 3, column: 5 });
+  const implementWithheld = (owesNothing.withheld ?? [])
+    .find((one) => one.title === `Implement members of ${IFACE}`);
+  check("nor does the lightbulb offer it again, the planner saying the class owes nothing",
+    !titles(owesNothing).some((one) => one.startsWith("Implement members of"))
+    && /already implements every member/i.test(String(implementWithheld?.refused)),
+    `${titles(owesNothing).join(" | ") || "(none)"}; withheld: ${implementWithheld?.refused}`);
+
   // HEADERS, not mentions: each stub names itself again in its own Err.Raise, so counting
   // mentions counts every member twice and reads as a doubling that did not happen.
   const unchanged = await hostText(IMPL);

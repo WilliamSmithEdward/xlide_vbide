@@ -55,6 +55,29 @@ try {
   check("a caret on the name is offered Inline",
     titles(onName).includes("Inline 'limit'"), titles(onName).join(" | ") || "(none)");
 
+  // THE CARET THE OWNER REPORTED (2026-09-10): on the keyword that closes a procedure the bulb
+  // lit, offering to inline the keyword. Nothing applies there, so nothing is offered - and the
+  // withheld list says both refactorings were ASKED and refused, which is what keeps this check
+  // from passing on a round trip that never came back.
+  await api.caret(8, { module: NAME, project: project.projectId, column: 5 });
+  await wait(300);
+  const onKeyword = await api.act("quickFixes", { line: 8, column: 5 });
+  const withheld = onKeyword.withheld ?? [];
+  check("a caret on End Sub is offered nothing at all",
+    titles(onKeyword).length === 0, titles(onKeyword).join(" | ") || "(none)");
+  check("because both refactorings were asked about and refused, in the planner's words",
+    withheld.some((one) => one.title === "Inline 'Sub'" && /not a local/.test(one.refused))
+    && withheld.some((one) => one.title === "Make 'Sub' a parameter" && /not a local/.test(one.refused)),
+    JSON.stringify(withheld));
+
+  // What asking costs, timed inside the page: the bulb waits on the engine before it shows.
+  await api.caret(4, { module: NAME, project: project.projectId, column: 9 });
+  await wait(300);
+  const cost = await api.act("timeFeature", { what: "codeActions", line: 4, column: 9, n: 10 });
+  check("the lightbulb's question costs well under what a caret move can spend",
+    cost.did && Number(cost.data?.medianMs) < 250,
+    cost.data ? `median ${cost.data.medianMs}ms, p95 ${cost.data.p95Ms}ms` : cost.detail);
+
   /* ---- the menu path ---------------------------------------------------------------------------- */
 
   const made = await api.act("inlineVariable", { word: "limit" });

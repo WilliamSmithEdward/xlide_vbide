@@ -165,6 +165,17 @@ try {
     titlesAt(selected).includes("Extract method..."),
     titlesAt(selected).join(" | ") || "(none)");
 
+  // A selection that half-takes a block is not: the lightbulb asks the planner before it offers
+  // the entry, and the planner would refuse. The dialog path above still carries the refusal to
+  // anyone who asks from the menu.
+  await api.act("select", { startLine: 11, endLine: 12 });
+  await wait(300);
+  const halfBlock = await api.act("quickFixes", { line: 11, column: 5 });
+  const halfWithheld = (halfBlock.withheld ?? []).find((one) => one.title === "Extract method...");
+  check("but a selection that half-takes a block is not, with the planner's refusal beside it",
+    !titlesAt(halfBlock).includes("Extract method...") && /If block/i.test(String(halfWithheld?.refused)),
+    `${titlesAt(halfBlock).join(" | ") || "(none)"}; withheld: ${halfWithheld?.refused}`);
+
   await api.act("select", { clear: 1 });
 
   /* ---- the dialog itself --------------------------------------------------------------------- */

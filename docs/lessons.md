@@ -2399,3 +2399,42 @@ failed them on "several xlide sessions are live" with nothing wrong in any
 of them, and a developer's own Word with the editor open would have done
 the same. They are aimed at the Excel the step launched, like every other
 live step.
+
+## 82. The lightbulb offered refactorings on the shape of the text
+
+The page built the lightbulb's refactoring entries from what the caret sat
+on rather than from what would work: Inline and Make-a-parameter on any
+word, Move to Module on any caret, Extract Variable on any selection,
+Extract Method on any whole lines, Implement on any `Implements` line. The
+planner's refusal arrived only after an entry was chosen, so the bulb lit on
+`End Function` to offer inlining the keyword (the owner's screenshot,
+2026-09-10), and a Move entry stood on every line of every procedure.
+
+The shape rules now decide only what to ask. `textDocument/refactorings`
+runs each candidate's own planner, keeps nothing but the verdict, and the
+page offers what the engine says would go through. The planners stay the
+only implementation of "applies", so the bulb and the refactoring cannot
+disagree. Extract Method and Extract Variable are asked with a fresh name,
+because theirs comes later in a dialog; Move to Module is asked whether any
+other standard module would take the procedure, which split its planner into
+the half the procedure decides and the half the destination decides, and its
+entry is anchored on the procedure's header line. The right-click menu is
+unchanged and still answers a refusal in words: it is where to ask why not.
+A caret's worth of verdicts is one round trip, 0.33ms at the median over
+the engine's pipe, because the analyzer memoizes its parse on the text, and
+about a millisecond in the page with the shim's relay included.
+
+Splitting Move's planner changed one thing a developer can see. When both
+halves would refuse - a procedure reaching for a Private of its module, sent
+to a module that does not exist - the dialog now names the procedure's own
+problem first, since no destination could fix it; it used to name the
+destination and leave the real reason for the second attempt.
+
+Two things came with it. The seven planners' own engine suites ran nowhere:
+not the gate, and not CI, which runs engine tests by name and named none of
+them - and a planner regression now changes what the bulb shows as well, so
+both run them. And the api's `quickFixes` act answers `withheld`, each
+candidate the bulb decided against with the planner's words, because a check
+built on an absence passes on a round trip that never came back; every new
+"not offered" check in the live suites asserts the reason too. The new
+engine suite went 12 of 21 red on a build that approved every candidate.

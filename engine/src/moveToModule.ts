@@ -20,6 +20,49 @@ import { parseModule, type ModuleNode, type ProcedureNode } from '../../../xlide
 import { lineStarts, referencesFor, toLineColumn, type ProjectSymbols } from './navigation';
 import type { MoveToModuleResult } from './protocol';
 
+/**
+ * Whether the procedure at the caret could move ANYWHERE, which is what the lightbulb asks before
+ * it offers the move.
+ *
+ * The entry opens a dialog for the destination, so the question it owes an answer to is whether
+ * some destination would take the procedure - never whether one the developer has not typed yet
+ * would. Every other standard module is tried with the whole planner, the qualified call sites
+ * included, and the first that would take it settles it. Null when one would; otherwise the
+ * procedure's own refusal when no destination could help, or the first destination's when every
+ * one of them refuses.
+ */
+export function moveToModuleOffered(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    source: string,
+    offset: number,
+): string | null {
+    const leaving = leavingFrom(symbols, moduleName, source, offset);
+    if ('refused' in leaving) {
+        return leaving.refused;
+    }
+
+    let first: string | null = null;
+    for (const held of symbols.modules) {
+        if (held.moduleName.toLowerCase() === moduleName.toLowerCase()
+            || !isStandard(symbols, held.moduleName)) {
+            continue;
+        }
+
+        const plan = moveToModuleFor(symbols, moduleName, source, offset, held.moduleName);
+        if (!plan.refused) {
+            return null;
+        }
+
+        if (first === null) {
+            first = plan.refused;
+        }
+    }
+
+    return first
+        ?? `There is no other standard module in this project for '${leaving.procedure.name}' to move into.`;
+}
+
 export function moveToModuleFor(
     symbols: ProjectSymbols,
     moduleName: string,
@@ -29,68 +72,20 @@ export function moveToModuleFor(
 ): MoveToModuleResult {
     const refuse = (why: string): MoveToModuleResult => ({ modules: [], refused: why });
 
-    const module = parseModule(source);
-    const procedure = module.members.find(
-        (member): member is ProcedureNode => member.kind === 'Procedure'
-            && member.span.start <= offset && member.span.end >= offset);
-
-    if (!procedure) {
-        return refuse('Put the caret inside the procedure to move.');
+    // WHAT THE PROCEDURE ITSELF DECIDES, then what the destination does. The first half needs no
+    // destination at all, which is what lets the lightbulb ask it before one has been typed.
+    const leaving = leavingFrom(symbols, moduleName, source, offset, targetName);
+    if ('refused' in leaving) {
+        return refuse(leaving.refused);
     }
 
-    if (!procedure.closed) {
-        return refuse(`'${procedure.name}' has no closing End, so there is nothing whole to move.`);
+    const { procedure } = leaving;
+    const arriving = arrivingAt(symbols, moduleName, procedure, targetName);
+    if ('refused' in arriving) {
+        return refuse(arriving.refused);
     }
 
-    if (targetName.toLowerCase() === moduleName.toLowerCase()) {
-        return refuse(`'${procedure.name}' is already in '${moduleName}'.`);
-    }
-
-    const target = symbols.byModule.get(targetName.toLowerCase());
-    if (!target) {
-        return refuse(`This project has no module called '${targetName}'.`);
-    }
-
-    // Standard modules both ways. A procedure in a class or a form is a MEMBER of that type -
-    // moving it changes what the type can do, which is a design change rather than a relocation -
-    // and a document module's procedures are the document's.
-    if (!isStandard(symbols, moduleName)) {
-        return refuse(`'${moduleName}' is not a standard module, and a procedure in a class, form or document belongs to it. Only a standard module's procedures can move.`);
-    }
-
-    if (!isStandard(symbols, targetName)) {
-        return refuse(`'${targetName}' is not a standard module, so a procedure moved into it would become one of its members.`);
-    }
-
-    const targetSource = target.source ?? '';
-    const targetModule = parseModule(targetSource);
-
-    if (hasPrivateModuleOption(module) || hasPrivateModuleOption(targetModule)) {
-        return refuse('One of these modules declares Option Private Module, which changes what its Public members can reach from outside. This one has to be done by hand.');
-    }
-
-    if (targetModule.members.some((member) => member.kind === 'Procedure'
-        && member.name.toLowerCase() === procedure.name.toLowerCase())) {
-        return refuse(`'${targetName}' already declares a procedure called '${procedure.name}'.`);
-    }
-
-    // An event handler belongs to whatever raises the event, and its name is the binding.
-    if (/^[\p{L}_][\p{L}\p{M}\p{N}_]*_[\p{L}_][\p{L}\p{M}\p{N}_]*$/u.test(procedure.name)
-        && symbols.byModule.has(procedure.name.slice(0, procedure.name.indexOf('_')).toLowerCase())) {
-        return refuse(`'${procedure.name}' reads as an event handler for '${procedure.name.slice(0, procedure.name.indexOf('_'))}', and a handler is bound to the thing that raises it.`);
-    }
-
-    /* ---- what it reaches for that would not come with it ---------------------------------------- */
-
-    const kept = privateNamesOf(module, procedure);
-    const mentioned = namesIn(source.slice(procedure.span.start, procedure.span.end));
-    const stranded = [...kept.keys()].filter((one) => mentioned.has(one));
-
-    if (stranded.length > 0) {
-        const names = stranded.slice(0, 4).map((one) => `'${kept.get(one)}'`).join(', ');
-        const more = stranded.length > 4 ? `, and ${stranded.length - 4} more` : '';
-        return refuse(`'${procedure.name}' uses ${names}${more}, which ${stranded.length === 1 ? 'is' : 'are'} Private to '${moduleName}' and would not be reachable from '${targetName}'.`);
-    }
+    const { targetSource } = arriving;
 
     /* ---- the three edits: out, in, and the qualified call sites ---------------------------------- */
 
@@ -142,6 +137,107 @@ export function moveToModuleFor(
         to: targetName,
         requalified: qualified.count,
     };
+}
+
+/** Said the same way whichever of the two modules carries it. */
+const PRIVATE_MODULE = 'One of these modules declares Option Private Module, which changes what its Public members can reach from outside. This one has to be done by hand.';
+
+/**
+ * The half of a move the procedure decides on its own: a whole procedure at the caret, in a
+ * standard module without Option Private Module, that is not an event handler and reaches for
+ * nothing Private to the module it would leave. No destination changes any of it, so it is asked
+ * first, and it is all the lightbulb has to ask about the procedure. `targetName`, when there is
+ * one, only words the refusal.
+ */
+function leavingFrom(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    source: string,
+    offset: number,
+    targetName?: string,
+): { module: ModuleNode; procedure: ProcedureNode } | { refused: string } {
+    const module = parseModule(source);
+    const procedure = module.members.find(
+        (member): member is ProcedureNode => member.kind === 'Procedure'
+            && member.span.start <= offset && member.span.end >= offset);
+
+    if (!procedure) {
+        return { refused: 'Put the caret inside the procedure to move.' };
+    }
+
+    if (!procedure.closed) {
+        return { refused: `'${procedure.name}' has no closing End, so there is nothing whole to move.` };
+    }
+
+    // Standard modules both ways. A procedure in a class or a form is a MEMBER of that type -
+    // moving it changes what the type can do, which is a design change rather than a relocation -
+    // and a document module's procedures are the document's.
+    if (!isStandard(symbols, moduleName)) {
+        return { refused: `'${moduleName}' is not a standard module, and a procedure in a class, form or document belongs to it. Only a standard module's procedures can move.` };
+    }
+
+    if (hasPrivateModuleOption(module)) {
+        return { refused: PRIVATE_MODULE };
+    }
+
+    // An event handler belongs to whatever raises the event, and its name is the binding.
+    if (/^[\p{L}_][\p{L}\p{M}\p{N}_]*_[\p{L}_][\p{L}\p{M}\p{N}_]*$/u.test(procedure.name)
+        && symbols.byModule.has(procedure.name.slice(0, procedure.name.indexOf('_')).toLowerCase())) {
+        return { refused: `'${procedure.name}' reads as an event handler for '${procedure.name.slice(0, procedure.name.indexOf('_'))}', and a handler is bound to the thing that raises it.` };
+    }
+
+    // What it reaches for that would not come with it.
+    const kept = privateNamesOf(module, procedure);
+    const mentioned = namesIn(source.slice(procedure.span.start, procedure.span.end));
+    const stranded = [...kept.keys()].filter((one) => mentioned.has(one));
+
+    if (stranded.length > 0) {
+        const names = stranded.slice(0, 4).map((one) => `'${kept.get(one)}'`).join(', ');
+        const more = stranded.length > 4 ? `, and ${stranded.length - 4} more` : '';
+        const elsewhere = targetName ? `'${targetName}'` : 'any other module';
+        return { refused: `'${procedure.name}' uses ${names}${more}, which ${stranded.length === 1 ? 'is' : 'are'} Private to '${moduleName}' and would not be reachable from ${elsewhere}.` };
+    }
+
+    return { module, procedure };
+}
+
+/**
+ * The half of a move the destination decides: that it is another module the project has, a
+ * standard one without Option Private Module, that does not already declare a procedure of the
+ * same name.
+ */
+function arrivingAt(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    procedure: ProcedureNode,
+    targetName: string,
+): { targetSource: string } | { refused: string } {
+    if (targetName.toLowerCase() === moduleName.toLowerCase()) {
+        return { refused: `'${procedure.name}' is already in '${moduleName}'.` };
+    }
+
+    const target = symbols.byModule.get(targetName.toLowerCase());
+    if (!target) {
+        return { refused: `This project has no module called '${targetName}'.` };
+    }
+
+    if (!isStandard(symbols, targetName)) {
+        return { refused: `'${targetName}' is not a standard module, so a procedure moved into it would become one of its members.` };
+    }
+
+    const targetSource = target.source ?? '';
+    const targetModule = parseModule(targetSource);
+
+    if (hasPrivateModuleOption(targetModule)) {
+        return { refused: PRIVATE_MODULE };
+    }
+
+    if (targetModule.members.some((member) => member.kind === 'Procedure'
+        && member.name.toLowerCase() === procedure.name.toLowerCase())) {
+        return { refused: `'${targetName}' already declares a procedure called '${procedure.name}'.` };
+    }
+
+    return { targetSource };
 }
 
 /** Whether a module is a standard one, which is the only kind whose procedures can move. */

@@ -120,6 +120,10 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   That is the set. What is left in this area is not more refactorings but the ones that need a
   capability nothing has yet: a rename that follows a symbol into a form's designer, and anything
   that has to reason about what a call does rather than what it names.
+
+  The lightbulb offers each of them only where its planner would carry it out: every entry is
+  asked of the engine before it is shown (`textDocument/refactorings`), and the right-click menu
+  is where a refusal is answered in words ([lessons.md](lessons.md) finding 82).
 - **A project's own conditional compilation arguments are read and honoured.** They live in the
   VBE's Project Properties box, which the object model has no property for, so they come out of
   the saved package's `dir` stream (MS-OVBA record `0x000C`) and ride the project seed. Without
@@ -137,13 +141,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 ## How it is checked
 
 `tools\verify.ps1` is the whole local gate in one command, in three tiers. Bare, it is
-19 headless steps in about ninety seconds: vendored spec, engine currency against the analyzer checkout, the
+20 headless steps in about ninety seconds: vendored spec, engine currency against the analyzer checkout, the
 variant-as-object guard, page and engine typecheck, build and tests, the engine language matrix
-and its host-supplied facts, knowledge routes, inline comment features, generated module casing,
+and its host-supplied facts, knowledge routes, inline comment features, the seven refactoring
+planners with the lightbulb's verdicts over them, generated module casing,
 the headless page probes, the xlide api's route audit, the Release build, the unit tests, the
 check that Release ships the api shut, and the native publish. `-Live` adds four steps that need
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
-release rather than before a commit. All 27 take about eleven minutes, the Word and Access
+release rather than before a commit. All 28 take about eleven minutes, the Word and Access
 groups included.
 
 **The live tier is not all Excel any more.** Its first group opens an Access database

@@ -80,6 +80,30 @@ try {
     !titles(inBody).some((one) => one.startsWith("Encapsulate ")),
     titles(inBody).join(" | ") || "(none)");
 
+  // A declaration whose variable CANNOT go behind a property is not offered it either: an array,
+  // which VBA cannot pass to a Property Let. The bulb used to offer on the line's shape alone.
+  // A module of its own, so the class above keeps the line numbers the rest of this suite reads.
+  const ARRAY = `Arr${process.pid % 10000}`;
+  try {
+    await api.component("add", { kind: "module", name: ARRAY, project: project.projectId });
+    await api.writeModule(ARRAY, ["Option Explicit", "", "Public Items(3) As Long"].join(CRLF), project.projectId);
+    await api.caret(3, { module: ARRAY, project: project.projectId, column: 8 });
+    await waitFor("the page to be showing the array's module", async () =>
+      ((await api.ui()).focus.model ?? "").toLowerCase().endsWith(`/${ARRAY.toLowerCase()}`));
+    await wait(300);
+    const onArray = await api.act("quickFixes", { line: 3, column: 8 });
+    const arrayWithheld = (onArray.withheld ?? []).find((one) => one.title === "Encapsulate 'Items' in a property");
+    check("an array's declaration is not offered encapsulation, with the planner's refusal beside it",
+      !titles(onArray).some((one) => one.startsWith("Encapsulate ")) && /array/i.test(String(arrayWithheld?.refused)),
+      `${titles(onArray).join(" | ") || "(none)"}; withheld: ${arrayWithheld?.refused}`);
+  } finally {
+    await api.pane("close", { module: ARRAY, project: project.projectId, answer: "discard" }).catch(() => { });
+    await api.component("remove", { name: ARRAY, project: project.projectId }).catch(() => { });
+    await api.caret(3, { module: NAME, project: project.projectId });
+    await waitFor("the page to be back on the class", async () =>
+      ((await api.ui()).focus.model ?? "").toLowerCase().endsWith(`/${NAME.toLowerCase()}`));
+  }
+
   /* ---- the rewrite ---------------------------------------------------------------------------- */
 
   const made = await api.act("encapsulateField", { fieldName: "Label" });

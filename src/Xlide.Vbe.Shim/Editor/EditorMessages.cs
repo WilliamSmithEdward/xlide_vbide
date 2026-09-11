@@ -742,6 +742,24 @@ public sealed record CodeActionResultMessage(
     [property: JsonPropertyName("actions")] SurfaceCodeAction[] Actions);
 
 /// <summary>
+/// One lightbulb candidate's verdict. Applies is spelled out rather than read from a missing
+/// refusal, so a field lost on the way can only ever withhold an entry, never offer one.
+/// </summary>
+public sealed record SurfaceRefactorVerdict(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("applies")] bool Applies,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
+/// The answer to the lightbulb's question about its candidate refactorings, in the order they
+/// were asked. Empty when there was no answer, which the page reads as none of them vouched for.
+/// </summary>
+public sealed record RefactoringsResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("verdicts")] SurfaceRefactorVerdict[] Verdicts);
+
+/// <summary>
 /// The answer to one rename: which modules changed and how many uses went in each, or the reason
 /// nothing changed. The new text is not sent back - the host has already written it, and the open
 /// tabs are refreshed by the ordinary document sync.
@@ -1067,6 +1085,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ScmStampMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
+[JsonSerializable(typeof(SurfaceRefactorVerdict))]
+[JsonSerializable(typeof(RefactoringsResultMessage))]
 [JsonSerializable(typeof(SurfaceAnalysisRule))]
 [JsonSerializable(typeof(AnalysisRulesResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]

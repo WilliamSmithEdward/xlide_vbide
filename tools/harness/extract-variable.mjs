@@ -55,12 +55,23 @@ try {
   check("a bare caret is not offered Extract variable",
     !titles(bare).includes("Extract variable..."), titles(bare).join(" | ") || "(none)");
 
-  // `total * 3` on line 6, which starts at column 17.
-  await api.act("select", { startLine: 6, endLine: 6 });
+  // `total * 3` on line 6, columns 17 to 26: the expression itself. A whole-line selection is the
+  // statement, which is not an expression, and since the bulb asks the planner before it offers
+  // the entry, that selection is correctly not offered it.
+  await api.act("select", { startLine: 6, startColumn: 17, endLine: 6, endColumn: 26 });
   await wait(300);
   const selected = await api.act("quickFixes", { line: 6, column: 17 });
-  check("and a selection is offered it",
+  check("and a selected expression is offered it",
     titles(selected).includes("Extract variable..."), titles(selected).join(" | ") || "(none)");
+
+  // Half of one is not: `total *`, with nothing on the operator's right.
+  await api.act("select", { startLine: 6, startColumn: 17, endLine: 6, endColumn: 24 });
+  await wait(300);
+  const half = await api.act("quickFixes", { line: 6, column: 17 });
+  const halfWithheld = (half.withheld ?? []).find((one) => one.title === "Extract variable...");
+  check("but half of one is not, with the planner's refusal beside it",
+    !titles(half).includes("Extract variable...") && /whole expression/i.test(String(halfWithheld?.refused)),
+    `${titles(half).join(" | ") || "(none)"}; withheld: ${halfWithheld?.refused}`);
 
   /* ---- a value expression --------------------------------------------------------------------- */
 

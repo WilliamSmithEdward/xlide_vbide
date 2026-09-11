@@ -783,6 +783,54 @@ export interface EncapsulateFieldResult {
 }
 
 /**
+ * textDocument/refactorings: which of the refactorings the lightbulb would offer at a caret or a
+ * selection would actually go through, asked before any of them is offered.
+ *
+ * THE LIGHTBULB USED TO GUESS. The page offered Inline and Make-a-parameter on any word, Move on
+ * any caret and Extract on any selection, and the planner's refusal arrived only after the entry
+ * was chosen - so the bulb lit on `End Function` to offer inlining a keyword (the owner's
+ * screenshot, 2026-09-10). The page still decides what shape of refactoring a caret or a
+ * selection could mean; this runs each one's own planner without keeping the result, and the
+ * entry is offered only when the planner would go through.
+ *
+ * Read-only, and one round trip for every candidate the caret raises. A planner that needs a name
+ * the developer has not typed yet - Extract Method and Extract Variable ask for one in a dialog -
+ * is tried with a fresh name nobody uses, so the verdict is about the selection and never about a
+ * name. Move to Module is asked whether ANY other standard module would take the procedure, since
+ * its entry asks for the destination.
+ */
+export type RefactoringCandidate =
+    | { kind: 'inlineVariable'; offset: number }
+    | { kind: 'introduceParameter'; offset: number }
+    | { kind: 'moveToModule'; offset: number }
+    | { kind: 'extractVariable'; startOffset: number; endOffset: number }
+    | { kind: 'extractMethod'; startLine: number; endLine: number }
+    | { kind: 'encapsulateField'; fieldName: string }
+    | { kind: 'implementInterface'; interfaceName: string };
+
+export interface RefactoringsParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    moduleType?: string;
+    documentType?: string;
+    /** What the caret or selection could mean, in the order the lightbulb would list them. */
+    candidates: RefactoringCandidate[];
+}
+
+/** One candidate's answer, at the candidate's own position in the request. */
+export interface RefactoringVerdict {
+    kind: string;
+    /** Null when the refactoring would go through as asked; the planner's own refusal otherwise. */
+    refused: string | null;
+}
+
+export interface RefactoringsResult {
+    verdicts: RefactoringVerdict[];
+}
+
+/**
  * workspace/renameModule: the new text of every module that mentions a module being renamed.
  *
  * The module's own name is not in its text - it belongs to the component, which the add-in

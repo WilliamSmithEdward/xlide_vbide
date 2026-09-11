@@ -344,6 +344,24 @@ Step 'engine inline comment features' {
     'suppression scopes, doc comments, the suppression fix, and the guarded rule overrides'
 }
 
+Step 'engine refactorings' {
+    # EVERY PLANNER, AND WHAT THE LIGHTBULB ASKS OF THEM. The seven refactorings each have a
+    # headless suite over the real pipe, and until 2026-09-10 nothing ran them: not this gate,
+    # and not CI, which runs the engine's tests by name and had named none of these. They matter
+    # more since the lightbulb began asking the planners before it offers anything - a planner
+    # that regresses now also changes what the bulb shows, silently (refactorings.mjs holds the
+    # verdicts, starting from the End Function the owner reported).
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        foreach ($suite in 'extract-method', 'implement-interface', 'encapsulate-field', 'extract-variable',
+            'inline-variable', 'move-to-module', 'introduce-parameter', 'refactorings') {
+            node "test/$suite.mjs" 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "the engine's $suite suite failed" }
+        }
+    } finally { Pop-Location }
+    'seven planners over the pipe, and the verdicts the lightbulb offers from'
+}
+
 Step 'generated VBA module casing' {
     # VBA cases identifiers project-wide to the latest declaration it sees, so a lowercase
     # parameter in a module this product INSTALLS re-spells the developer's own code - every

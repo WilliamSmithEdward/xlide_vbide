@@ -82,6 +82,7 @@ export type HostMessage =
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
+  | { type: "refactoringsResult"; id: number; verdicts: HostRefactorVerdict[] }
   | { type: "analysisRulesResult"; id: number; rules: HostAnalysisRule[]; overrides: Record<string, string>; failed?: boolean }
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
@@ -363,6 +364,26 @@ export interface HostCodeAction {
 }
 
 /**
+ * One refactoring the lightbulb would offer, asked of the host before it is offered: the kind,
+ * and what that kind's planner is asked with - the offset of the word under the caret, the span
+ * of a selection, the lines of whole statements, or the name on a declaration or `Implements`
+ * line.
+ */
+export type HostRefactorCandidate =
+  | { kind: "inlineVariable" | "introduceParameter" | "moveToModule"; offset: number }
+  | { kind: "extractVariable"; startOffset: number; endOffset: number }
+  | { kind: "extractMethod"; startLine: number; endLine: number }
+  | { kind: "encapsulateField"; fieldName: string }
+  | { kind: "implementInterface"; interfaceName: string };
+
+/** One candidate's verdict: `applies` true when the planner would carry it out as asked. */
+export interface HostRefactorVerdict {
+  kind: string;
+  applies: boolean;
+  refused?: string | null;
+}
+
+/**
  * One coloured span from the host's engine, UTF-16 offsets into the live source. The type is the
  * analyzer's vocabulary; the only modifier it uses is `defaultLibrary`, for host globals.
  */
@@ -563,6 +584,7 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "codeAction"; id: number; start: number; end: number; module?: string; project?: string | null }
+  | { type: "refactorings"; id: number; candidates: HostRefactorCandidate[] }
   | { type: "semanticTokens"; id: number; module: string; project?: string }
   | { type: "definition"; id: number; offset: number }
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
@@ -765,6 +787,8 @@ export class EditorBridge {
   private readonly pendingSignatures = new RequestTable<HostSignatureInfo | null>();
   private readonly pendingCanonicalCases = new RequestTable<HostTextEdit[]>();
   private readonly pendingCodeActions = new RequestTable<HostCodeAction[]>();
+  /** The lightbulb's verdicts. An empty answer is no answer, and offers nothing. */
+  private readonly pendingRefactorings = new RequestTable<HostRefactorVerdict[]>();
   private readonly pendingAnalysisRules = new RequestTable<HostAnalysisRules | null>();
   private readonly pendingSemanticTokens = new RequestTable<HostSemanticToken[] | null>();
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
@@ -1273,6 +1297,20 @@ export class EditorBridge {
         type: "codeAction", id, start, end,
         ...(target ? { module: target.module, project: target.project } : {}),
       }));
+  }
+
+  /**
+   * Asks the host which of the lightbulb's candidate refactorings would go through, before any is
+   * offered: one verdict per candidate, in order - null where it would, the planner's refusal
+   * where it would not. Null for the whole answer when none came back or it does not line up
+   * with what was asked, which the lightbulb reads as nothing vouched for.
+   */
+  requestRefactorings(candidates: HostRefactorCandidate[]): Promise<(string | null)[] | null> {
+    return this.pendingRefactorings.ask(() => [], 2000, (id) =>
+      this.transport.post({ type: "refactorings", id, candidates }))
+      .then((verdicts) => verdicts.length !== candidates.length
+        ? null
+        : verdicts.map((one) => one.applies === true ? null : (one.refused ?? "Refused without a reason.")));
   }
 
   /**
@@ -2140,6 +2178,9 @@ export class EditorBridge {
 
       case "codeActionResult":
         this.pendingCodeActions.settle(message.id, message.actions);
+        return;
+      case "refactoringsResult":
+        this.pendingRefactorings.settle(message.id, message.verdicts ?? []);
         return;
       case "renameResult":
         this.pendingRenames.settle(message.id, {
@@ -3545,6 +3586,20 @@ export function demoTransport(): HostTransport {
               edits: [{ start: shadowed, end: shadowed + "rowIndex".length, text: "outerRowIndex" }],
             }]
             : [],
+        });
+      }
+      // The lightbulb's verdicts. The demo has no engine to ask, so it vouches for nothing: the
+      // bulb here shows the one fix over the demo's squiggle and no refactoring, which is what an
+      // unanswered question looks like on the real surface too.
+      if (message.type === "refactorings") {
+        send({
+          type: "refactoringsResult",
+          id: message.id,
+          verdicts: message.candidates.map((one) => ({
+            kind: one.kind,
+            applies: false,
+            refused: "The demo page has no engine to ask.",
+          })),
         });
       }
       // The demo's own answers for both, so the peek windows and the context-menu entries are

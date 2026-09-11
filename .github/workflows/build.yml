@@ -140,6 +140,19 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/knowledge.mjs
 
+      # The seven refactorings' own suites, and the lightbulb's verdicts over them, which nothing
+      # ran until 2026-09-10. The lightbulb asks each planner before it offers its entry, so a
+      # planner that regresses changes what the bulb shows as well. Also in verify.ps1. Each exit
+      # code is checked, because the pwsh wrapper fails a step only on the last command's.
+      - name: Refactorings
+        working-directory: xlide_vbide/engine
+        shell: pwsh
+        run: |
+          foreach ($suite in 'extract-method', 'implement-interface', 'encapsulate-field', 'extract-variable', 'inline-variable', 'move-to-module', 'introduce-parameter', 'refactorings') {
+            node "test/$suite.mjs"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.

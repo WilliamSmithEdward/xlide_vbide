@@ -69,13 +69,24 @@ try {
 
   const titles = (answer) => (answer.data ?? []).map((one) => one.title);
   const offered = await api.act("quickFixes", { line: 7, column: 5 });
-  check("a caret inside a procedure is offered the move",
+  check("a caret on a procedure's header line is offered the move",
     titles(offered).includes("Move to module..."), titles(offered).join(" | ") || "(none)");
   // A `Public Sub` line is a procedure, not a variable called `Sub`: the encapsulate entry has no
   // business on it, and did until this suite put a caret on one.
   check("and is not offered to encapsulate the word Sub",
     !titles(offered).some((one) => one.startsWith("Encapsulate ")),
     titles(offered).join(" | ") || "(none)");
+
+  // Not from inside the body. The bulb marks a procedure where it is declared: offered from every
+  // line of every procedure that could move, it said nothing about the line the caret was on.
+  // The right-click menu still reaches the move from anywhere inside.
+  await api.caret(8, { module: SOURCE, project: project.projectId, column: 5 });
+  await wait(300);
+  const inBody = await api.act("quickFixes", { line: 8, column: 5 });
+  check("a line inside the body does not light the bulb for the move",
+    !titles(inBody).includes("Move to module..."), titles(inBody).join(" | ") || "(none)");
+  await api.caret(7, { module: SOURCE, project: project.projectId });
+  await wait(300);
 
   /* ---- the menu path ---------------------------------------------------------------------------- */
 
@@ -149,13 +160,26 @@ try {
 
   /* ---- the refusals ------------------------------------------------------------------------------ */
 
+  // Free, on line 9, can go anywhere, which is what the missing destination below is asked with:
+  // the planner names what the procedure itself cannot do BEFORE anything about a destination,
+  // so asking with Stranded would answer about 'held' and never reach the missing module.
   await api.writeModule(SOURCE, [
     "Option Explicit", "", "Private held As Long", "",
     "Public Sub Stranded()", "    Debug.Print held", "End Sub",
+    "", "Public Sub Free()", "    Debug.Print 1", "End Sub",
   ].join(CRLF), project.projectId);
   await wait(700);
   await api.caret(5, { module: SOURCE, project: project.projectId });
   await wait(300);
+
+  // The lightbulb does not offer this one at all: it asks whether ANY other standard module would
+  // take the procedure, and a procedure reaching for a Private of its own module can go nowhere.
+  const strandedBulb = await api.act("quickFixes", { line: 5, column: 12 });
+  const moveWithheld = (strandedBulb.withheld ?? []).find((one) => one.title === "Move to module...");
+  check("the lightbulb does not offer to move a procedure using a Private of its module",
+    !titles(strandedBulb).includes("Move to module...")
+    && /'held'/.test(String(moveWithheld?.refused)) && /any other module/.test(String(moveWithheld?.refused)),
+    `${titles(strandedBulb).join(" | ") || "(none)"}; withheld: ${moveWithheld?.refused}`);
 
   const stranded = await api.act("moveToModule", { line: 5, column: 5, targetModule: TARGET });
   check("a procedure using a Private of its module is refused, and the refusal names it",
@@ -168,7 +192,7 @@ try {
     untouched.some((one) => one.includes("Sub Stranded")),
     untouched.map((one) => one.trim()).filter(Boolean).join(" | "));
 
-  const nowhere = await api.act("moveToModule", { line: 5, column: 5, targetModule: "NoSuchModule" });
+  const nowhere = await api.act("moveToModule", { line: 9, column: 5, targetModule: "NoSuchModule" });
   check("a module the project does not have is refused",
     !nowhere.did && /no module called 'NoSuchModule'/.test(String(nowhere.detail)), nowhere.detail);
 } finally {

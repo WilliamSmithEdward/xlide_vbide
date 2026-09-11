@@ -34,6 +34,7 @@ import { introduceParameterFor } from './introduceParameter';
 import { moveToModuleFor } from './moveToModule';
 import { extractMethodFor } from './extractMethod';
 import { implementInterfaceFor } from './implementInterface';
+import { refactoringVerdicts, refusingEvery } from './refactorings';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
@@ -57,6 +58,8 @@ import {
     type AnalysisRulesResult,
     type CodeActionParams,
     type CodeActionResult,
+    type RefactoringsParams,
+    type RefactoringsResult,
     type CompletionParams,
     type CompletionResult,
     type DiagnosticsParams,
@@ -434,6 +437,9 @@ export class Dispatcher {
             case 'textDocument/implementInterface':
                 return this.implementInterface(this.require<ImplementInterfaceParams>(params));
 
+            case 'textDocument/refactorings':
+                return this.refactorings(this.require<RefactoringsParams>(params));
+
             case 'workspace/renameModule':
                 return this.renameModule(this.require<RenameModuleParams>(params));
 
@@ -789,6 +795,32 @@ export class Dispatcher {
 
         const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
         return implementInterfaceFor(symbols, params.moduleName, source, params.interfaceName);
+    }
+
+    /**
+     * The lightbulb's question, answered by the planners themselves: which of the refactorings a
+     * caret or a selection could mean would go through here. A module the engine does not hold
+     * refuses every candidate in the words each refactoring uses alone.
+     */
+    private refactorings(params: RefactoringsParams): RefactoringsResult {
+        this.requireInitialized();
+
+        const candidates: readonly unknown[] = Array.isArray(params.candidates) ? params.candidates : [];
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { verdicts: refusingEvery(candidates, 'This module is not one the engine holds.') };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return {
+            verdicts: refactoringVerdicts(
+                symbols,
+                this.seededModules.get(params.projectId) ?? [],
+                params.projectId,
+                params.moduleName,
+                source,
+                candidates),
+        };
     }
 
     private renameModule(params: RenameModuleParams): RenameResult {

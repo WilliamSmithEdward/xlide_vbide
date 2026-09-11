@@ -161,6 +161,12 @@ the one module, syncs the open tab and fills the undo slot; the page offers it f
 for the name. 34 checks in `engine/test/extract-method.mjs`, 16 in
 `tools\harness\extract-method.mjs`, and a round in `com-leak.mjs`.
 
+Since 2026-09-10 the lightbulb asks before it offers. The entry appears only where the planner
+would carry the selection out, tried with a fresh name because the real one comes later in the
+dialog (`textDocument/refactorings`, [lessons.md](lessons.md) finding 82), so a selection that
+half-takes a block no longer lights the bulb at all. The right-click menu still offers it on any
+selection and answers the refusal in the dialog.
+
 Three departures from the design above, each deliberate:
 
 - **A dialog, not the inline rename box.** The editor's rename widget is bound to a symbol at a

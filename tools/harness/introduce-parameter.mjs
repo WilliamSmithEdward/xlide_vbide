@@ -71,6 +71,27 @@ try {
   check("a caret on a local is offered the parameter",
     titles(offered).includes("Make 'rate' a parameter"), titles(offered).join(" | ") || "(none)");
 
+  // A PARAMETER IS NOT A LOCAL, and the bulb used to offer to make one a parameter all the same,
+  // because it offered on any word and let the refusal arrive after the choice. It asks the
+  // planner first now, and the withheld list carries the answer, so this check cannot pass on a
+  // round trip that never came back. Column 23 is `label` in `Public Sub Post(ByVal label ...`.
+  await api.caret(3, { module: OWNER, project: project.projectId, column: 23 });
+  await wait(300);
+  const onParameter = await api.act("quickFixes", { line: 3, column: 23 });
+  const refusedFor = (answer, title) =>
+    (answer.withheld ?? []).find((one) => one.title === title)?.refused ?? null;
+  check("a caret on a parameter is not offered to make it one, and the planner says why",
+    !titles(onParameter).includes("Make 'label' a parameter")
+    && /already a parameter/.test(String(refusedFor(onParameter, "Make 'label' a parameter"))),
+    `${titles(onParameter).join(" | ") || "(none)"}; withheld: ${refusedFor(onParameter, "Make 'label' a parameter")}`);
+  check("nor to inline it",
+    !titles(onParameter).includes("Inline 'label'")
+    && /is a parameter/.test(String(refusedFor(onParameter, "Inline 'label'"))),
+    String(refusedFor(onParameter, "Inline 'label'")));
+
+  await api.caret(4, { module: OWNER, project: project.projectId, column: 9 });
+  await wait(300);
+
   /* ---- the menu path ------------------------------------------------------------------------------ */
 
   const made = await api.act("introduceParameter", { word: "rate" });

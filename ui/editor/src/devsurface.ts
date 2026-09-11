@@ -557,6 +557,12 @@ export interface ActResult {
   detail: string;
   /** What the action found, when it is a question as much as an act. */
   data?: unknown;
+  /**
+   * `quickFixes` alone: the refactorings the lightbulb asked the engine about and did not offer,
+   * each with the planner's own reason - the half of its answer that says an absence was decided
+   * rather than a round trip that never came back.
+   */
+  withheld?: { title: string; refused: string }[];
 }
 
 /** An action's answer. A promise for anything whose outcome crosses to the host and back. */
@@ -2696,10 +2702,16 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         where.model, range, { trigger: 1, only: undefined } as never, NO_CANCEL);
 
       const actions = answer?.actions ?? [];
+      // THE REFACTORINGS THE LIGHTBULB DECIDED AGAINST, each with the planner's reason, beside the
+      // entries it shows. An absence alone cannot tell a refusal from a verdict that never came
+      // back, and a check built on absence alone passes on a broken round trip.
+      const withheld = (answer as { withheld?: { title: string; refused: string }[] } | null | undefined)
+        ?.withheld ?? [];
       return {
         did: actions.length > 0,
-        detail: `${actions.length} quick fix(es)`,
+        detail: `${actions.length} quick fix(es)` + (withheld.length > 0 ? `, ${withheld.length} withheld` : ""),
         data: actions.map((one) => ({ title: one.title, kind: one.kind, isPreferred: one.isPreferred })),
+        withheld,
       };
     },
 
@@ -2729,10 +2741,24 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         definition: () => parts.providers.definition.provideDefinition(where.model, where.position, NO_CANCEL),
         signature: () => parts.providers.signature.provideSignatureHelp(
           where.model, where.position, NO_CANCEL, { triggerKind: 1, isRetrigger: false } as never),
+        // The lightbulb, which asks the engine about every refactoring the caret raises before it
+        // shows anything - timed, so the cost of that question is a number and not a claim. It
+        // reads the editor's own caret and selection, as the bulb does: place them first.
+        codeActions: () => {
+          const word = where.model.getWordAtPosition(where.position);
+          const range = word
+            ? new monacoApi.Range(
+              where.position.lineNumber, word.startColumn, where.position.lineNumber, word.endColumn)
+            : new monacoApi.Range(
+              where.position.lineNumber, where.position.column,
+              where.position.lineNumber, where.position.column);
+          return parts.providers.codeAction.provideCodeActions(
+            where.model, range, { trigger: 1, only: undefined } as never, NO_CANCEL);
+        },
       }[which];
 
       if (!call) {
-        return { did: false, detail: `what must be hover, completions, definition or signature; got ${which}` };
+        return { did: false, detail: `what must be hover, completions, definition, signature or codeActions; got ${which}` };
       }
 
       const samples: number[] = [];
@@ -3080,9 +3106,26 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: `${args.startLine}-${args.endLine} is not a range of this model's ${lines} line(s)` };
       }
 
-      editor.setSelection(new monacoApi.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine)));
+      // COLUMNS WHEN GIVEN, whole lines when not. Extract Variable's real case is part of one
+      // line - an expression inside a statement - and the lightbulb now asks the engine whether a
+      // selection is one before offering the entry, so a whole-line selection is correctly refused
+      // and the door needed a way to make the other kind.
+      const startColumn = args.startColumn === undefined ? 1 : Number(args.startColumn);
+      const endColumn = args.endColumn === undefined ? model.getLineMaxColumn(endLine) : Number(args.endColumn);
+      if (!Number.isInteger(startColumn) || startColumn < 1 || startColumn > model.getLineMaxColumn(startLine)
+        || !Number.isInteger(endColumn) || endColumn < 1 || endColumn > model.getLineMaxColumn(endLine)
+        || (startLine === endLine && endColumn < startColumn)) {
+        return { did: false, detail: `${args.startColumn}-${args.endColumn} are not columns of lines ${startLine}-${endLine}` };
+      }
+
+      editor.setSelection(new monacoApi.Range(startLine, startColumn, endLine, endColumn));
       editor.focus();
-      return { did: true, detail: `lines ${startLine}-${endLine} selected` };
+      return {
+        did: true,
+        detail: args.startColumn === undefined && args.endColumn === undefined
+          ? `lines ${startLine}-${endLine} selected`
+          : `${startLine}:${startColumn}-${endLine}:${endColumn} selected`,
+      };
     },
 
     /**

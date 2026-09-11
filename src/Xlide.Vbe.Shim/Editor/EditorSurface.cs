@@ -278,6 +278,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Request id, start and end offsets, and the module and workbook when the asker names one (the Problems pane); null for the shown module.</summary>
     public Action<int, int, int, string?, string?>? CodeActionsRequested { get; set; }
 
+    /// <summary>
+    /// The lightbulb asking which of its candidate refactorings would go through, before it offers
+    /// any: the request id and the candidates, already checked at this boundary.
+    /// </summary>
+    public Action<int, Xlide.Vbe.Core.Engine.EngineRefactorCandidate[]>? RefactoringsRequested { get; set; }
+
     /// <summary>The page asking for the analyzer rule catalog and the standing overrides.</summary>
     public Action<int>? AnalysisRulesRequested { get; set; }
 
@@ -494,6 +500,24 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new CodeActionResultMessage("codeActionResult", requestId, actions),
             EditorMessageContext.Default.CodeActionResultMessage));
+    }
+
+    /// <summary>
+    /// Answers the lightbulb's question about its candidate refactorings, one verdict per
+    /// candidate in the order they were asked; empty when there was no answer.
+    /// </summary>
+    public void ShowRefactorings(int requestId, SurfaceRefactorVerdict[] verdicts)
+    {
+        ArgumentNullException.ThrowIfNull(verdicts);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new RefactoringsResultMessage("refactoringsResult", requestId, verdicts),
+            EditorMessageContext.Default.RefactoringsResultMessage));
     }
 
     /// <summary>Answers one rename request: what changed, or why nothing did.</summary>
@@ -2677,6 +2701,28 @@ internal sealed class EditorSurface : IDisposable
                             ? fixProjectElement.GetString()
                             : null;
                         CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd, fixModule, fixProject);
+                    }
+
+                    break;
+
+                case "refactorings":
+                    if (document.RootElement.TryGetProperty("id", out var refactoringsIdElement)
+                        && refactoringsIdElement.TryGetInt32(out var refactoringsRequestId))
+                    {
+                        // Checked here, at the boundary, before anything is relayed. A request the
+                        // page built wrong is answered at once with no verdicts, which the page
+                        // reads as nothing vouched for, rather than left to time out.
+                        if (document.RootElement.TryGetProperty("candidates", out var refactoringsCandidatesElement)
+                            && Xlide.Vbe.Core.Engine.EngineRefactorCandidate.TryReadAll(
+                                refactoringsCandidatesElement, out var refactoringsCandidates))
+                        {
+                            RefactoringsRequested?.Invoke(refactoringsRequestId, refactoringsCandidates);
+                        }
+                        else
+                        {
+                            Log.Warn("refactorings: the page asked with candidates this boundary will not relay");
+                            ShowRefactorings(refactoringsRequestId, []);
+                        }
                     }
 
                     break;

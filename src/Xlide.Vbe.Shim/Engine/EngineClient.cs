@@ -497,6 +497,25 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks which of the lightbulb's candidate refactorings would go through at a module's live
+    /// text: each one's own planner, run without keeping the result. The verdicts come back in the
+    /// candidates' order.
+    /// </summary>
+    public async Task<EngineRefactorings?> RefactoringsAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        EngineRefactorCandidate[] candidates,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["candidates"] = candidates;
+
+        var result = await CallAsync("textDocument/refactorings", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineRefactorings);
+    }
+
+    /// <summary>
     /// Asks where the identifier at an offset is declared, or everywhere it is used. One method
     /// for both because the request and the answer are the same shape; the engine names which.
     /// </summary>

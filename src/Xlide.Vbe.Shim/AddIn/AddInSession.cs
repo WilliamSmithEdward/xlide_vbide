@@ -1446,6 +1446,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
+        _editorSurface.RefactoringsRequested = OnRefactoringsRequested;
         _editorSurface.AnalysisRulesRequested = OnAnalysisRulesRequested;
         _editorSurface.SuppressFindingRequested = OnSuppressFindingRequested;
         _editorSurface.RuleSeverityChangeRequested = (code, severity) =>
@@ -7456,6 +7457,52 @@ internal sealed partial class AddInSession : IDisposable
             actions => $"{actions.Length} fix(es)",
             forModule,
             forSource);
+    }
+
+    /// <summary>
+    /// Answers the lightbulb's question before it offers a refactoring: which of the candidates a
+    /// caret or a selection raised would the engine's own planners carry out. Off the host thread
+    /// like every language request, and empty on failure - the page offers nothing it was not
+    /// told would work, so an empty answer is a lightbulb without refactorings, never a wrong one.
+    /// </summary>
+    private void OnRefactoringsRequested(int requestId, Xlide.Vbe.Core.Engine.EngineRefactorCandidate[] candidates) =>
+        AnswerFromEngine<SurfaceRefactorVerdict[]>(
+            "refactorings",
+            $" ({string.Join(", ", candidates.Select(one => one.Kind))})",
+            [],
+            async (analysis, module, source, token) =>
+            {
+                var answered = await analysis.RefactoringsAsync(module, candidates, token)
+                    .ConfigureAwait(false);
+                return answered is null
+                    ? []
+                    : [.. answered.Select(one => new SurfaceRefactorVerdict(one.Kind, one.Refused is null, one.Refused))];
+            },
+            (surface, verdicts) => surface.ShowRefactorings(requestId, verdicts),
+            DescribeVerdicts);
+
+    /// <summary>
+    /// The log's line for a lightbulb's verdicts: how many apply, and each one withheld with the
+    /// start of its reason, so a bulb that did not light can be explained from the log alone.
+    /// </summary>
+    private static string DescribeVerdicts(SurfaceRefactorVerdict[] verdicts)
+    {
+        if (verdicts.Length == 0)
+        {
+            return "no answer, so none offered";
+        }
+
+        static string Shortened(string text) => text.Length <= 90 ? text : text[..87] + "...";
+
+        var withheld = verdicts
+            .Where(one => !one.Applies)
+            .Select(one => $"{one.Kind}: {Shortened(one.Refused ?? "refused")}")
+            .ToArray();
+        var applies = verdicts.Length - withheld.Length;
+
+        return withheld.Length == 0
+            ? $"{applies} of {verdicts.Length} apply"
+            : $"{applies} of {verdicts.Length} apply; withheld {string.Join("; ", withheld)}";
     }
 
     /// <summary>
