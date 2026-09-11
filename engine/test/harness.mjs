@@ -32,14 +32,26 @@ export async function startEngine(label, { useExe = process.argv.includes('--exe
     engine.stderr.on('data', (chunk) => process.stderr.write(`engine stderr: ${chunk}`));
 
     // Resolves once the engine reports the pipe is open, so there is no race and no sleep.
+    //
+    // EVERY BUDGET TIMER IS CLEARED WHEN ITS ANSWER ARRIVES, here and in call() below. A pending
+    // timer holds node open, so a suite that ends by running out of work - rather than by
+    // process.exit - sat out the last 30s budget it had started: form-unvouched and
+    // class-predeclared took 30 seconds each for 3 and 6 checks, a minute of every gate run and
+    // the same tail on pass-cost in CI (2026-09-10).
     await new Promise((resolve, reject) => {
         let seen = '';
+        const budget = setTimeout(() => reject(new Error('engine did not report listening within 30s')), 30_000);
         engine.stdout.on('data', (chunk) => {
             seen += chunk.toString();
-            if (seen.includes('listening')) { resolve(); }
+            if (seen.includes('listening')) {
+                clearTimeout(budget);
+                resolve();
+            }
         });
-        engine.on('exit', (code) => reject(new Error(`engine exited early with code ${code}`)));
-        setTimeout(() => reject(new Error('engine did not report listening within 30s')), 30_000);
+        engine.on('exit', (code) => {
+            clearTimeout(budget);
+            reject(new Error(`engine exited early with code ${code}`));
+        });
     });
 
     const socket = net.connect(`\\\\.\\pipe\\${pipeName}`);
@@ -65,6 +77,7 @@ export async function startEngine(label, { useExe = process.argv.includes('--exe
             const waiter = pending.get(message.id);
             if (waiter) {
                 pending.delete(message.id);
+                clearTimeout(waiter.budget);
                 if (message.error) { waiter.reject(new Error(`${message.error.code}: ${message.error.message}`)); }
                 else { waiter.resolve(message.result); }
             }
@@ -74,11 +87,12 @@ export async function startEngine(label, { useExe = process.argv.includes('--exe
     function call(method, params) {
         const id = nextId++;
         return new Promise((resolve, reject) => {
-            pending.set(id, { resolve, reject });
-            socket.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
-            setTimeout(() => {
+            // Cleared by the answer (above), so a finished suite is not held open by it.
+            const budget = setTimeout(() => {
                 if (pending.delete(id)) { reject(new Error(`${method} timed out`)); }
             }, 30_000);
+            pending.set(id, { resolve, reject, budget });
+            socket.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
         });
     }
 
