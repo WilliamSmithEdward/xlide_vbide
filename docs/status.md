@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-10, at v0.16.0.
+Updated 2026-09-10, at v0.16.1.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -160,8 +160,8 @@ way - which is how the test runner came to have never once run a test in Access
 project after every save (finding 81). Both close the session they opened, so the Excel groups
 after them find only Excel.
 
-Counts move, so they are given as of this line rather than as standing facts: 641 unit tests,
-68 api routes of which 66 are driven by one of the 70 suites the gate runs, 2 left out on
+Counts move, so they are given as of this line rather than as standing facts: 675 unit tests,
+68 api routes of which 66 are driven by one of the 73 suites the gate runs, 2 left out on
 purpose.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
