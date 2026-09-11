@@ -234,8 +234,14 @@ finally {
         [System.GC]::WaitForPendingFinalizers()
     }
     if ($process) {
+        # THE ENGINE THIS EXCEL STARTED, not every engine by name: another Excel's session has an
+        # engine of its own, and a stop by name ended it mid-analysis (#24). Read before Excel
+        # goes, while the parent link is fresh.
+        $ours = @(Get-CimInstance Win32_Process -Filter "Name='xlide-engine.exe' AND ParentProcessId=$($process.Id)" -ErrorAction SilentlyContinue)
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        Get-Process xlide-engine -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        foreach ($engine in $ours) {
+            Stop-Process -Id $engine.ProcessId -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
