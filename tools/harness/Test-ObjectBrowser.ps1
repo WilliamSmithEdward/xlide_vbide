@@ -8,15 +8,15 @@
 #      bundle, and in the PUBLISHED bundle (the stale-deploy tripwire).
 #   2. Page behaviour - objbrowser-page-probe.mjs drives the built page headless: boot,
 #      Group/Object/All scopes, the whole-group pull, details rows, splitter keyboard.
-#   3. Live behaviour - its own Excel, driven SEMANTICALLY through the dev build's two
-#      doors: the DevTools protocol clicks real elements on the live pages, and the shim's
-#      xlide api answers with the native truth. This is what pins the double-click
-#      navigate leg that posted mouse messages never could. Window lifecycle (hide with
-#      the editor, stay away, re-present) runs through the same doors; only the icon check
-#      still asks Win32, because an icon is not a page's business.
 #
-# The live leg launches and kills its own Excel; run it with no Excel you care about open.
-# It needs a DEBUG publish: the doors do not exist in Release, by design.
+# Neither leg needs Excel. The LIVE behaviour is the gate's (verify.ps1 -Live), driven through
+# the api with the trust setting off: objbrowser-live-probe.mjs clicks the summons, reads real
+# libraries and members, double-clicks a member to navigate, and reads the icon off the
+# palette's window (state.paletteIcon); window-routes.mjs closes and reshows the editor and
+# holds the palette to following it down, staying away, and coming back as the same palette
+# on the next summons. A third leg here launched an Excel of its own, attached with
+# GetActiveObject, and hid the editor through Application.VBE, which the trust setting gates.
+# It rotted outside the gate and was retired once its checks ran inside it (2026-09-10).
 $ErrorActionPreference = 'Continue'
 
 $here = $PSScriptRoot
@@ -84,9 +84,9 @@ if (Test-Path $published) {
 }
 
 function Invoke-NodeProbe {
-    param([string] $Leg, [string] $Script, [string[]] $Arguments = @())
+    param([string] $Leg, [string] $Script)
 
-    $verdictText = & node (Join-Path $script:here $Script) @Arguments 2>$null | Select-Object -Last 1
+    $verdictText = & node (Join-Path $script:here $Script) 2>$null | Select-Object -Last 1
 
     if (-not $verdictText) {
         Write-Output "${Leg}: FAIL - the probe printed no verdict"
@@ -114,144 +114,8 @@ function Invoke-NodeProbe {
 Write-Output 'page: driving the built palette page headless (Edge + DevTools protocol)...'
 Invoke-NodeProbe 'page' 'objbrowser-page-probe.mjs'
 
-# --- live leg -------------------------------------------------------------------------
-
-Add-Type -Namespace XlideObTest -Name Native -MemberDefinition @'
-[DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
-[DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
-[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
-[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
-[DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
-[DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr(IntPtr h, int index);
-
-delegate bool EnumProc(IntPtr h, IntPtr l);
-
-public static IntPtr TopLevel(int processId, string className)
-{
-    IntPtr found = IntPtr.Zero;
-    EnumWindows((h, l) =>
-    {
-        int owner;
-        GetWindowThreadProcessId(h, out owner);
-        if (owner != processId) { return true; }
-        var name = new System.Text.StringBuilder(128);
-        GetClassNameW(h, name, 128);
-        if (name.ToString() != className) { return true; }
-        found = h;
-        return false;
-    }, IntPtr.Zero);
-    return found;
-}
-'@
-
-function Test-Live {
-    param([string] $Label, [bool] $Ok, [string] $Detail = '')
-
-    if ($Ok) {
-        Write-Output "live: ok - $Label"
-    } else {
-        $said = if ($Detail) { " ($Detail)" } else { '' }
-        Write-Output "live: FAIL - $Label$said"
-        $script:failures += 1
-    }
-}
-
-Write-Output 'live: launching Excel with the VBE...'
-
-$excelPath = "$env:ProgramFiles\Microsoft Office\root\Office16\EXCEL.EXE"
-$scratch = Join-Path $here 'fixtures\scratch.xlsm'
-$process = $null
-$excel = $null
-
-try {
-    $process = Start-Process -FilePath $excelPath -ArgumentList "`"$scratch`"" -PassThru
-    $deadline = (Get-Date).AddSeconds(45)
-
-    while ($null -eq $excel -and (Get-Date) -lt $deadline) {
-        try { $excel = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') } catch { Start-Sleep -Milliseconds 300 }
-    }
-    if ($null -eq $excel) { throw 'Excel never answered on COM.' }
-
-    # This one test genuinely needs the VBA project object model: it HIDES and re-shows the
-    # editor, and there is no ungated equivalent of that - Excel's ribbon command opens the
-    # editor but does not close it. Everything else in the harness works with the setting off,
-    # so the failure is named rather than left to arrive as a null-reference three lines later.
-    if ($null -eq $excel.VBE) {
-        throw 'Application.VBE is null: this test needs "Trust access to the VBA project ' +
-              'object model" enabled (Trust Center > Macro Settings). It is the only one that does.'
-    }
-
-    $excel.VBE.MainWindow.Visible = $true
-
-    # The dev door announces itself in a per-process discovery file; Get-XlideApi waits for
-    # THIS Excel's door and proves it answers, and its coordinates are how everything below
-    # asks and acts.
-    Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
-    $remaining = [int][math]::Max(1, ($deadline - (Get-Date)).TotalSeconds)
-    try {
-        $discovery = Get-XlideApi -ProcessId $process.Id -TimeoutSeconds $remaining
-    } catch {
-        throw 'no live xlide api for the launched Excel; is this a Debug publish?'
-    }
-    $api = $discovery.Base
-
-    $state = $null
-    while ((Get-Date) -lt $deadline) {
-        try { $state = Invoke-RestMethod "$api/state"; if ($state.surfaceReady) { break } } catch { }
-        Start-Sleep -Milliseconds 250
-    }
-    Test-Live 'the xlide api answers and the surface is ready' ($null -ne $state -and $state.surfaceReady)
-
-    # The whole in-page story - summon by real click, real libraries, members from real
-    # code, and the double-click navigate - runs in the node probe over the two doors.
-    Invoke-NodeProbe 'live' 'objbrowser-live-probe.mjs' @('--api', $api, '--cdp', "$($discovery.DevtoolsPort)")
-
-    # The icon is a window property, not a page's; Win32 answers for it.
-    $palette = [XlideObTest.Native]::TopLevel($process.Id, 'XlidePalette')
-    $icon = if ($palette -ne [IntPtr]::Zero) { [XlideObTest.Native]::SendMessageW($palette, 0x007F, [IntPtr] 0, [IntPtr] 0) } else { [IntPtr]::Zero }
-    if ($icon -eq [IntPtr]::Zero -and $palette -ne [IntPtr]::Zero) { $icon = [XlideObTest.Native]::GetClassLongPtr($palette, -34) }
-    Test-Live 'the palette wears an icon' ($icon -ne [IntPtr]::Zero)
-
-    # Lifecycle through the doors: hide with the editor, stay away, return on a summons.
-    $excel.VBE.MainWindow.Visible = $false
-    Start-Sleep -Milliseconds 800
-    $state = Invoke-RestMethod "$api/state"
-    Test-Live 'the palette hides when the editor closes' (-not $state.paletteVisible)
-
-    $excel.VBE.MainWindow.Visible = $true
-    Start-Sleep -Seconds 2
-    $state = Invoke-RestMethod "$api/state"
-    Test-Live 'the palette stays away until summoned' (-not $state.paletteVisible)
-
-    $null = Invoke-RestMethod -Method Post "$api/command?name=objectBrowser"
-    Start-Sleep -Milliseconds 800
-    $state = Invoke-RestMethod "$api/state"
-    Test-Live 'a summons by name re-presents the same palette' ($state.paletteOpen -and $state.paletteVisible)
-}
-catch {
-    Write-Output "live: FAIL - $($_.Exception.Message)"
-    $script:failures += 1
-}
-finally {
-    if ($excel) {
-        [void] [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)
-        [System.GC]::Collect()
-        [System.GC]::WaitForPendingFinalizers()
-    }
-    if ($process) {
-        # THE ENGINE THIS EXCEL STARTED, not every engine by name: another Excel's session has an
-        # engine of its own, and a stop by name ended it mid-analysis (#24). Read before Excel
-        # goes, while the parent link is fresh.
-        $ours = @(Get-CimInstance Win32_Process -Filter "Name='xlide-engine.exe' AND ParentProcessId=$($process.Id)" -ErrorAction SilentlyContinue)
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        foreach ($engine in $ours) {
-            Stop-Process -Id $engine.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
 if ($failures -eq 0) {
-    Write-Output 'RESULT: PASS - the floating Object Browser, its scopes, its details pane, its navigate, and its lifecycle are as pinned'
+    Write-Output 'RESULT: PASS - the floating Object Browser''s seams, scopes, group pull, and details pane are as pinned'
 } else {
     Write-Output "RESULT: FAIL - $failures check(s) down; the Object Browser behaviour has drifted"
 }

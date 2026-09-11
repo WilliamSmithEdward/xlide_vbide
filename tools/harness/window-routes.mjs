@@ -11,8 +11,8 @@
  *   frame show     the palette greeting the next Alt+F11 uninvited (2026-08-05)
  *   closeNative    the 2026-08-04 dead tab: a hidden pane's close left its tab standing
  *
- * Runs against the DebugFixture session the live probes share, after objbrowser-live-probe
- * (which leaves a palette existing, hidden) and before Test-ResizeFollow.
+ * Runs in the gate's language-and-editor suites, on the DebugFixture session that group shares.
+ * It summons the palette itself, so it needs none to exist, and it leaves the palette hidden.
  */
 import { open, reporter, waitFor } from "./xlide-api.mjs";
 
@@ -46,6 +46,14 @@ check("and the palette is hidden with its state intact",
 await api.command("objectBrowser");
 await waitFor("the palette to be back for the close test", async () =>
   (await state()).paletteVisible === true);
+
+// A mark on the palette's page, read back once the editor has been closed and brought back and
+// the palette summoned again. The same palette keeps its page, and with it the library, type
+// and member the developer left picked; one rebuilt by the summons comes up just as visible,
+// and blank, and no visibility check below can tell the two apart.
+const mark = `window-routes-${process.pid}-${Date.now()}`;
+const marked = await api.ask(`window.__windowRoutesMark = ${JSON.stringify(mark)}`, "palette");
+check("the palette's page takes a mark before the close", marked === mark, String(marked));
 
 const closed = await api.frame("close");
 check("frame close answers posted, not done", closed.did === true && closed.visible === true,
@@ -81,6 +89,25 @@ const afterShow = await state();
 check("the palette STAYS away when the editor returns",
   afterShow.paletteVisible === false,
   "it returns only when summoned; greeting the next Alt+F11 uninvited was the 2026-08-05 defect");
+
+// ---- and a summons brings back the SAME palette ----
+
+// Ported from Test-ObjectBrowser.ps1's retired live leg, which asked it through Application.VBE
+// and so only ever ran with the trust setting on (2026-09-10). The wait may not throw, for the
+// reason the follow-down wait above gives.
+await api.command("objectBrowser");
+await waitFor("the palette to answer the summons", async () =>
+  (await state()).paletteVisible === true, { budgetMs: 5000 }).catch(() => null);
+const resummoned = await state();
+check("a summons re-presents the palette once the editor is back",
+  resummoned.paletteOpen === true && resummoned.paletteVisible === true,
+  `paletteOpen=${resummoned.paletteOpen} paletteVisible=${resummoned.paletteVisible}`);
+const markAfter = await api.ask("window.__windowRoutesMark ?? null", "palette");
+check("and it is the same palette, its page kept rather than rebuilt", markAfter === mark,
+  `the mark reads ${JSON.stringify(markAfter)}`);
+
+// Left the way its close box leaves it: hidden, state intact.
+await api.paletteHide();
 
 // ---- a HIDDEN native pane closed through the door ----
 

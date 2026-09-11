@@ -5,18 +5,33 @@
 // probe double-click a member and pin the navigate leg that synthetic input never could.
 //
 // Usage: node objbrowser-live-probe.mjs [--api http://127.0.0.1:PORT/TOKEN] [--cdp PORT]
-// With neither flag it resolves both doors from the newest live session's discovery file,
-// which is how the gate runs it - ports are per-process, so a hardcoded default is a
-// stale one by the second session. Prints "RESULT: PASS/FAIL" and then a JSON verdict
-// {pass, checks} as the LAST line (Test-ObjectBrowser.ps1 reads the last line as JSON;
-// the gate greps for the RESULT). Exits nonzero when any check fails.
+// With neither flag it resolves both doors from the discovery file of the session XLIDE_PID
+// names, or the newest live one when it names none. The gate aims it that way - ports are
+// per-process, so a hardcoded default is a stale one by the second session. Prints
+// "RESULT: PASS/FAIL" and then a JSON verdict {pass, checks} as the LAST line for a scripted
+// reader; the gate greps for the RESULT. Exits nonzero when any check fails.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** The newest discovery file whose process is still alive: the session to probe. */
+/**
+ * The session to probe: the one XLIDE_PID names when it is set, which is how the gate aims every
+ * live step, and otherwise the newest discovery file whose process is still alive.
+ */
 function discoverDoors() {
   const home = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
+  const aimed = Number(process.env.XLIDE_PID) || undefined;
+  if (aimed !== undefined) {
+    // AIMED, like the api client's own open(). With a second session live - a Word fixture
+    // beside the gate's Excel, or the developer's own - "the newest" is a guess, and this probe
+    // went on making it after every other live step was aimed (found 2026-09-10).
+    try {
+      return JSON.parse(readFileSync(join(home, `xlide-api-${aimed}.json`), "utf8"));
+    } catch {
+      throw new Error(`XLIDE_PID is ${aimed}, and no discovery file answers for it`);
+    }
+  }
+
   const sessions = [];
   for (const name of readdirSync(home)) {
     if (!/^xlide-api-\d+\.json$/.test(name)) { continue; }
@@ -154,6 +169,14 @@ try {
   }
   check("the click summons the palette", state.paletteOpen === true && state.paletteVisible === true);
 
+  // The icon belongs to the window, not the page: the taskbar and Alt+Tab draw it. The palette
+  // stamps the editor's own onto itself as it opens and its window class carries none, so a
+  // palette reading no icon is one that was never given the editor's. The shim reads it back
+  // off the window (state.paletteIcon), so this is the icon the window HAS, not the one the
+  // code meant to give it. Ported from Test-ObjectBrowser.ps1's retired live leg (2026-09-10).
+  check("the palette wears an icon, the editor's own", state.paletteIcon === true,
+    `paletteIcon=${state.paletteIcon}`);
+
   // Drive the palette itself: real libraries, real modules, real members from real code.
   await sleep(1000);
   const palette = await attachToPage(send, "Object Browser");
@@ -221,8 +244,8 @@ try {
   await api("palette?action=hide");
 
   const pass = checks.every((one) => one.ok);
-  // RESULT first, JSON last: the gate greps the RESULT line, and Test-ObjectBrowser.ps1
-  // parses the LAST line as JSON. Both readers get theirs.
+  // RESULT first, JSON last: the gate greps the RESULT line, and a scripted reader parses the
+  // LAST line as JSON. Both readers get theirs.
   console.log(`RESULT: ${pass ? "PASS" : "FAIL"} - ${checks.filter((one) => one.ok).length} of ${checks.length} checks`);
   console.log(JSON.stringify({ pass, checks }));
   process.exit(pass ? 0 : 1);

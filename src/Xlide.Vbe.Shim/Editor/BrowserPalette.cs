@@ -49,6 +49,17 @@ internal sealed unsafe class BrowserPalette : IDisposable
 
     public nint Handle => _handle;
 
+    /// <summary>
+    /// Whether the window carries an icon, read back off the window with WM_GETICON - exactly
+    /// what AdoptOwnerIcon writes with WM_SETICON when the palette opens, and what the taskbar
+    /// and Alt+Tab draw. Not the window class's icon: a class icon would answer yes even with the
+    /// editor's icon never adopted, which is the one failure worth seeing.
+    /// </summary>
+    public bool HasIcon =>
+        _handle != 0
+        && (Win32.SendMessage(_handle, Win32.WmGetIcon, Win32.IconSmall, 0) != 0
+            || Win32.SendMessage(_handle, Win32.WmGetIcon, Win32.IconBig, 0) != 0);
+
     /// <summary>Creates the palette over <paramref name="owner"/> and starts its page.</summary>
     public static BrowserPalette? Open(nint owner)
     {

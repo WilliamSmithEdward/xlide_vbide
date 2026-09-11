@@ -347,7 +347,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `placement` | `placement()` | forces a placement pass |
 | `problems` | `problems(module)` | the analyzer's findings |
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
-| `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
+| `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port; whether the frame is on screen; the Object Browser palette open, visible, and wearing an icon (`paletteIcon`) |
 | `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters, the COM WRAPPER counts - and the marshal lane's own eyes: `laneHolder` names the route whose work is ON the host thread right now (null when free) and `laneHeldMs` how long it has held; `marshalQueueDepth`/`marshalLastDrainMs`/`marshalLastEnqueueMs` are the layer under it - what is WAITING and whether the drain is running at all. Both served without the host thread, which is the point (#12: seed 2009959200 reads holder null AND depth 0 AND both ages climbing together through a four-minute jam - the marshal machinery is idle, so the freeze is upstream of it). A lane hold past five seconds also writes itself into the log |
 | `trip` | `trip("pagecall", {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
@@ -411,9 +411,15 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 > the pump delivers SC_CLOSE, so its reply says posted and the outcome is read off
 > `state().frameVisible` - the same rule as every posted effect on this door. `frame("show")`
 > and `paletteHide()` are synchronous and their replies are the outcome. The follow contracts
-> ride along: closing the frame takes a visible palette down with it, and showing the frame
-> does NOT bring the palette back - it returns only when summoned. `window-routes.mjs` in the
-> gate holds all three to that.
+> ride along: closing the frame takes a visible palette down with it, showing the frame does
+> NOT bring the palette back - it returns only when summoned - and the summons brings back the
+> SAME palette, its page kept. `window-routes.mjs` in the gate holds all of it, the last by a
+> mark it sets on the palette's page before the close (`eval(script, "palette")`) and reads
+> after the summons, because a palette rebuilt by the summons would be just as visible, and
+> blank. The palette's icon belongs to its window and is read back off it as
+> `state().paletteIcon`; `objbrowser-live-probe.mjs` checks it. These were the live leg of
+> `Test-ObjectBrowser.ps1`, which hid the editor through `Application.VBE` and so needed the
+> trust setting. That leg is retired, and the file keeps its seams and headless page legs.
 
 ### The surface, asked and driven
 
@@ -2683,7 +2689,10 @@ The list of things that USED to need it keeps shrinking. On 2026-08-12 three lef
 host-originated close of a hidden pane (`pane?action=closeNative`), and hiding and reshowing the
 editor window (`frame?action=close|show`) - each previously reachable only through
 `Application.VBE` or window messages from outside, each now a route the gate drives with trust
-off. What remains behind the setting is below.
+off. On 2026-09-10 the Object Browser's live checks followed: its lifecycle rides those frame
+routes in `window-routes.mjs`, its icon is `state().paletteIcon` in `objbrowser-live-probe.mjs`,
+and the harness leg that hid the editor through `Application.VBE` is retired. What remains
+behind the setting is below.
 
 **Reaching the project from outside the add-in.** `Workbook.VBProject` and `Application.VBE`, from
 a script rather than from inside:

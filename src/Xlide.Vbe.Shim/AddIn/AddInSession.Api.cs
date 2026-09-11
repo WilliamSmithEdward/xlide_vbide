@@ -3732,7 +3732,8 @@ internal sealed partial class AddInSession
                         SurfaceReady: _surfaceShown,
                         DevToolsPort: WebView.WebView2Surface.DevToolsPort,
                         CaretLine: _editorSurface?.CaretLine ?? 0,
-                        ProcedureAtCaret: ProcedureAtPageCaret()),
+                        ProcedureAtCaret: ProcedureAtPageCaret(),
+                        PaletteIcon: _browserPalette?.HasIcon ?? false),
                     DebugJsonContext.Default.DebugStateReply);
             }
 

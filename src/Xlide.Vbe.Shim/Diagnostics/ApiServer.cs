@@ -720,7 +720,13 @@ public sealed record DebugStateReply(
     /// native answer the page's status-bar readout is held to. Null in the declarations section,
     /// and with nothing shown.
     /// </summary>
-    [property: JsonPropertyName("procedureAtCaret")] string? ProcedureAtCaret = null);
+    [property: JsonPropertyName("procedureAtCaret")] string? ProcedureAtCaret = null,
+    /// <summary>
+    /// Whether the Object Browser palette's window carries an icon, read back off the window.
+    /// The palette stamps the editor's own icon onto itself when it opens, so a palette reading
+    /// false here is one the taskbar and Alt+Tab show as a blank window. False while none exists.
+    /// </summary>
+    [property: JsonPropertyName("paletteIcon")] bool PaletteIcon = false);
 
 /// <summary>
 /// What a window action came to: whether the action itself TOOK, and what the window's

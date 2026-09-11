@@ -727,14 +727,15 @@ if ($Live) {
         }
 
         # The tail of this list is ORDERED, not alphabetical. objbrowser-live-probe asserts no
-        # palette exists before its summons and leaves one open behind it, so it runs after
+        # palette is SHOWING before its summons and navigates the editor, so it runs after
         # everything that would mind and before Test-ResizeFollow - which runs LAST because it
         # closes every pane and leaves the frame resized, and the next step's fresh relaunch is
         # what puts that back. ResizeFollow is the only thing anywhere that RESIZES the host
         # window, so the twice-shipped placement chain (frame -> overlay -> Chromium child) is
-        # exercised by it alone; the palette probe is the only live coverage the Object Browser
-        # has - its summons, real-data panes, member navigation, and the native browser staying
-        # retired (both triaged 2026-08-12).
+        # exercised by it alone; the palette probe is the Object Browser's live coverage - its
+        # summons, real-data panes, member navigation, the native browser staying retired
+        # (both triaged 2026-08-12), and the icon its window wears (2026-09-10).
+        # window-routes, in the next step, holds its lifecycle.
         # AIMED, like every other live step: these probes connect bare, and a bare connection
         # refuses to guess between two live sessions. Every Excel of the harness's is closed by
         # the launch above, but a Word or an Access with the editor open - the developer's own,
@@ -844,8 +845,8 @@ if ($Live) {
             # has a one-suite group of its own directly after this one.
             # window-routes drives the three 2026-08-12 routes (palette hide, frame close and
             # show, pane closeNative) and their follow contracts - the palette going down with
-            # the frame and staying away on its return, the hidden pane's tab leaving the
-            # strip.
+            # the frame, staying away on its return, and coming back as the same palette on the
+            # next summons; the hidden pane's tab leaving the strip.
             # designer-features builds a whole UserForm through the designer routes, verifies
             # the read against the plan that built it, round-trips the mutations, and removes
             # the component.
@@ -1078,12 +1079,15 @@ if ($Deep) {
         value is the action orders nobody scripts. Run it before a release; a commit does not
         owe it (triaged 2026-08-12, one agent per suite, cost grounded line by line).
 
-        Three triaged suites are NOT here although they are unique cover - Test-ObjectBrowser's
-        window-lifecycle trio, Test-GhostLocalsPanel's setLocals push, Test-WatchPanel's
-        populated Watch panel - because all three reach through the VBA project object model,
-        and this machine runs with that trust OFF, as does everything api-driven by design.
-        Their path into a tier is routes: frame visibility, and something that can populate a
-        watch. Until then they are hand-run documentation of what the api cannot yet do.
+        Two triaged suites are NOT here although they are unique cover - Test-GhostLocalsPanel's
+        setLocals push and Test-WatchPanel's populated Watch panel - because both reach through
+        the VBA project object model, and this machine runs with that trust OFF, as does
+        everything api-driven by design. Their path into a tier is a route that can populate a
+        watch. Until then they are hand-run documentation of what the api cannot yet do. The
+        third, Test-ObjectBrowser's window-lifecycle trio and its icon, took that path: the
+        frame routes carry the trio in window-routes.mjs and state.paletteIcon carries the
+        icon in objbrowser-live-probe.mjs, both in -Live, and its live leg is retired
+        (2026-09-10).
     #>
     Step 'deep: completion menus, signature help, and the shutdown revival' {
         # The dot menu is the feature a developer touches most, and nothing in -Live asks it
