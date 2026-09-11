@@ -141,14 +141,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 ## How it is checked
 
 `tools\verify.ps1` is the whole local gate in one command, in three tiers. Bare, it is
-20 headless steps in about ninety seconds: vendored spec, engine currency against the analyzer checkout, the
+20 headless steps in about a minute: vendored spec, engine currency against the analyzer checkout, the
 variant-as-object guard, page and engine typecheck, build and tests, the engine language matrix
 and its host-supplied facts, knowledge routes, inline comment features, the seven refactoring
 planners with the lightbulb's verdicts over them, generated module casing,
 the headless page probes, the xlide api's route audit, the Release build, the unit tests, the
 check that Release ships the api shut, and the native publish. `-Live` adds four steps that need
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
-release rather than before a commit. All 28 take about eleven minutes, the Word and Access
+release rather than before a commit. All 28 take about ten minutes, the Word and Access
 groups included.
 
 **The live tier is not all Excel any more.** Its first group opens an Access database
