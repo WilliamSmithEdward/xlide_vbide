@@ -511,7 +511,9 @@ ui.blame;                         // the editor's blame layer for the active mod
 // Headless, the demo page answers `scm` with state noGit; served as /index.html?scm=1 it holds a
 // fake repository - rows, a Folder row, commits, diff and show rows, blame, a commit, an import,
 // a checkout refused while dirty, and a past-version tab - so the pane can be driven without
-// a host (tools/harness/page-probe.mjs, from PowerShell).
+// a host (tools/harness/page-probe.mjs, from PowerShell). Served as /index.html?scm=noFolder
+// it answers git present and no folder chosen, suggesting a folder long enough that the "Use"
+// button draws it shortened from the middle (scm-folder-page-probe.mjs).
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a

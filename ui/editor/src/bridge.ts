@@ -3126,6 +3126,10 @@ export function demoTransport(): HostTransport {
    * face exactly as the host lists them, because that is the plumbing worth exercising.
    */
   const scmDemo = new URLSearchParams(location.search).get("scm") === "1";
+  // ?scm=noFolder: git is there and no folder has been chosen yet - the state that offers "Use
+  // <folder>" - with a suggestion long enough that the button has to shorten it.
+  const scmNoFolder = new URLSearchParams(location.search).get("scm") === "noFolder";
+  const DEMO_SUGGESTED_FOLDER = "C:\\Users\\Demo Developer\\OneDrive - Contoso\\Documents\\Finance\\Quarterly Close\\Book1";
   const historyTabs: { module: string; short: string }[] = [];
   let activeFace: string | null = null;
 
@@ -3201,13 +3205,14 @@ export function demoTransport(): HostTransport {
       covers: "the module code against the branch head; attributes and designs at commit time",
     }
     : {
-      detail: "the demo page has no git behind it",
+      detail: scmNoFolder ? "choose the folder the modules are exported to" : "the demo page has no git behind it",
       project: DEMO_WORKBOOK,
       projectId: DEMO_WORKBOOK,
-      state: "noGit",
+      state: scmNoFolder ? "noFolder" : "noGit",
       folder: "",
       repository: "",
-      gitVersion: "",
+      suggestedFolder: scmNoFolder ? DEMO_SUGGESTED_FOLDER : "",
+      gitVersion: scmNoFolder ? "git version 2.55.0.windows.1" : "",
       branch: "",
       upstream: "",
       ahead: 0,

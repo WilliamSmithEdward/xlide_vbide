@@ -98,7 +98,9 @@ page for it, until the workbook closed.
 One folder per project, remembered per project in sync.json as `Repository`, a field of its own.
 The sync dialog's `Folder` is not reused: every apply and every folder pick re-point it, so one
 export to a scratch folder would have moved the repository. The pane offers the sync folder as its
-first suggestion and otherwise a folder beside the workbook named after it.
+first suggestion and otherwise a folder beside the workbook named after it. The button draws a long
+suggestion shortened from the middle - the drive and the folder's own name - and its tooltip holds
+the whole path, which is also what the button sends.
 
 The folder is flat, because the export is flat. The repository root is whatever
 `git rev-parse --show-toplevel` answers from the folder: a folder inside an existing repository

@@ -17,6 +17,7 @@ import type { OpenFiles } from "./changespane.js";
 import { drawDiffRows, type SyncDiffLine } from "./diffview.js";
 import { installSplitterDrag } from "./livedrag.js";
 import { openModal } from "./modal.js";
+import { shortenPath } from "./pathlabel.js";
 
 /** One module live against the branch head, as the host reports it. */
 export interface ScmRow {
@@ -1368,7 +1369,10 @@ export class ScmPane {
         acts.appendChild(button("scm-browse", "Choose folder", () => void this.run({ action: "browse" })));
         const offered = state.suggestedFolder || state.folder;
         if (offered) {
-          const use = button("scm-use-folder", `Use ${offered}`, () => void this.run({ action: "settings", folder: offered }));
+          // THE DRIVE AND THE FOLDER'S OWN NAME, the middle given way: the whole path stretched the
+          // button across the pane (the owner's screenshot, 2026-09-10). The tooltip keeps the
+          // path whole, and so does the click - only what is drawn is shortened.
+          const use = button("scm-use-folder", `Use ${shortenPath(offered)}`, () => void this.run({ action: "settings", folder: offered }));
           use.title = offered;
           acts.appendChild(use);
         }
