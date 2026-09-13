@@ -2244,6 +2244,17 @@ body.live-resize .minimap {
    because a confirm, a settings sheet and a 960px sync planner are not one size. */
 .modal-card {
   max-width: calc(100vw - 40px);
+
+  /* AND A CEILING. The backdrop drops every card 18vh down the viewport, so a card taller than
+     what is left ran off the bottom of the screen - with its buttons on it, in a short window or
+     at a high zoom, and no way to reach them. Past the ceiling the card scrolls instead, and the
+     bar is the page's own: the ::-webkit-scrollbar rules at the top of this file paint every
+     scrollable box in the product, so a modal's bar matches the panes' (the owner, 2026-09-13).
+     The dialogs that cap their own inner lists keep doing so; this is the outer bound, and a
+     card that fits the screen never shows a bar at all. */
+  max-height: calc(100vh - 18vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, #454545);
   border-radius: 6px;
