@@ -2637,3 +2637,27 @@ does not exist they answer `Views has no tab 9 (it has 3)` and `no context
 menu is open`. The product's refusals were already exact; nothing was reading
 them. An act whose answer is thrown away is not a step in a test, it is a
 wish.
+
+## 87. The installer shipped a file nobody named
+
+v0.16.2's first installer was 55.98 MB where its predecessor had been 33.92.
+The extra 23.6 MB was `xlide-engine.held-130938.exe`, a full copy of the
+engine renamed aside by hand that morning when a running Excel held the real
+one, still sitting in `engine\dist` hours later. The packager globbed the
+folder for `*.exe` and shipped both, saying nothing: the payload listing named
+it, in the middle of eleven other lines, and it read as one more file that
+belonged there.
+
+The engine is taken by name now, a second executable is named out loud and
+left behind, and the shim's own loop skips a `.held-NNNNNN.` copy the same
+way. Proven by planting a stray and building: "left behind, not the engine",
+one engine in the payload, and an installer back at 32.35 MB - which is the
+build that shipped, so the guard ran on the artifact it protects. The asset
+was replaced within minutes and no released version ever carried the file,
+v0.16.1 having been cut three days before the copy existed.
+
+Two lessons, and the second one is mine. A packager should take the files it
+NAMES rather than what it FINDS - the same shape as 85 and 86, one layer out.
+And a file set aside by hand is litter with a deadline: it was created during
+a publish that could not overwrite a locked file, it was never cleaned up, and
+the next thing to read that folder believed it.

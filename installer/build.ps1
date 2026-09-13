@@ -66,6 +66,15 @@ New-Item -ItemType Directory -Path $payloadDir | Out-Null
 $shipped = 0
 foreach ($file in (Get-ChildItem $shimPublish -File -ErrorAction SilentlyContinue)) {
     if ($file.Extension -in @('.pdb', '.lib', '.exp')) { continue }
+
+    # A COPY SET ASIDE BY HAND IS NOT A RUNTIME FILE. When a running host holds the shim or the
+    # engine, the way past it is to rename the locked file aside and publish a fresh one - after
+    # which a full-size copy sits in the publish folder wearing a name nothing looks for. This
+    # loop shipped whatever it found, so such a copy would ride into the installer in silence.
+    if ($file.Name -match '\.held-\d+\.') {
+        Write-Host ("    skipped a set-aside copy: {0}" -f $file.Name) -ForegroundColor Yellow
+        continue
+    }
     Copy-Item $file.FullName (Join-Path $payloadDir $file.Name)
     Write-Host ("    {0} ({1:N0} KB)" -f $file.Name, ($file.Length / 1KB))
     $shipped++
@@ -73,9 +82,22 @@ foreach ($file in (Get-ChildItem $shimPublish -File -ErrorAction SilentlyContinu
 
 if ($shipped -eq 0) { throw "Nothing to package: no published files under $shimPublish." }
 
+# THE ENGINE IS TAKEN BY NAME, not by extension. `*.exe` ships whatever executable happens to be
+# in the folder, and on 2026-09-13 that was `xlide-engine.held-130938.exe` - a 98 MB copy set
+# aside days earlier when a running Excel held the real one. It went into v0.16.2's installer at
+# 23.6 MB compressed, to be installed beside the engine on every machine that took that build,
+# and nothing in the packaging said a word about it. A second executable here is somebody's
+# leftover; it is named out loud and left behind.
+$engineName = 'xlide-engine.exe'
 $engine = @()
 if (Test-Path $enginePublish) {
-    $engine = @(Get-ChildItem $enginePublish -File -Filter '*.exe' -ErrorAction SilentlyContinue)
+    $engine = @(Get-ChildItem $enginePublish -File -Filter $engineName -ErrorAction SilentlyContinue)
+
+    $strays = @(Get-ChildItem $enginePublish -File -Filter '*.exe' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne $engineName })
+    if ($strays.Count -gt 0) {
+        Write-Host ("    left behind, not the engine: {0}" -f (($strays | ForEach-Object { $_.Name }) -join ', ')) -ForegroundColor Yellow
+    }
 }
 
 # The engine is not built by this script and is not in source control -- it embeds a language
