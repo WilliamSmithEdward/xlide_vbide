@@ -173,8 +173,13 @@ try {
 
   // THE WHOLE TEXT, not the first line: the race has written both `Option Explicit()` and a
   // first line with the procedure header underneath it eaten, and one equality catches either.
+  //
+  // AND A BLANK LINE UNDER THE STATEMENT, which is how a declarations section reads: the fix
+  // used to insert the statement and one line ending, landing it directly on the procedure
+  // header (xlide_vscode#75, fixed in the analyzer's 8.2.1 and carried here by the engine this
+  // repository packages). A module whose first line is already blank keeps the one it has.
   const expected = [
-    "Option Explicit", "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
+    "Option Explicit", "", "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
   ].join(CRLF);
   const written = await hostTextWhen(NAME, (one) => /Option Explicit/i.test(one));
   check("and the host holds exactly Option Explicit above the code it was inserted over",
