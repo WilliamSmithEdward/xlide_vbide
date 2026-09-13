@@ -52,19 +52,10 @@ const OPTIONS = [
       + "to it open while the others fold, and everything folds away when the last tab closes. "
       + "Off leaves the tree exactly as you left it.",
   },
-  {
-    key: "explorerView" as const,
-    kind: "choice" as const,
-    label: "Explorer layout",
-    description:
-      "'Folders' groups modules by the '@Folder(\"Parent.Child\") comment at the top of each one, "
-      + "the Rubberduck convention; 'tree' lists them flat by kind. The same two tabs sit at the "
-      + "top of the Explorer pane.",
-    choices: [
-      { value: "tree", label: "Tree" },
-      { value: "folders", label: "Folders" },
-    ],
-  },
+  // NOT HERE: the Explorer's layout and the designer's snapping. Both are settings, and both
+  // already have a control where they are used - the pane's own Tree and Folders tabs, and the
+  // two snap toggles on the designer's toolbox row. A second control in this dialog is a second
+  // place to look and a second place for the two to disagree (the owner, 2026-09-13).
   {
     key: "applyAttributesOnSave" as const,
     kind: "toggle" as const,
@@ -84,19 +75,6 @@ const OPTIONS = [
     description: "One indent level, in spaces. Used by typing, by smart Enter, by Backspace, and by formatting.",
     min: 1,
     max: 8,
-  },
-  {
-    key: "designerSnap" as const,
-    kind: "choice" as const,
-    label: "Form designer snapping",
-    description:
-      "Where a dragged, resized or dropped control lands. Arrow keys always move by a single "
-      + "point, and holding Alt overrides whichever is chosen.",
-    choices: [
-      { value: "grid", label: "To the grid" },
-      { value: "objects", label: "To the other controls" },
-      { value: "off", label: "Nowhere" },
-    ],
   },
   {
     key: "designerGridSize" as const,
