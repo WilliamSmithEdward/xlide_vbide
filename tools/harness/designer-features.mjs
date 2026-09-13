@@ -2999,8 +2999,21 @@ try {
     /<Tab\b[^>]*\bName="Tab3"/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
   check("and Ctrl+S puts it on the form itself - MSForms' own Tabs.Add", true);
 
-  await api.act("designerTabMenu", { module: form, container: "Views", tab: 3 });
-  await api.act("chooseMenuItem", { label: "Delete Tab" });
+  // THE MENU IS RAISED ON THE CANVAS, which has its own clock. The wait above is satisfied by
+  // the FORM, and the save that got it there re-publishes the markup behind it, so the canvas
+  // is redrawing while this line runs: in the gate it was showing two tabs when the menu went
+  // up, Delete Tab was not on it, and nothing was applied. Neither of the two acts below was
+  // read, so the whole failure surfaced twenty seconds later as a timeout waiting for a removal
+  // that had never been asked for - a silence with no name on it (2026-09-13).
+  await waitFor("the canvas to draw the third tab, so its menu can be raised on it", async () =>
+    (await containerNow("Views"))?.tabs.length === 3, { budgetMs: 15000 });
+
+  const thirdMenu = await api.act("designerTabMenu", { module: form, container: "Views", tab: 3 });
+  check("the third tab raises a menu of its own", thirdMenu.did === true, thirdMenu.detail);
+
+  const deleting = await api.act("chooseMenuItem", { label: "Delete Tab" });
+  check("and Delete Tab is on it", deleting.did === true, deleting.detail);
+
   await api.command("save");
   await waitFor("the tab to leave the form again", async () =>
     !/<Tab\b[^>]*\bName="Tab3"/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });

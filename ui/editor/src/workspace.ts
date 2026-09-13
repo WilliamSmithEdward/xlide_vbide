@@ -303,8 +303,18 @@ class EditorGroup {
      *
      * Closed here because this is the one place every path through show() arrives at - the design
      * face, the code face, and the re-activation of a model already loaded.
+     *
+     * ONLY WHEN WHAT IS ON SCREEN ACTUALLY CHANGES, though. A save republishes the project and
+     * the page re-activates the tab that is already active, which is not a change of subject:
+     * the menu still means what it meant a moment ago. Closing on that no-op took the designer's
+     * tab menu out from under a developer who had just saved, and in the gate it took it out
+     * BETWEEN the menu opening and an item being chosen on it - the menu read "New Tab | Delete
+     * Tab" and the click that followed landed on nothing at all (2026-09-13). The key carries
+     * the face, so a form's design tab and its code tab are still two different subjects.
      */
-    closeContextMenu();
+    if (this.active === null || this.key(this.active) !== this.key(id)) {
+      closeContextMenu();
+    }
 
     this.active = id;
     this.pending = null;

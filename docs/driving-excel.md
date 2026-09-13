@@ -2340,6 +2340,13 @@ that is open. A TabStrip opens NO menu and the act answers `did: false`: its tab
 markup dialect, so there is no line to add or take away and every item would be a claim the
 product cannot keep.
 
+**Read what both acts answer.** An open menu closes when the tab under it changes, so a driver
+that fires `designerTabMenu` and `chooseMenuItem` without looking at either reply has no way to
+tell "the item ran" from "there was no menu by then": `designer-features.mjs` did exactly that
+and a lost menu surfaced twenty seconds later as a timeout waiting for an edit nobody had asked
+for. `designerTabMenu` answers the items it found, `chooseMenuItem` answers `no context menu is
+open` when there is none, and either is worth one line of checking.
+
 `designerDelete` is the same shape with the Delete key: the control's line leaves the document
 with everything indented under it, and the form keeps the control until the save. It reaches a
 PAGE too - the page's line and its children go, one undoable edit, which is Delete Page's own

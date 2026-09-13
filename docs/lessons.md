@@ -2602,3 +2602,38 @@ its own first timestamp under a hundred copies of the same sentence.
 The shape to watch for: a search that returns the first thing of the right
 KIND, when what the caller needs is the first thing that WORKS. Both defects
 this day were that, one in PowerShell and one in C#.
+
+## 86. A save closed the menu the developer had just opened
+
+The next gate run failed on the designer: a twenty-second timeout waiting for
+Delete Tab to take a tab off the form. The suite had passed 443 checks in the
+run before, so the first guess was flake, and the first standalone run passed,
+which is exactly how a real defect gets written off.
+
+The shim log settled it. In the whole twenty seconds there was no
+`applyFormMarkup` and no `designer: markup applied` - the page had never asked
+for the edit. Nothing was slow. Nothing had been asked for.
+
+`setActive` closed any open context menu, every time, on the reasoning that a
+menu is about the thing that was clicked and should go when that thing stops
+being on screen. True for a tab switch, which is the photographed bug it was
+written for. But the page re-activates the tab that is ALREADY active after a
+save republishes the project, and closing on that no-op is not a change of
+subject: the menu still means what it meant. So a right-click on a tab strip
+could be taken away a moment later by a save the developer had already
+finished. In the gate it landed in the gap between the menu opening and the
+item being chosen - the menu read `New Tab | Delete Tab`, and the choice that
+followed landed on nothing. It now closes only when the arriving key differs
+from the standing one, face included.
+
+Two runs in three failed before the change and none of three after, at 445
+checks each.
+
+The suite's own half of it: it fired `designerTabMenu` and `chooseMenuItem`
+and read neither reply, so a menu that had gone reported nothing at all and
+the failure surfaced twenty seconds downstream as a timeout naming an edit
+nobody had asked for. Both acts are checked now, and pointed at a tab that
+does not exist they answer `Views has no tab 9 (it has 3)` and `no context
+menu is open`. The product's refusals were already exact; nothing was reading
+them. An act whose answer is thrown away is not a step in a test, it is a
+wish.
