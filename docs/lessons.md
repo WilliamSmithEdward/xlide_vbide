@@ -2526,3 +2526,44 @@ of the aimed process now, the way `Start-Excel.ps1` does.
 Aiming a test by pid is half the job. The other half is that every reach it
 makes afterwards has to be aimed too, and a COM entry point that takes no
 process - `GetActiveObject`, `GetObject`, the ROT at all - is never aimed.
+
+## 85. An empty COM read was believed, and Excel asked the developer a question
+
+A release gate put "File in Use - DebugFixture.xlsm is locked for editing by
+'William'. Open Read-Only" on the owner's screen, mid-run. Two symptoms, one
+cause, and the cause is that a COM read which comes back empty was taken as a
+fact about the world rather than as a failure to see.
+
+`Start-Excel.ps1` reaches a host by finding an `EXCEL7` worksheet window and
+asking it for `OBJID_NATIVEOM`. An `EXCEL7` window exists before the workbook
+behind it does, and the object model that one hands back has no `Application`
+on it. So the launcher's next line, `$excel.DisplayAlerts = $false`, died with
+"The property 'DisplayAlerts' cannot be found on this object" - a message that
+names a property nobody was thinking about, on a step whose actual problem was
+that it had asked one beat too early. That killed the gate's whole suite-group
+step, and left the Excel it had just launched on three fixtures standing.
+
+The same read is what the `-Fresh` census uses to decide whose each Excel is.
+Asked about that standing instance it got nothing, and "nothing" was written
+down as "a stranger's, not ours to close". The next group's launcher therefore
+left it up, started a second Excel with `/x` on `DebugFixture.xlsm` - which
+the standing one already held - and Excel did the only thing it can do about
+that: it asked. Nothing was stuck, nothing had crashed, and the run was
+waiting on a dialog.
+
+The command line is the fact the COM read was only ever a proxy for. An Excel
+launched on a workbook under this repository's fixture folders is the
+harness's, and `Win32_Process` says so with no COM, no window and no running
+object table, on an instance that is busy, modal or half gone. The census
+reads that first now and only falls back to COM for an instance whose command
+line says nothing. The attach waits for a window with an `Application` on it
+rather than the first window it sees, which costs 50ms in the case that used
+to be fatal.
+
+Both halves reproduce in one probe: launch Excel on three fixtures, read it
+immediately, and the COM answer is "no workbook window this harness can read"
+while the command line names the fixtures folder. On the old code the census
+called it a stranger and the launcher then died reaching for the duplicate it
+had started; on the new one it is closed by id and a single Excel holds the
+file. Believing an empty read is the defect; the ten places that read COM to
+decide something about a process are where to look for the rest of it.

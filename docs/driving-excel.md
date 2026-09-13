@@ -99,6 +99,22 @@ by its id - and waits for it to go. Every other Excel stays, whoever started it:
 another automation's hidden instances, which a stop by name was ending mid-statement (#24). When
 one stays, the fixture starts in a process of its own, and the launcher says which it left.
 
+**Which Excel is ours is read from the command line first, and only then over COM.** An Excel
+launched on a workbook under `artifacts\fixtures`, `artifacts\chaos` or
+`tools\harness\fixtures` is this harness's whether or not its object model will answer, and
+there are seconds in every launch when it will not - three files opening at once, a modal up, a
+teardown half done. That window used to be read as "a stranger's", the instance was left
+standing, and the next group opened one of the same workbooks beside it, at which point Excel
+asked the developer whether to open it read-only. A `Win32_Process` command line settles it with
+no COM, no window and no running object table; the COM census still runs for an Excel whose
+command line says nothing, which is the one a developer opened a fixture in by hand.
+
+The attach that follows waits for a window **with an `Application` on it**, not merely for a
+window. An `EXCEL7` exists before the workbook behind it does, and the object model handed back
+by that one answers no property at all - the launcher died on `DisplayAlerts` and took a whole
+gate step with it. Both were one defect wearing two faces: an empty COM read believed as fact
+(2026-09-13).
+
 Not `New-Object -ComObject Excel.Application`. A host created through automation runs in
 **embedding mode** and loads **no add-ins**, so the thing under test is never there. It has to be
 `EXCEL.EXE <workbook>` with a document on the command line, so it initialises promptly.

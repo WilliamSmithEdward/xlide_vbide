@@ -189,9 +189,37 @@ if ($Fresh) {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
+    # AND THE COMMAND LINE IS READ FIRST, because it is the fact the census below only has a
+    # proxy for. An Excel started on a workbook under this repo's fixture folders is this
+    # harness's whether or not its object model will answer, and there are seconds in every
+    # launch when it will not: three files opening at once, a modal up, a teardown half done.
+    # Reading empty as "a stranger's" is what left the gate's own multi-file Excel standing on
+    # 2026-09-13, after which the next group opened DebugFixture.xlsm beside it and Excel put
+    # "File in Use - Open Read-Only" on the developer's screen in the middle of a release gate.
+    # No COM, no window, no running object table: the path Excel was launched with.
+    $myFolders = @(
+        (Join-Path $repoRoot 'artifacts\fixtures'),
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
+    )
+    $launchedWith = @{}
+    foreach ($row in @(Get-CimInstance Win32_Process -Filter "Name='EXCEL.EXE'" -ErrorAction SilentlyContinue)) {
+        $launchedWith[[int] $row.ProcessId] = "$($row.CommandLine)"
+    }
+
     $ours = @()
     $theirs = @()
     foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
+        $commandLine = if ($launchedWith.ContainsKey($running.Id)) { $launchedWith[$running.Id] } else { '' }
+        $fromOurFolders = @($myFolders | Where-Object {
+            $commandLine.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+        if ($fromOurFolders.Count -gt 0) {
+            # Settled without taking a single wrapper on an instance that may be busy.
+            $ours += $running.Id
+            continue
+        }
+
         $held = $null
         # EVERY WRAPPER THIS READ TAKES IS GIVEN BACK BEFORE THE SWEEP. A wrapper the collector
         # finalises after its Excel has been killed makes DCOM start a fresh hidden Excel to
@@ -285,15 +313,29 @@ $apart = if ($Separate) { ', in a process of its own' } else { '' }
 # through its window" three steps in a row (2026-09-08). The question is asked once; the instance
 # asking it is stopped by its id and Excel is started again, which came up clean every time.
 $window = $null
+$excel = $null
 foreach ($attempt in 1, 2) {
     $process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
     Write-Host "Started Excel as process $($process.Id) on $names$apart."
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $asking = $false
-    while ($null -eq $window -and (Get-Date) -lt $deadline) {
+    while ($null -eq $excel -and (Get-Date) -lt $deadline) {
         $window = [XlideHarness.Attach]::WorkbookWindowOf($process.Id)
-        if ($null -ne $window) { break }
+        if ($null -ne $window) {
+            # THE WINDOW IS NOT THE ANSWER; ITS APPLICATION IS. An EXCEL7 window exists before
+            # the workbook behind it does, and the object model handed back by one of those has
+            # no Application on it - on which the property set below died with "The property
+            # 'DisplayAlerts' cannot be found on this object" and took a whole gate step with
+            # it, mid-release (2026-09-13, launching three fixtures at once). Waiting another
+            # 50ms is the entire fix; what it must not do is believe the first answer.
+            $excel = try { $window.Application } catch { $null }
+            if ($null -eq $excel) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($window) | Out-Null } catch { }
+                $window = $null
+            }
+        }
+        if ($null -ne $excel) { break }
         if ($attempt -eq 1 -and [XlideHarness.Attach]::AsksAboutSafeMode($process.Id)) {
             $asking = $true
             break
@@ -301,7 +343,7 @@ foreach ($attempt in 1, 2) {
         Start-Sleep -Milliseconds 50
     }
 
-    if ($null -ne $window) { break }
+    if ($null -ne $excel) { break }
     if ($asking) {
         Write-Host "Excel $($process.Id) is asking whether to start in safe mode, which it does once after a crash; stopping it by id and starting again."
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -309,11 +351,10 @@ foreach ($attempt in 1, 2) {
         Start-Sleep -Seconds 2
         continue
     }
-    throw "Could not reach Excel $($process.Id) through its window."
+    throw "Could not reach Excel $($process.Id) through a window with an Application on it."
 }
-if ($null -eq $window) { throw "Could not reach Excel $($process.Id) through its window." }
+if ($null -eq $excel) { throw "Could not reach Excel $($process.Id) through a window with an Application on it." }
 
-$excel = $window.Application
 $excel.DisplayAlerts = $false
 
 # The editor is opened through Excel's OWN ribbon command, not through $excel.VBE.
