@@ -246,6 +246,7 @@ export function openSettingsDialog(
 
   const head = document.createElement("div");
   head.id = "settings-head";
+  head.className = "modal-head";
 
   const title = document.createElement("span");
   title.textContent = "Settings";

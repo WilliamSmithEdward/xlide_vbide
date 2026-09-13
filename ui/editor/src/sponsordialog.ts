@@ -74,6 +74,7 @@ export function openSponsorDialog(handlers: SponsorHandlers, closed?: () => void
 
   const head = document.createElement("div");
   head.id = "sponsor-head";
+  head.className = "modal-head";
 
   const title = document.createElement("div");
   title.id = "sponsor-title";

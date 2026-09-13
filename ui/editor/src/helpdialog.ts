@@ -91,6 +91,7 @@ export function openHelpDialog(closed?: () => void): void {
 
   const head = document.createElement("div");
   head.id = "help-head";
+  head.className = "modal-head";
 
   const title = document.createElement("div");
   title.id = "help-title";

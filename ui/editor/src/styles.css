@@ -2268,6 +2268,28 @@ body.live-resize .minimap {
   font-size: 13px;
 }
 
+/* THE TITLE STRIP STAYS, whatever scrolls beneath it. A dialog names itself and offers its X in
+   one strip at the top, and the moment the card above began to scroll that strip was carried off
+   with the rows: Settings took it 545px up, About 203px, Support 96px, and the way out went with
+   it - Escape still worked, the button was simply gone (the owner, 2026-09-13).
+
+   Sticky rather than a header over a separate scroll box, because for these dialogs the CARD is
+   the scroll box: settings rows, About's facts and the sponsor's addresses are appended straight
+   to it. The dialogs that do run an inner scroller - sync, references, the agent card, the full
+   change log - carry the class too and are unaffected by it, which is the point of one rule: a
+   strip that is a strip behaves like one, and a card that later loses its inner scroller does
+   not quietly lose its header with it.
+
+   The background is the card's own. A sticky box is transparent by default, so without it the
+   rows would scroll through the title. Each dialog's own id keeps its padding, its border and
+   its layout, the way the ids do under .modal-card. */
+.modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--vscode-editorWidget-background, #252526);
+}
+
 /* The two QUESTION cards are plain content in a card - no header, no body, no scroll box - so
    the card itself is what holds them off its edges. Every other dialog has an inner layout that
    pads its own parts, which is why the shared .modal-card carries none and why this one went

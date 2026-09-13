@@ -150,6 +150,7 @@ export function openSyncDialog(
   // ---- head -------------------------------------------------------------------------------
   const head = document.createElement("div");
   head.id = "sync-head";
+  head.className = "modal-head";
 
   const title = document.createElement("span");
   title.id = "sync-title";

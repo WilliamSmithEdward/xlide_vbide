@@ -46,6 +46,7 @@ export function openReferencesDialog(
 
   const header = document.createElement("div");
   header.id = "references-head";
+  header.className = "modal-head";
 
   const title = document.createElement("h2");
   title.id = "references-title";

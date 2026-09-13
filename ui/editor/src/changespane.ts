@@ -724,6 +724,7 @@ export class ChangesPane {
 
     const head = document.createElement("div");
     head.id = "changes-full-head";
+    head.className = "modal-head";
 
     // TOP LEFT, where a panel toggle lives - not out on the divider, where it was a 15px target
     // hunting for a chevron (the owner, 2026-08-22: "I'd prefer a button at the top left").

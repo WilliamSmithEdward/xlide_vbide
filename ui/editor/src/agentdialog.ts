@@ -187,6 +187,7 @@ export function openAgentDialog(ask: ApiRequest, closed?: () => void): void {
 
   const head = document.createElement("div");
   head.id = "agent-head";
+  head.className = "modal-head";
 
   const title = document.createElement("h2");
   title.id = "agent-title";
