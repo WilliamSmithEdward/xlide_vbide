@@ -31,6 +31,23 @@ import { currentSettings } from "./settings.js";
 const CANONICAL_LINE_IDLE_DELAY_MS = 200;
 
 /**
+ * Yields until the dispatch that woke us has finished, so every listener of that event has run
+ * and the bridge has posted the change it carries.
+ *
+ * An offset means nothing to the host until the change it belongs to has reached it, and Monaco
+ * calls listeners in registration order: this controller's editor listeners can run ahead of the
+ * bridge's model listener, so a request posted inline overtakes the push describing the edit it
+ * was computed against. The host then answers from the previous text, where the same offsets sit
+ * inside other words - which is how a quick fix's `Option Explicit` came back as
+ * `Option Explicit()`, with the procedure header it was inserted above eaten (xlide_vbide#25 and
+ * #27, lessons.md 83). A microtask runs after the whole dispatch, which is why the Enter pass
+ * below is queued rather than called.
+ */
+function settled(): Promise<void> {
+  return new Promise((resolve) => { queueMicrotask(resolve); });
+}
+
+/**
  * One indent level: that many spaces, the width the developer asked for.
  *
  * The same width the editor's own `tabSize`/`indentSize` follow, so everything that indents
@@ -200,6 +217,8 @@ class TypingAutomation {
     line: number,
     completeHeader: boolean,
   ): Promise<void> {
+    // The host must already hold the edit these offsets belong to; see settled().
+    await settled();
     if (this.editor.getModel() !== model || !this.touched.has(this.lineKey(model, line))) {
       return;
     }
@@ -214,6 +233,7 @@ class TypingAutomation {
     const edits = await this.bridge.requestCanonicalCase(
       start,
       end,
+      model.getValueLength(),
       completeHeader ? { completeHeader: true } : {},
     );
     if (edits.length === 0) {
@@ -234,6 +254,8 @@ class TypingAutomation {
     model: monaco.editor.ITextModel,
     position: monaco.Position,
   ): Promise<void> {
+    // The host must already hold the edit this offset belongs to; see settled().
+    await settled();
     if (this.editor.getModel() !== model || !this.touched.has(this.lineKey(model, position.lineNumber))) {
       return;
     }
@@ -245,7 +267,8 @@ class TypingAutomation {
     const offset = model.getOffsetAt({ lineNumber: position.lineNumber, column });
     const version = model.getVersionId();
 
-    const edits = await this.bridge.requestCanonicalCase(offset, offset, { single: true });
+    const edits = await this.bridge.requestCanonicalCase(
+      offset, offset, model.getValueLength(), { single: true });
     if (edits.length === 0) {
       return;
     }

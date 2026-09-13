@@ -2439,6 +2439,45 @@ built on an absence passes on a round trip that never came back; every new
 "not offered" check in the live suites asserts the reason too. The new
 engine suite went 12 of 21 red on a build that approved every candidate.
 
+## 83. A recase overtook the edit it was about, and wrote Option Explicit()
+
+A quick fix inserted `Option Explicit` at the top of a module and the module
+came back holding `Option Explicit()`, which does not compile. On the
+reporter's module the `Sub` header the line was inserted above was eaten with
+it, so every statement under it read as a statement outside a procedure and
+the pane filled with five errors nothing in the visible text explained
+(xlide_vbide#25 and #27, against 0.16.1).
+
+Neither end was wrong. The analyzer's fix text is `Option Explicit` and an
+end-of-line, and the write path carried what it was given. The corruption
+arrived between them. The page applies the fix, the caret leaves line 1, and
+the line it left is sent to the host to be recased: offsets into the page's
+model, answered from the host's shadow of that model, which the page's own
+change messages rebuild. The recase was posted BEFORE the change carrying the
+insertion, which the host's own log shows to the millisecond:
+
+    page -> canonicalCase    (offsets 0..15, the new line 1)
+    page -> contentChanged   (the insertion those offsets came from)
+    canonicalCase: 0..15 -> 1 edit
+
+So the host sliced 0..15 out of the PREVIOUS text, where it reads
+`Sub MakeApplica`. That is a bare procedure header by the shape rules, and
+the header completion answers one by inserting `()` at column 15. The page
+applied that edit to its own text, where 15 is the end of `Option Explicit`.
+
+The page was guarding the wrong end of this. It drops an answer when its own
+model moved while the answer was in flight, which says nothing about which
+text the host answered from. Two things hold it now. The recase waits for the
+dispatch that woke it to finish, so the bridge's change message goes first -
+the same reason the Enter pass is queued rather than called. And the request
+carries the length of the text its offsets belong to, so the host refuses a
+request whose text it does not hold and says so in the log instead of
+answering about another one.
+
+An offset is evidence of nothing by itself. Anything that crosses a process
+boundary as a position needs the identity of the text it was taken from, or
+the receiver has to be ordered behind the writer that produces it.
+
 Measured at scale the same day, the first cut was dear. On a 63,000-line
 module a caret on a local cost 159ms and a procedure's header 94ms, every
 time the caret settled, on the engine's one thread. A CPU profile put 15s of

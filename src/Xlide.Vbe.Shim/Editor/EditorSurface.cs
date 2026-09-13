@@ -2639,6 +2639,25 @@ internal sealed class EditorSurface : IDisposable
                         var completeHeader = document.RootElement.TryGetProperty("completeHeader", out var headerElement)
                             && headerElement.ValueKind == JsonValueKind.True;
 
+                        // THE TEXT THE OFFSETS NAME, not whatever this shadow holds now. The
+                        // offsets are the page's; the engine is handed this shadow, which the
+                        // page's own changes rebuild - so a request that overtakes the change
+                        // carrying them is answered against the previous text, where the same
+                        // offsets sit inside other words. That is how a quick fix's
+                        // `Option Explicit` came back as `Option Explicit()` with the procedure
+                        // header it was inserted above eaten, on a developer's own module
+                        // (xlide_vbide#25 and #27, lessons.md 83). The page is ordered to post
+                        // the change first; this refuses the answer if it ever does not.
+                        var shadowLength = ActiveDoc?.Text?.Length ?? -1;
+                        if (document.RootElement.TryGetProperty("fullLength", out var caseLengthElement)
+                            && caseLengthElement.TryGetInt32(out var caseFullLength)
+                            && caseFullLength != shadowLength)
+                        {
+                            Log.Info($"canonicalCase: refused, the page holds {caseFullLength} character(s) where this shadow holds {shadowLength}");
+                            ShowCanonicalCase(caseRequestId, []);
+                            break;
+                        }
+
                         CanonicalCaseRequested?.Invoke(caseRequestId, caseStart, caseEnd, single, completeHeader);
                     }
 

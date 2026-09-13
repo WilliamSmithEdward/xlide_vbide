@@ -938,7 +938,7 @@ node tools\harness\format-positions.mjs    # where a squiggle lands after Format
 node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
 node tools\harness\analysis-freshness.mjs  # findings stay true while the work behind them is skipped
 node tools\harness\inline-comments-live.mjs # suppression directives and ''' docs on the live surface
-node tools\harness\analysis-rules-live.mjs  # machine-wide rule overrides, the catalog, and the inline writer
+node tools\harness\analysis-rules-live.mjs  # rule overrides, the catalog, the inline writer, a fix's own text
 ```
 
 ### Inline suppression directives and `'''` doc comments
@@ -995,7 +995,9 @@ clears); `analysis({ module, line, code })` writes the inline directive from out
 the problems pane's right-click does. The UI's three entry points - the toolbar's Analyzer rules
 dialog, the problems row's menu, and the lightbulb's "Turn off '<code>' on this machine" - all
 run the identical host mechanism. Held by `engine/test/rule-overrides.mjs` and
-`analysis-rules-live.mjs`.
+`analysis-rules-live.mjs`, which also runs `Add Option Explicit` from the finding and reads the
+module back from the HOST: a fix's text reaches a module through the page, the recase behind it
+and the write, and only what the host ends up holding is what compiles (lessons.md 83).
 
 ### Work that is skipped, and how to see that it was skipped
 

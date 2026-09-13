@@ -582,7 +582,7 @@ export type ClientMessage =
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
-  | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
+  | { type: "canonicalCase"; id: number; start: number; end: number; fullLength: number; single?: boolean; completeHeader?: boolean }
   | { type: "codeAction"; id: number; start: number; end: number; module?: string; project?: string | null }
   | { type: "refactorings"; id: number; candidates: HostRefactorCandidate[] }
   | { type: "semanticTokens"; id: number; module: string; project?: string }
@@ -1316,10 +1316,17 @@ export class EditorBridge {
   /**
    * Asks the host for the case corrections over a span. Resolves empty rather than rejecting: a
    * recase that fails is a line left as typed, and the next pass over it will ask again.
+   *
+   * `fullLength` is the length of the text the offsets belong to. The host answers from its own
+   * shadow of this model, rebuilt from the changes posted above, and offsets carry no evidence
+   * of which text they were taken from: against the wrong one they land inside other words. The
+   * host compares the two and refuses rather than answering about a text it does not hold
+   * (lessons.md 83).
    */
   requestCanonicalCase(
     start: number,
     end: number,
+    fullLength: number,
     options: { single?: boolean; completeHeader?: boolean } = {},
   ): Promise<HostTextEdit[]> {
     return this.pendingCanonicalCases.ask(() => [], 2000, (id) =>
@@ -1328,6 +1335,7 @@ export class EditorBridge {
         id,
         start,
         end,
+        fullLength,
         ...(options.single ? { single: true } : {}),
         ...(options.completeHeader ? { completeHeader: true } : {}),
       }));

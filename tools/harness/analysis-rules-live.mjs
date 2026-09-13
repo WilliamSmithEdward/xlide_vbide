@@ -20,6 +20,20 @@ const { check, done } = reporter();
 const CRLF = "\r\n";
 const NAME = `Rules${process.pid % 10000}`;
 
+/** A module's text as the HOST holds it, once it satisfies the predicate or the budget is out. */
+async function hostTextWhen(module, predicate, budgetMs = 15000) {
+  const until = Date.now() + budgetMs;
+  let text = "";
+  do {
+    text = (await api.readModule(module, project.projectId)).text ?? "";
+    if (predicate(text)) {
+      return text;
+    }
+    await wait(200);
+  } while (Date.now() < until);
+  return text;
+}
+
 async function problemsFor(module, expected) {
   let rows = [];
   const until = Date.now() + 25000;
@@ -126,6 +140,45 @@ try {
 
   const gone = await problemsFor(NAME, (rows) => rows.length === 0);
   check("and the pane empties from the comment alone", gone.arrived, codes(gone.rows));
+
+  /* ---- a fix writes what it says, against the text the page holds ------------------------------ */
+
+  // The insertion is the page's edit; the recase that follows it is the HOST's answer, computed
+  // from the shadow the page's change messages rebuild. When the recase overtook the change
+  // carrying the insertion, the host answered from the previous text and `Option Explicit` was
+  // written as `Option Explicit()`, which does not compile - on the reporter's module the
+  // procedure header it sat above was eaten with it (xlide_vbide#25 and #27, lessons.md 83).
+  // The caret goes on the finding's line first, because the recase this raced is the one that
+  // fires as the caret leaves a line.
+  //
+  // THE FIRST LINE MUST BE LONGER THAN `Option Explicit`, and a header when it is cut to that
+  // length. The stale answer is the new line 1's span read out of the OLD text, so with a first
+  // line of 15 characters or fewer there is nothing to cut and the bug cannot appear: written
+  // as `Public Sub Go()` this section passed against the very build it was written to catch.
+  // `Public Sub Recalculate()` cut to 15 is `Public Sub Reca`, a bare header, which is what the
+  // header completion answers with `()`.
+  await api.writeModule(NAME, [
+    "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
+  ].join(CRLF), project.projectId);
+  const needing = await problemsFor(NAME,
+    (rows) => rows.some((one) => one.code === "option-explicit-missing"));
+  check("the module needs Option Explicit again", needing.arrived, codes(needing.rows));
+
+  await api.pane("open", { module: NAME, project: project.projectId });
+  await api.caret(1, { module: NAME, column: 1, project: project.projectId });
+  const added = await api.act("problemFixes", {
+    module: NAME, workbook: project.projectId, line: 1, column: 1, title: "Add Option Explicit",
+  });
+  check("the Add Option Explicit fix runs from the finding", added.did === true, added.detail);
+
+  // THE WHOLE TEXT, not the first line: the race has written both `Option Explicit()` and a
+  // first line with the procedure header underneath it eaten, and one equality catches either.
+  const expected = [
+    "Option Explicit", "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
+  ].join(CRLF);
+  const written = await hostTextWhen(NAME, (one) => /Option Explicit/i.test(one));
+  check("and the host holds exactly Option Explicit above the code it was inserted over",
+    written.trimEnd() === expected, JSON.stringify(written.slice(0, 160)));
 } finally {
   await api.analysis({ rule: "option-explicit-missing", severity: "default" }).catch(() => {});
   await api.command("reset").catch(() => {});
