@@ -17,11 +17,45 @@ $ErrorActionPreference = 'Continue'
 
 Add-Type -Namespace Xlide -Name Close -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+[DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
 [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IDispatch)] out object window);
 public delegate bool EnumProc(IntPtr h, IntPtr l);
+
+// OBJID_NATIVEOM: a worksheet window hands back the workbook window, and its Application is the
+// one belonging to THIS process - which the running object table cannot promise.
+const uint NativeObjectModel = 0xFFFFFFF0u;
+
+public static object WorkbookWindowOf(int processId)
+{
+    IntPtr sheet = IntPtr.Zero;
+
+    EnumWindows((h, l) =>
+    {
+        int owner;
+        GetWindowThreadProcessId(h, out owner);
+        if (owner != processId) { return true; }
+
+        EnumChildWindows(h, (child, l2) =>
+        {
+            var name = new System.Text.StringBuilder(128);
+            GetClassNameW(child, name, 128);
+            if (name.ToString() == "EXCEL7") { sheet = child; return false; }
+            return true;
+        }, IntPtr.Zero);
+
+        return sheet == IntPtr.Zero;
+    }, IntPtr.Zero);
+
+    if (sheet == IntPtr.Zero) { return null; }
+
+    var dispatch = new Guid("00020400-0000-0000-C000-000000000046");
+    object window;
+    return AccessibleObjectFromWindow(sheet, NativeObjectModel, ref dispatch, out window) == 0 ? window : null;
+}
 
 public static IntPtr FrameOf(int processId)
 {
@@ -47,11 +81,17 @@ if (-not $excelProcess) { $excelProcess = Get-Process EXCEL -ErrorAction Silentl
 if (-not $excelProcess) { Write-Output 'RESULT: FAIL - no Excel is running'; exit 1 }
 $processId = $excelProcess.Id
 
-try {
-    $app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-} catch {
-    Write-Output "RESULT: FAIL - Excel $processId is not reachable through the running object table"; exit 1
+# THROUGH ITS WINDOW, not the running object table. The ROT hands back whichever Excel registered
+# itself, which is not necessarily the one XLIDE_PID names: with a second Excel running the add-in
+# - a recovery copy, another session's fixture - this test closed the aimed editor and pressed the
+# ribbon button on the OTHER instance, so the frame never came back and every cycle broke
+# (2026-09-13). Start-Excel.ps1 attaches this way for the same reason.
+$window = [Xlide.Close]::WorkbookWindowOf($processId)
+if (-not $window) {
+    Write-Output "RESULT: FAIL - Excel $processId has no worksheet window to reach its object model through"; exit 1
 }
+
+$app = $window.Application
 Write-Output "excel $processId"
 
 $broken = 0
@@ -82,6 +122,14 @@ for ($cycle = 1; $cycle -le 3; $cycle++) {
     if (-not $alive) { $broken += 1; break }
     if (-not $visible) { $broken += 1 }
 }
+
+# RELEASED BEFORE THE VERDICT. A wrapper finalised after its host has gone is what DCOM answers
+# by starting a fresh Excel, and this test exists because hosts die here (lesson 27).
+foreach ($held in $app, $window) {
+    if ($held) { [void] [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($held) }
+}
+[System.GC]::Collect()
+[System.GC]::WaitForPendingFinalizers()
 
 if ($broken -eq 0) {
     Write-Output 'RESULT: PASS - three close and reopen cycles, Excel standing after each'

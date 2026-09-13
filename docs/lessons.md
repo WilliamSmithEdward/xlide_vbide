@@ -2496,3 +2496,33 @@ question after an edit: 24ms on a keyword and about 85ms on a local at
 analysis pass makes anyway; the rest is the analyzer's own symbol index and
 reference scan, both whole-module, and scoping a local's references to its
 procedure is the analyzer's change to make.
+
+## 84. Two lookups answered about whichever host came first
+
+The host object model is reached by walking windows, because the running
+object table cannot be told which host is meant. Two places got the walk
+wrong in the same way, and both surfaced the same week.
+
+In Word, `HostApplication.Find()` asked the FIRST top-level `OpusApp` frame of
+the process for a `_WwG` document pane. Word keeps more than one such frame,
+so the answer depended on window order: with the first frame holding no pane
+the lookup returned nothing, and everything that needs the host said so at
+once - the Immediate window, the test runner and source control's dirty check
+all answering "The host application could not be reached". It failed that way
+on three gate runs in a row and passed by hand on the same build three times,
+which is the signature of an order dependency rather than a broken feature.
+The Excel branch beside it had always walked every `XLMAIN`; Word walks every
+frame now, and answers with the frame itself when no frame holds a pane,
+because a Word frame carries the object model the way an Access frame does.
+
+Test-CloseVbe had the other half. It picked its session from `XLIDE_PID` and
+then reached for Excel through `GetActiveObject`, which hands back whichever
+Excel registered itself: with a second Excel running the add-in - a recovery
+copy of a fixture, in this case, left by a crash - it closed the aimed editor
+and pressed Developer > Visual Basic on the other instance, so the frame never
+came back and all three cycles broke. It attaches through a worksheet window
+of the aimed process now, the way `Start-Excel.ps1` does.
+
+Aiming a test by pid is half the job. The other half is that every reach it
+makes afterwards has to be aimed too, and a COM entry point that takes no
+process - `GetActiveObject`, `GetObject`, the ROT at all - is never aimed.

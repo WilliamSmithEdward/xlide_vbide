@@ -34,7 +34,7 @@ internal static class HostApplication
         var pane = FindDocumentWindow();
         if (pane == 0)
         {
-            Log.Warn("host: no document window in this process, so its object model cannot be reached");
+            Log.Warn($"host: no document window for {Engine.HostApp.Name} in this process, so its object model cannot be reached");
             return null;
         }
 
@@ -63,7 +63,7 @@ internal static class HostApplication
     private static nint FindDocumentWindow() => Engine.HostApp.Name switch
     {
         "excel" => FindExcelWorksheetWindow(),
-        "word" => FindDescendantByClass(FindProcessFrame("OpusApp"), "_WwG", 0),
+        "word" => FindWordDocumentPane(),
 
         // ACCESS ANSWERS ON ITS FRAME, and answers with the Application ITSELF rather than with a
         // window object - `Name` on it reads "Microsoft Access" (measured 2026-09-06 against a
@@ -74,6 +74,48 @@ internal static class HostApplication
         "access" => FindProcessFrame("OMain"),
         _ => 0,
     };
+
+    /// <summary>
+    /// Word's document pane, from whichever of this process's frames holds one.
+    ///
+    /// EVERY FRAME, the way the Excel walk below does. Word keeps more than one top-level
+    /// `OpusApp` window, so asking only the first - which this did - makes the answer depend on
+    /// window order. The gate's Word session answered "the host application could not be reached"
+    /// for the Immediate window, the test runs and the dirty check on three runs in a row, while
+    /// the same suite passed by hand on the same build (2026-09-13).
+    ///
+    /// A frame with no pane under it is still worth answering with when NO frame has one: Word's
+    /// frame carries the object model itself, as Access's does, so a session whose document
+    /// window has not been built yet reaches the Application rather than nothing.
+    /// </summary>
+    private static nint FindWordDocumentPane()
+    {
+        nint frame = 0;
+        nint first = 0;
+        var frames = 0;
+
+        while ((frame = NextProcessFrame("OpusApp", frame)) != 0)
+        {
+            frames += 1;
+            if (first == 0)
+            {
+                first = frame;
+            }
+
+            var pane = FindDescendantByClass(frame, "_WwG", 0);
+            if (pane != 0)
+            {
+                return pane;
+            }
+        }
+
+        if (first != 0)
+        {
+            Log.Verbose($"host: no _WwG under {frames} Word frame(s); asking the frame itself");
+        }
+
+        return first;
+    }
 
     private static nint FindExcelWorksheetWindow()
     {
