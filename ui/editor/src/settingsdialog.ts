@@ -433,10 +433,9 @@ export function openSettingsDialog(
     card.appendChild(row);
   }
 
-  const foot = document.createElement("div");
-  foot.id = "settings-foot";
-  foot.textContent = "Changes are saved as you make them.";
-  card.appendChild(foot);
+  // NO FOOTER. "Changes are saved as you make them" was a line of chrome under every row saying
+  // what the rows already do: a checkbox that takes effect as it is ticked has told the
+  // developer that itself (the owner, 2026-09-13).
 
   const refresh = (): void => refreshers.forEach((apply) => apply());
   refresh();

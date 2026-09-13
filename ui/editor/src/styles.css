@@ -2183,15 +2183,19 @@ body.live-resize .minimap {
   line-height: 1.45;
   /* Paragraphs, so a choice and what it costs are not one wall of words. */
   white-space: pre-line;
-  clip-path: inset(50%);
+
+  /* OUT OF THE LAYOUT, not merely out of sight. Clipped and transparent it was still an
+     absolutely positioned box hanging below its row, and once the card could scroll, the card's
+     scroll area grew to cover it: the dialog scrolled past its last row into 118px of nothing
+     (the owner's screenshot, 2026-09-13). The flip-above measurement still works, because it is
+     taken after the shown class is on. */
+  display: none;
   pointer-events: none;
-  opacity: 0;
 }
 
 .settings-detail.shown {
-  clip-path: none;
+  display: block;
   pointer-events: auto;
-  opacity: 1;
 }
 
 /* Flipped when the room below has run out, which the last row in the list regularly finds. */
@@ -2213,13 +2217,6 @@ body.live-resize .minimap {
   width: 16px;
   height: 16px;
   accent-color: var(--vscode-focusBorder, #0078d4);
-}
-
-#settings-foot {
-  padding: 8px 14px 10px;
-  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
-  opacity: 0.6;
-  font-size: 12px;
 }
 
 /* The small centred card the page asks a question on: the unsaved-changes gate a closing tab
