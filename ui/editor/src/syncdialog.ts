@@ -118,10 +118,10 @@ export function openSyncDialog(
    *
    * The dialog used to name none, and the host filled the gap with two different fallbacks: the
    * plan's identity from the SHOWN project and its modules from the editor's ACTIVE one. With two
-   * workbooks open those are routinely different - measured 2026-08-21 with nothing contrived,
+   * projects open those are routinely different - measured 2026-08-21 with nothing contrived,
    * seconds after opening two fixtures side by side, a plan titled DebugFixture.xlsm whose rows
-   * were TwinFixture's six modules. Applying it would have exported one workbook's modules into
-   * the other's folder, or imported that folder over the other workbook's code.
+   * were TwinFixture's six modules. Applying it would have exported one project's modules into
+   * the other's folder, or imported that folder over the other project's code.
    *
    * Naming it here closes the other half of that too: the plan on screen and the Apply that
    * carries it out cannot drift apart while the dialog is open, whatever the editor does behind
@@ -202,14 +202,14 @@ export function openSyncDialog(
     return button;
   };
 
-  const exportButton = makeDirection("export", "export", "Export", "the workbook writes the folder");
-  const importButton = makeDirection("import", "cloud-download", "Import", "the folder writes the workbook");
+  const exportButton = makeDirection("export", "export", "Export", "the project writes the folder");
+  const importButton = makeDirection("import", "cloud-download", "Import", "the folder writes the project");
   directions.append(exportButton, importButton);
 
   // ---- folder -----------------------------------------------------------------------------
   // ---- project ----------------------------------------------------------------------------
   //
-  // "Project", not "File", though a file is this product's word for a workbook everywhere else
+  // "Project", not "File", though a file is this product's word for a project everywhere else
   // (see scopeselect.ts). Here the rows below ARE files - the .bas and .cls on disk - and one
   // dialog cannot use the word for both without the reader having to work out which is meant.
   // Project is what VBA calls it, what the plan's own field is called, and what the tree holds.
@@ -557,9 +557,9 @@ export function openSyncDialog(
           + "matching the project exactly."
         : "Files in the folder that no longer match a module are left where they are."
       : deleting
-        ? "Modules with no file are removed from the workbook. Only standard and class modules are "
-          + "ever removed; sheets, the workbook and forms are always left alone."
-        : "Modules with no file are left in the workbook.";
+        ? "Modules with no file are removed from the project. Only standard and class modules are "
+          + "ever removed; sheets, document modules and forms are always left alone."
+        : "Modules with no file are left in the project.";
   }
 
   function drawList(): void {
@@ -787,11 +787,11 @@ export function openSyncDialog(
 
     busy = true;
     apply.disabled = true;
-    say(direction === "export" ? "Writing the folder..." : "Writing the workbook...");
+    say(direction === "export" ? "Writing the folder..." : "Writing the project...");
 
     const answer = await request(
       // The SAME project the plan above was read for. Without it the apply resolved itself
-      // all over again, so a plan drawn for one workbook could be carried out against another.
+      // all over again, so a plan drawn for one project could be carried out against another.
       { action: "apply", direction, ...(project ? { project } : {}), folder, mode: modeSelect.value },
       [...ticked].join("\n"),
     );

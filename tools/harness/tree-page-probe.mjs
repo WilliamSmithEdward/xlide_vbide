@@ -30,16 +30,16 @@ const DRIVE = `(async () => {
 
   // The demo publishes the tree a beat after load; nothing below means anything until it has.
   for (let waited = 0; tabs().length < 2 && waited < 20000; waited += 200) await sleep(200);
-  act('expandWorkbook', { workbook: 'Book1.xlsm', open: true });
+  act('expandProject', { project: 'Book1.xlsm', open: true });
   for (let waited = 0; !rows().includes('Module1') && waited < 10000; waited += 200) await sleep(200);
   check('the demo tree lists Book1 with Module1 in it', rows().includes('Module1'), rows().join(','));
 
   // THE PLUS ON EVERY WORKBOOK ROW.
-  const plusButtons = [...document.querySelectorAll('.tree-workbook .tree-add')];
-  const workbookRows = [...document.querySelectorAll('.tree-workbook')];
+  const plusButtons = [...document.querySelectorAll('.tree-project .tree-add')];
+  const projectRows = [...document.querySelectorAll('.tree-project')];
   check('every workbook row carries a plus',
-    workbookRows.length >= 2 && plusButtons.length === workbookRows.length,
-    plusButtons.length + ' of ' + workbookRows.length);
+    projectRows.length >= 2 && plusButtons.length === projectRows.length,
+    plusButtons.length + ' of ' + projectRows.length);
 
   check('the plus is out of sight until the row is wanted',
     getComputedStyle(plusButtons[0]).opacity === '0',
@@ -71,14 +71,14 @@ const DRIVE = `(async () => {
   check('the plus meets the 24px target', plusBox.width >= 24 && plusBox.height >= 24,
     Math.round(plusBox.width) + 'x' + Math.round(plusBox.height));
 
-  const rowBox = workbookRows[0].getBoundingClientRect();
+  const rowBox = projectRows[0].getBoundingClientRect();
   check('the plus is right-aligned in its row',
     Math.abs(rowBox.right - plusBox.right) <= 6,
     'row right ' + Math.round(rowBox.right) + ', plus right ' + Math.round(plusBox.right));
 
   check('the plus is green, not the text colour',
     getComputedStyle(plus.querySelector('.codicon')).color
-      !== getComputedStyle(workbookRows[0]).color,
+      !== getComputedStyle(projectRows[0]).color,
     getComputedStyle(plus.querySelector('.codicon')).color);
 
   /*
@@ -90,7 +90,7 @@ const DRIVE = `(async () => {
    * Checked against the SCROLLPORT rather than against the row, because the row was the thing
    * that was wrong.
    */
-  const tree = workbookRows[0].parentElement;
+  const tree = projectRows[0].parentElement;
   const visible = () => {
     const port = tree.getBoundingClientRect();
     const button = tree.querySelector('.tree-add').getBoundingClientRect();
@@ -112,11 +112,11 @@ const DRIVE = `(async () => {
   // A NAME TOO LONG FOR THE PANE MUST NOT PUSH THE PLUS OFF IT. The name is what gives way, and
   // the ellipsis is the browser's, so what is asserted is that the element is narrower than the
   // text it holds and the plus is still inside the row.
-  const label = workbookRows[0].querySelector('.tree-workbook-name');
+  const label = projectRows[0].querySelector('.tree-project-name');
   const wasName = label.textContent;
   label.textContent = 'A'.repeat(200) + 'Workbook_With_A_Very_Long_Name.xlsm';
   const squeezed = plus.getBoundingClientRect();
-  const squeezedRow = workbookRows[0].getBoundingClientRect();
+  const squeezedRow = projectRows[0].getBoundingClientRect();
   check('a long name truncates rather than pushing the plus out',
     label.scrollWidth > label.clientWidth && squeezed.right <= squeezedRow.right + 1,
     'name ' + label.scrollWidth + 'px in ' + label.clientWidth + 'px, plus right '
@@ -155,7 +155,7 @@ const DRIVE = `(async () => {
   // THE WORKBOOK'S MENU IS THE PROJECT'S DIALOGS, and only those: adding a component is the
   // plus on the row, which is visible and one press, so the menu stopped carrying a second
   // copy of that list (2026-08-20).
-  const bookMenu = act('treeMenu', { workbook: 'Book1.xlsm' });
+  const bookMenu = act('treeMenu', { project: 'Book1.xlsm' });
   check('the workbook menu offers the dialogs a row cannot otherwise reach',
     bookMenu.did && bookMenu.detail === 'References... | Project Properties...', bookMenu.detail);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -202,16 +202,16 @@ const DRIVE = `(async () => {
   /*
    * AND WITH SEVERAL WORKBOOKS, CLOSING THE LAST TAB STILL FOLDS THEM.
    *
-   * The sole-workbook exception is checked in its own probe, against a books=1 query. NO BACKTICKS
+   * The sole-project exception is checked in its own probe, against a books=1 query. NO BACKTICKS
    * in here, which this file already warns about further up and which I did anyway: the drive is
    * itself a template literal and a nested one ends it early. This is the half
    * it must not have cost: folding several away when nothing is open is real tidying, and the
    * exception is about one row, not about the rule.
    */
-  const books = () => window.xlideUi.state().explorer.workbooks;
+  const books = () => window.xlideUi.state().explorer.projects;
   check('the demo has more than one workbook', books().length > 1, books().length + '');
 
-  for (const one of books()) { act('expandWorkbook', { workbook: one.name, open: true }); }
+  for (const one of books()) { act('expandProject', { project: one.name, open: true }); }
   await sleep(400);
 
   for (let i = 0; i < 12 && document.querySelectorAll('.tab').length > 0; i++) {
@@ -243,7 +243,7 @@ await runPageProbe({
      * pointer being somewhere.
      */
     const point = JSON.parse(await inPage(`(() => {
-      const row = document.querySelector('.tree-workbook');
+      const row = document.querySelector('.tree-project');
       const box = row.getBoundingClientRect();
       // Over the NAME, not over the button: the point of hovering the row is that the whole row
       // arms it, so the measurement has to be taken somewhere the button is not.
@@ -251,7 +251,7 @@ await runPageProbe({
     })()`));
 
     const opacity = () => inPage(
-      "getComputedStyle(document.querySelector('.tree-workbook .tree-add')).opacity");
+      "getComputedStyle(document.querySelector('.tree-project .tree-add')).opacity");
     const settle = () => new Promise((done) => setTimeout(done, 300));
 
     await send("Input.dispatchMouseEvent",

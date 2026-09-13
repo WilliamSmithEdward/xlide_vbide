@@ -42,12 +42,12 @@ const pick = (list) => list[Math.floor(random() * list.length)];
 
 const api = await open({});
 const first = await api.ui();
-const workbooks = first.explorer.workbooks.map((b) => b.name);
+const workbooks = first.explorer.projects.map((b) => b.name);
 
 // Every workbook's modules, carrying which workbook each belongs to: a bare name is ambiguous
 // across workbooks, which is the whole point of running this with two of them open.
-const modules = first.explorer.workbooks.flatMap((b) =>
-  b.modules.filter((m) => m.kind !== "document").map((m) => ({ name: m.name, workbook: b.name })));
+const modules = first.explorer.projects.flatMap((b) =>
+  b.modules.filter((m) => m.kind !== "document").map((m) => ({ name: m.name, project: b.name })));
 
 const broken = [];
 let checks = 0;
@@ -81,7 +81,7 @@ async function closeOne() {
 const ACTIONS = [
   [6, "open a module", async () => {
     const one = pick(modules);
-    await api.pane("open", { module: one.name, project: one.workbook.toLowerCase() });
+    await api.pane("open", { module: one.name, project: one.project.toLowerCase() });
   }],
   [2, "close the active tab", closeOne],
   [2, "cycle forward", async () => { await api.act("cycleTab", { delta: 1 }); }],
@@ -90,11 +90,11 @@ const ACTIONS = [
   [1, "split down", async () => { await api.act("split", { direction: "down" }); }],
   [2, "unfold a module", async () => {
     const one = pick(modules);
-    await api.act("unfoldModule", { module: one.name, workbook: one.workbook });
+    await api.act("unfoldModule", { module: one.name, project: one.project });
   }],
   [2, "toggle a workbook", async () => {
     if (workbooks.length > 0) {
-      await api.act("expandWorkbook", { workbook: pick(workbooks), open: random() < 0.5 });
+      await api.act("expandProject", { project: pick(workbooks), open: random() < 0.5 });
     }
   }],
   [1, "open the settings dialog", async () => { await api.act("settings"); }],
@@ -203,7 +203,7 @@ async function sweep(where) {
   if (new Set(w.groups.flatMap((g) => g.tabs).map((t) => t.project)).size > 1) { reached.twoWorkbooksOpen++; }
   if ([...counts.values()].some((n) => n > 1)) { reached.collision++; }
 
-  const unfolded = ui.explorer.workbooks.flatMap((b) => b.modules.filter((m) => m.unfolded));
+  const unfolded = ui.explorer.projects.flatMap((b) => b.modules.filter((m) => m.unfolded));
   check(where, "at most one module is unfolded", unfolded.length <= 1,
     unfolded.map((m) => m.name).join(","));
   check(where, "explorer.unfolded agrees with the rows",
@@ -246,12 +246,12 @@ const twins = modules
   .filter((m) => modules.filter((other) => other.name.toLowerCase() === m.name.toLowerCase()).length > 1);
 
 for (const twin of twins) {
-  await api.pane("open", { module: twin.name, project: twin.workbook.toLowerCase() });
+  await api.pane("open", { module: twin.name, project: twin.project.toLowerCase() });
   await wait(900);
 }
 
 console.log(`seed ${SEED}, ${STEPS} steps, ${modules.length} modules, ${workbooks.length} workbooks`);
-console.log(`opened ${twins.length} twin(s) up front: ${twins.map((t) => `${t.name}@${t.workbook}`).join(", ") || "none"}\n`);
+console.log(`opened ${twins.length} twin(s) up front: ${twins.map((t) => `${t.name}@${t.project}`).join(", ") || "none"}\n`);
 
 // One entry per unit of weight, so `pick` stays a uniform choice over a loaded list.
 const WEIGHTED = ACTIONS.flatMap(([weight, label, run]) =>

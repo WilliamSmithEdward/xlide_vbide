@@ -313,10 +313,10 @@ export class ChangesPane {
   /**
    * Rebuilds the file list from the session as it stands.
    *
-   * A CLOSED FILE DROPS OUT. A workbook nobody has open is not something this pane offers, and if
+   * A CLOSED FILE DROPS OUT. A project nobody has open is not something this pane offers, and if
    * it was the one being shown the pane falls back to the file the developer is actually in rather
    * than going on answering about a file that is not there. The session lets go of its log at the
-   * same moment, so opening the workbook again starts fresh.
+   * same moment, so opening the project again starts fresh.
    */
   filesChanged(): void {
     const { names, current } = this.files();
@@ -338,7 +338,7 @@ export class ChangesPane {
     }
 
     // One file is not a choice, the same rule the list panes' file select follows - and the
-    // name beside it goes the other way, so the workbook is said exactly once either way.
+    // name beside it goes the other way, so the project is said exactly once either way.
     this.file.hidden = names.length < 2;
     this.title.hidden = !this.file.hidden;
     this.file.value = keep ? chosen : current ?? names[0] ?? "";

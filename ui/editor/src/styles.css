@@ -1074,7 +1074,7 @@ span.prop-value.readonly {
 /* A workbook's row: the twisty, the name, and the plus that adds to it. A treeitem rather than a
    button, because it holds a button and nesting them is invalid; the tree's keydown gives it back
    the Enter and Space the element used to carry. */
-.tree-workbook {
+.tree-project {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1102,7 +1102,7 @@ span.prop-value.readonly {
    control that is only sometimes reachable is worse than a name that is only sometimes whole, and
    the row's tooltip carries the name in full either way. min-width: 0 is what lets it — a flex
    item refuses to shrink below its content without it, so the name would push the plus out. */
-.tree-workbook-name {
+.tree-project-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -1110,16 +1110,16 @@ span.prop-value.readonly {
   white-space: nowrap;
 }
 
-.tree-workbook:hover {
+.tree-project:hover {
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
 }
 
-.tree-workbook:focus-visible {
+.tree-project:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: -2px;
 }
 
-.tree-workbook .codicon {
+.tree-project .codicon {
   font-size: 14px;
   opacity: 0.8;
 }
@@ -1159,8 +1159,8 @@ span.prop-value.readonly {
 /* Hovering the row is what shows it — anywhere on the row, the name included, rather than only
    over the 24 pixels the button occupies, which would be a control you have to already know about
    to find. Focus shows it too, so tabbing through the tree reveals what the pointer would. */
-.tree-workbook:hover .tree-add,
-.tree-workbook:focus-within .tree-add,
+.tree-project:hover .tree-add,
+.tree-project:focus-within .tree-add,
 .tree-add:focus-visible {
   opacity: 1;
 }

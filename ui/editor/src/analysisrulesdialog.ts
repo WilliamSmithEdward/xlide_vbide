@@ -65,7 +65,7 @@ export function openAnalysisRulesDialog(
   const scope = document.createElement("div");
   scope.className = "analysis-rules-scope";
   scope.textContent = "For this machine: saved in your user settings and applied to every "
-    + "workbook you open. To silence one finding at one line instead, use the inline "
+    + "project you open. To silence one finding at one line instead, use the inline "
     + "suppression comment - it travels with the code.";
   card.appendChild(scope);
 

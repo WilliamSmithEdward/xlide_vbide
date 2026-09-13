@@ -64,7 +64,7 @@ interface Shortcut {
 const SHORTCUTS: Shortcut[] = [
   { keys: "Ctrl+\\", what: "Split the editor" },
   { keys: "Ctrl+F", what: "Find in this module" },
-  { keys: "Ctrl+Shift+F", what: "Find across the workbook" },
+  { keys: "Ctrl+Shift+F", what: "Find across the project" },
   { keys: "F2", what: "Object browser" },
   { keys: "F5", what: "Run" },
   { keys: "F8", what: "Step into" },

@@ -429,7 +429,7 @@ export class TestsPane {
     this.runFailed.title = only ? `Rerun what failed in ${only}` : "Rerun what failed";
 
     // Run Displayed's whole promise is the number on its face: exactly the rows the filters
-    // are showing, workbook and all. Its title says which filters are doing the narrowing,
+    // are showing, project and all. Its title says which filters are doing the narrowing,
     // and says plainly when none is - the press still means what it says then, it just says
     // the same thing Run All does.
     const narrowingTags = this.tags.active();

@@ -270,9 +270,9 @@ public sealed record SetSettingsMessage(
     /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
     [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true);
 
-/// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>
+/// <summary>One search hit, as the results list draws it. Project is the display name.</summary>
 public sealed record SurfaceSearchMatch(
-    [property: JsonPropertyName("workbook")] string? Workbook,
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("module")] string Module,
     [property: JsonPropertyName("line")] int Line,
     [property: JsonPropertyName("column")] int Column,
@@ -874,7 +874,7 @@ public sealed record ExtractResultMessage(
 /// </summary>
 public sealed record SurfaceLocation(
     [property: JsonPropertyName("module")] string Module,
-    [property: JsonPropertyName("workbook")] string? Workbook,
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("line")] int Line,
     [property: JsonPropertyName("column")] int Column,
     [property: JsonPropertyName("length")] int Length,

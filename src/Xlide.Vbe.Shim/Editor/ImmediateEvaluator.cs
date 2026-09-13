@@ -197,7 +197,7 @@ internal sealed partial class ImmediateEvaluator
                 "Closing a workbook or quitting the host from here would tear down the very "
                 + "project this line runs in, and the editor does not survive that. Close a "
                 + "workbook through the door instead: "
-                + "workbook?action=close&project=<name>&saveChanges=0|1.",
+                + "file?action=close&project=<name>&saveChanges=0|1.",
                 Failed: true);
         }
         var wantsValue = text.StartsWith('?');

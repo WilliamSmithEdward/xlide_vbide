@@ -103,7 +103,7 @@ export interface TabSnapshot {
   project: string | null;
   /** "design" for a form's designer tab; absent for a code pane. */
   face?: string;
-  /** The label as rendered, workbook and all when the name collides. */
+  /** The label as rendered, project and all when the name collides. */
   label: string;
   active: boolean;
   dirty: boolean;
@@ -423,7 +423,7 @@ class EditorGroup {
    * Including whether each name COLLIDES, which is not a fact about this group. A twin tab
    * opening in another group changes what this group's label should say while changing nothing
    * about its own tabs, so a key built from its own tabs alone held it back: the newly opened
-   * tab showed its workbook and the one already there stayed bare, which reads as arbitrary
+   * tab showed its project and the one already there stayed bare, which reads as arbitrary
    * (the developer, 2026-08-07). Both names are ambiguous, so both are qualified.
    */
   renderTabs(): void {
@@ -443,7 +443,7 @@ class EditorGroup {
     this.lastTabsKey = renderKey;
     this.strip.replaceChildren();
 
-    // A name two workbooks share earns its workbook in the label; a unique name stays bare.
+    // A name two projects share earns its project in the label; a unique name stays bare.
     // Counted across EVERY group: the collision is real wherever the twin tab sits.
     const nameCounts = this.workspace.openNameCounts;
 
@@ -461,11 +461,11 @@ class EditorGroup {
       if (id.face) {
         tab.dataset.face = id.face;
       }
-      // The workbook is added to the LABEL only when two open tabs share a module name, which is
+      // The project is added to the LABEL only when two open tabs share a module name, which is
       // exactly when the bare name is ambiguous. Putting it on every tab costs strip width, and
       // the strip runs out: it grew scroll arrows for that reason.
       //
-      // Bracketed rather than dashed, because the workbook qualifies the name rather than
+      // Bracketed rather than dashed, because the project qualifies the name rather than
       // standing beside it as a second thing of equal weight. A designer tab says its face the
       // same way: the module worn a second way needs telling apart from its code tab above all.
       // A history tab says its commit, because two of them may stand for one module.
@@ -473,7 +473,7 @@ class EditorGroup {
       tab.textContent = collides && id.project ? `${shown} (${id.project})` : shown;
 
       // The tooltip always carries it, collision or not. Otherwise a bare tab offers no way at
-      // all to find out which workbook it belongs to, and the answer to "which one is this?"
+      // all to find out which project it belongs to, and the answer to "which one is this?"
       // should not depend on some other tab happening to share its name (the developer,
       // 2026-08-07).
       tab.title = id.project ? `${shown} (${id.project})` : shown;
@@ -489,12 +489,12 @@ class EditorGroup {
         tab.appendChild(badge);
       }
 
-      // The unsaved dot sits where the close box sits: the dot while the workbook is dirty,
+      // The unsaved dot sits where the close box sits: the dot while the project is dirty,
       // the X the moment the pointer arrives. Both are always in the tree; the stylesheet
       // decides which one shows.
       const unsaved = document.createElement("span");
       unsaved.className = "tab-dirty codicon codicon-circle-filled";
-      unsaved.title = "Unsaved changes in this workbook";
+      unsaved.title = "Unsaved changes in this project";
       tab.appendChild(unsaved);
 
       const close = document.createElement("span");
@@ -528,7 +528,7 @@ export class Workspace {
   private groups: EditorGroup[] = [];
   private activeGroup: EditorGroup;
 
-  /** The findings, for the tab badges: a finding that names its workbook counts only on the
+  /** The findings, for the tab badges: a finding that names its project counts only on the
    * matching tab, and one that cannot say counts wherever the name appears. */
   private findings: { module: string; project?: string | null }[] = [];
 
@@ -636,7 +636,7 @@ export class Workspace {
     this.openNameCounts = new Map();
     for (const id of open) {
       // A designer tab does not make its own module's name ambiguous - [Design] already
-      // tells the two faces apart. Only same-named modules across workbooks collide.
+      // tells the two faces apart. Only same-named modules across projects collide.
       if (id.face) {
         continue;
       }

@@ -291,7 +291,7 @@ export interface DesignerViewDeps {
   /** Finish the gesture that asked for the apply, once the form holds the document.
    * Ctrl+S's second half is the host's raw File Save; F5's is the launch INSTEAD - the
    * native editor never saves on Run, and the save that rode under F5 raised Save As over
-   * a never-saved workbook and wedged it behind the modal form (the owner, 2026-08-27). */
+   * a never-saved project and wedged it behind the modal form (the owner, 2026-08-27). */
   saveOrRun(run: boolean): void;
   /** Subscribe to the HOST's Ctrl+S and F5: neither accelerator reaches the page, so the host
    * asks the tab to apply-then-save through this - `run` is F5's - and returns the unwatch. */
@@ -829,12 +829,12 @@ export class DesignerView {
   private readonly request: () => void;
 
   /** Set when an apply should be followed by the host's save - every Ctrl+S is, because
-   * Ctrl+S means "save the workbook" everywhere else in the product and the designer must
+   * Ctrl+S means "save the project" everywhere else in the product and the designer must
    * not quietly mean less (the owner, 2026-08-15: "CTRL+S in designer isn't saving"). `run`
    * carries F5's half through the apply - the launch, and never a save (2026-08-27). */
   private pendingFinish: { run: boolean } | null = null;
 
-  /** Ctrl+S: the document to the form, then the workbook to disk. A clean document has
+  /** Ctrl+S: the document to the form, then the project to disk. A clean document has
    * nothing to apply and just saves. F5 comes through here too, with `run`, because the
    * form the developer is about to see must be the document they are looking at. */
   applyNow(run = false): void {

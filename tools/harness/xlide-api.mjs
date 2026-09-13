@@ -5,17 +5,17 @@
  * VBE. A developer with several workbooks open usually has ONE process and one api, and the
  * workbooks are told apart by the project argument; a developer running `excel /x` has two
  * processes and two apis, each with its own port, token, and DevTools port. This client
- * covers both: discover() lists every live instance, and open() picks one by workbook, pid,
+ * covers both: discover() lists every live instance, and open() picks one by project, pid,
  * or "the only one".
  *
  * Usage as a module:
  *   import { open, discover } from "./xlide-api.mjs";
- *   const api = await open({ workbook: "scratch.xlsm" });
+ *   const api = await open({ project: "scratch.xlsm" });
  *   const { debugMode } = await api.state();
  *
  * Usage from a shell, for a quick look:
  *   node xlide-api.mjs state
- *   node xlide-api.mjs --workbook scratch.xlsm locals
+ *   node xlide-api.mjs --project scratch.xlsm locals
  *   node xlide-api.mjs module CleanModule
  */
 
@@ -315,19 +315,19 @@ export async function discover() {
 }
 
 /**
- * One instance: the only live one, or the one matching pid or workbook. Throws with the list
- * when the choice is ambiguous, because guessing which Excel to drive is how a test writes
- * into the wrong workbook.
+ * One instance: the only live one, or the one matching pid or project. Throws with the list
+ * when the choice is ambiguous, because guessing which host to drive is how a test writes
+ * into the wrong document.
  *
- * XLIDE_PID and XLIDE_WORKBOOK fill in when the caller passed nothing, HERE rather than in
+ * XLIDE_PID and XLIDE_PROJECT fill in when the caller passed nothing, HERE rather than in
  * every suite: the day a Word session first ran beside the Excel one (2026-08-19), all
  * twenty-eight bare open() calls refused at once, and twenty-eight identical patches would
  * have been twenty-eight chances to drift. An explicit argument still wins - a suite that
  * names its session means it.
  */
-export async function open({ pid, workbook } = {}) {
+export async function open({ pid, project } = {}) {
   pid ??= Number(process.env.XLIDE_PID) || undefined;
-  workbook ??= process.env.XLIDE_WORKBOOK || undefined;
+  project ??= process.env.XLIDE_PROJECT || undefined;
 
   const instances = await discover();
   if (instances.length === 0) {
@@ -351,8 +351,8 @@ export async function open({ pid, workbook } = {}) {
     return found.api;
   }
 
-  if (workbook !== undefined) {
-    const wanted = String(workbook).toLowerCase();
+  if (project !== undefined) {
+    const wanted = String(project).toLowerCase();
     const matches = [];
     for (const entry of instances) {
       const windows = await entry.api.windows();
@@ -364,17 +364,17 @@ export async function open({ pid, workbook } = {}) {
     }
 
     if (matches.length === 0) {
-      throw new Error(`no instance holds a workbook matching "${workbook}"`);
+      throw new Error(`no instance holds a project matching "${project}"`);
     }
     if (matches.length > 1) {
-      throw new Error(`several instances hold "${workbook}": pids ${matches.map((e) => e.pid).join(", ")}`);
+      throw new Error(`several instances hold "${project}": pids ${matches.map((e) => e.pid).join(", ")}`);
     }
     return matches[0].api;
   }
 
   if (instances.length > 1) {
     throw new Error(
-      `several instances are live (pids ${instances.map((e) => e.pid).join(", ")}); pass pid or workbook`);
+      `several instances are live (pids ${instances.map((e) => e.pid).join(", ")}); pass pid or project`);
   }
 
   return instances[0].api;
@@ -842,14 +842,14 @@ function clientFor(entry) {
     project: (project) => call(`project${query({ project })}`),
 
     /**
-     * EVERY open workbook: its name, its id, how many components it holds, and whether the
+     * EVERY open project: its name, its id, how many components it holds, and whether the
      * surface is showing one of them.
      *
-     * `project()` answers about ONE, the one named or the active one, so with two workbooks open
+     * `project()` answers about ONE, the one named or the active one, so with two projects open
      * there was no way to discover the other's name from the host at all. A probe either knew it
      * in advance or read the page's tree, which is the surface's view rather than the object
      * model's. The language suite failed exactly there: it asked `project()`, got whichever
-     * workbook happened to be active, and looked for its own fixture's module in the other one.
+     * project happened to be active, and looked for its own fixture's module in the other one.
      *
      *   const mine = (await api.projects()).projects
      *     .find((one) => one.project.toLowerCase().startsWith("language"));
@@ -857,18 +857,18 @@ function clientFor(entry) {
     projects: () => call("projects"),
 
     /**
-     * Closes one open workbook, the save question answered in the request rather than by a
+     * Closes one open file, the save question answered in the request rather than by a
      * dialog: `saveChanges` is required, 0 discards and 1 saves. The ONE safe route for the
      * gesture - an immediate line runs inside the active project, so `Workbooks(2).Close`
      * typed there tears down its own host and kills the editor (#13); the evaluator refuses
      * those lines and points here.
      *
-     *   await api.workbook("close", { project: "Book1", saveChanges: 0 });
+     *   await api.file("close", { project: "Book1", saveChanges: 0 });
      */
-    workbook: (action, { project, saveChanges } = {}) =>
-      call(`workbook${query({ action, project, saveChanges })}`, { method: "POST" }),
+    file: (action, { project, saveChanges } = {}) =>
+      call(`file${query({ action, project, saveChanges })}`, { method: "POST" }),
 
-    /** The open workbook holding a module, by name. Null when no open workbook has one. */
+    /** The open project holding a module, by name. Null when no open project has one. */
     async projectHolding(moduleName) {
       const wanted = moduleName.toLowerCase();
 
@@ -1130,7 +1130,7 @@ function clientFor(entry) {
     /**
      * Drives the surface through the methods a click reaches.
      *
-     * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
+     * `closeActive`, `activate`, `cycleTab`, `split`, `expandProject`, `unfoldModule`,
      * `treeMenu`, `chooseMenuItem`, `answerRemoveConfirm`, `settings`, `sponsors`, `closeDialogs`,
      * `focusEditor`, `reveal`, `search`, `dock`, `bookmark`, `format`, `undo`, `editorAction`, and the
      * language ones: `hover`, `completions`, `signature`, `quickFixes`, `definition`,
@@ -1562,7 +1562,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   };
 
   const pid = take("--pid");
-  const workbook = take("--workbook");
+  const project = take("--project");
   const [route, ...rest] = args;
 
   // BEFORE picking one, because this is the verb for when there are several.
@@ -1586,7 +1586,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(0);
   }
 
-  const api = await open({ pid, workbook });
+  const api = await open({ pid, project });
   const answer = await (async () => {
     switch (route) {
       case undefined:
@@ -1599,7 +1599,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "analyzer": return api.analyzer();
       case "windows": return api.windows();
 
-      // THE ROUTES A WORKBOOK QUESTION NEEDS, which the command line did not carry.
+      // THE ROUTES A PROJECT QUESTION NEEDS, which the command line did not carry.
       //
       // The client had them and the CLI did not, so every question about which workbook a thing
       // belongs to had to be asked from a throwaway script - exactly the habit the standing
@@ -1612,8 +1612,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       //   xlide-api.mjs outline Runner    xlide-api.mjs caret 12 Runner
       case "native": return api.native({ text: rest[0] === "text" });
       case "projects": return api.projects();
-      // xlide-api.mjs workbook close Book1 0      close it, 0 discards / 1 saves
-      case "workbook": return api.workbook(rest[0] ?? "close", { project: rest[1], saveChanges: rest[2] });
+      // xlide-api.mjs file close Book1 0      close it, 0 discards / 1 saves
+      case "file": return api.file(rest[0] ?? "close", { project: rest[1], saveChanges: rest[2] });
       case "console": return api.console(Number(rest[0] ?? 20));
       // The face is named rather than counted: it arrived after the positionals were spent,
       // and `pane open EntryForm face design` reads better than a fourth silent slot.
@@ -1675,7 +1675,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "session": return api.session(rest[0] ?? "cancelledShutdown");
       case "eval": return api.eval(rest.join(" "));
       case "ui": return api.ui();
-      // node xlide-api.mjs act closeActive / act expandWorkbook workbook TwinFixture.xlsm
+      // node xlide-api.mjs act closeActive / act expandProject project TwinFixture.xlsm
       case "act": return api.act(rest[0], Object.fromEntries(
         rest.slice(1).reduce((pairs, value, at, all) =>
           at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])));

@@ -386,7 +386,7 @@ Step 'page probes (headless)' {
     # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
     # which drives the same file as one of its three legs. Listing it here too would launch
     # Edge twice for the same answer.
-    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'folders-page-probe.mjs', 'problems-badge-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs', 'drop-page-probe.mjs', 'scm-page-probe.mjs', 'scm-ready-page-probe.mjs', 'scm-folder-page-probe.mjs'
+    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'folders-page-probe.mjs', 'problems-badge-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-project-page-probe.mjs', 'drop-page-probe.mjs', 'scm-page-probe.mjs', 'scm-ready-page-probe.mjs', 'scm-folder-page-probe.mjs'
     foreach ($probe in $probes) {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1
         if ($answer -notmatch '"pass":true') { throw "$probe did not pass" }
@@ -911,7 +911,7 @@ if ($Live) {
                                      # while a caller elsewhere still passes the old argument list
                                      # compiles nowhere and reports somewhere else entirely.
                                      'introduce-parameter.mjs',
-                                     'unsaved-workbook.mjs',
+                                     'unsaved-project.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's
                                      # address, and says what turning it on costs. It presses

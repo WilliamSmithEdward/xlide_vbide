@@ -41,7 +41,7 @@ target opening `@` reaches any of it - `Request("@word/state")` answers for the 
 `Request("@12345/agent")` for a pid exactly - proxied to that session's own door with its own
 key, which the caller never sees. A host name that matches two sessions refuses and says to
 address by pid. Suites and probes pick their session the same way everything else does:
-`open()` reads `XLIDE_PID` (or `XLIDE_WORKBOOK`) when the caller passed nothing, so
+`open()` reads `XLIDE_PID` (or `XLIDE_PROJECT`) when the caller passed nothing, so
 `XLIDE_PID=1234 node tools\harness\colouring.mjs` runs any suite against any session with
 no per-suite plumbing; the PowerShell suites take `-ProcessId`.
 
@@ -170,7 +170,7 @@ DevTools port. The client reads them:
 
 ```js
 import { open, discover } from "./xlide-api.mjs";
-const api = await open({ workbook: "RenameFixture.xlsm" });   // or { pid }, or nothing when there is one
+const api = await open({ project: "RenameFixture.xlsm" });    // or { pid }, or nothing when there is one
 ```
 
 A discovery file **outlives a killed Excel**, so `discover()` proves liveness by asking each one
@@ -311,7 +311,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
 | `session` | `session("cancelledShutdown")` | a shutdown begun and cancelled, so the watchdog revives the session (the 2026-08-02 dead-add-in field failure). The reply beats the teardown; after it this port is dead, so re-`discover()` for the revived session's new port and `startedAt`. `session-lifecycle.mjs` drives it in the `-Deep` gate |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one. An unsaved workbook answers by the host's own name for it - "Book1" - the same axis as saved ones, and that name resolves as a `project` argument everywhere (#14) |
-| `workbook` | `workbook("close", {project, saveChanges})` | closes one open workbook, the save question answered in the request: `saveChanges` required, 0 discards, 1 saves (and 1 on a never-saved workbook raises the host's own Save As). The ONE safe route for the gesture - an immediate line runs inside the active project, so a close typed there kills the editor (#13); the evaluator refuses those lines and points here |
+| `file` | `file("close", {project, saveChanges})` | closes one open file, the save question answered in the request: `saveChanges` required, 0 discards, 1 saves (and 1 on a never-saved workbook raises the host's own Save As). The ONE safe route for the gesture - an immediate line runs inside the active project, so a close typed there kills the editor (#13); the evaluator refuses those lines and points here |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest. `designerSnap` is `grid`, `objects` or `off` - the designer's snapping, one or the other. `insertOptionExplicit` (default true) makes every module xlide creates start with `Option Explicit`; restore never seeds |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched. Answers `{undone, from, to, modules, stopped}` - read `stopped`, because an undo can restore four modules and be refused the fifth, which leaves the project in neither state. It is the SHIM's undo, not the context-menu item; drive the item with `act("editorAction", {id: "xlide.undoRename"})` |
 | `breakpoints` | `breakpoints()` / `breakpointsIn(project)` | what is set, per module AND workbook, and the mode |
@@ -429,8 +429,8 @@ Two routes, and they replace almost every DOM script a probe used to carry.
 const ui = await api.ui();
 ui.workspace.groups[0].tabs;      // module, project, LABEL as drawn, active, dirty, problems
 ui.workspace.groups[0].recent;    // the MRU stack a close falls back through
-ui.explorer.workbooks;            // expanded, and each module's unfolded state, folder and procedures
-ui.explorer.workbooks[0].folders; // every folder the '@Folder annotations make: path, expanded, modules
+ui.explorer.projects;            // expanded, and each module's unfolded state, folder and procedures
+ui.explorer.projects[0].folders; // every folder the '@Folder annotations make: path, expanded, modules
 ui.explorer.unfolded;             // the accordion's one open module, and its workbook
 ui.explorer.view;                 // "tree" or "folders": which layout the pane is showing
 ui.explorer.currentProcedure;     // the procedure row wearing the caret's mark, or null
@@ -676,7 +676,7 @@ await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the
 > ```
 
 ```js
-await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
+await api.act("expandProject", { project: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
 
 // THE HIDDEN ATTRIBUTES, through their annotations. What the code says, what the saved module
@@ -686,7 +686,7 @@ attributes.drift;                                   // annotation-not-applied an
 await api.attributesApply("Registry", { project: "AttributesFixture.xlsm" });
 await api.attributesRemove("Registry", "PredeclaredId", { project: "AttributesFixture.xlsm" });
 await api.act("explorerView", { view: "folders" });   // a settings change: poll ui.explorer.view
-await api.act("expandFolder", { workbook: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
+await api.act("expandFolder", { project: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");
 
@@ -726,8 +726,8 @@ await api.bars("designMode");   // -> places[].state === -1 means the host is in
 
 // The tree's right-click menus, and the one destructive thing on them.
 await api.act("treeMenu", { module: "Helpers" });        // -> detail is the menu, " | " separated
-await api.act("treeMenu", { workbook: "TwinFixture.xlsm" });  // the workbook row's menu instead
-await api.act("treeAdd", { workbook: "TwinFixture.xlsm" });   // the row's green plus: the three kinds
+await api.act("treeMenu", { project: "TwinFixture.xlsm" });   // the project row's menu instead
+await api.act("treeAdd", { project: "TwinFixture.xlsm" });    // the row's green plus: the three kinds
 await api.act("menuBar");                                // the wrench: the editor's own dialogs
 await api.act("chooseMenuItem", { label: "Remove" });    // pointerup, which is what a menu listens for
 await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
@@ -745,7 +745,7 @@ await api.act("editorAction", { id: "xlide.undoRename" });   // the Undo Rename 
 ```
 
 > **`treeMenu` needs the row to exist**, and a collapsed workbook has no component rows at all, so
-> `expandWorkbook` comes first or the answer is `did: false` saying exactly that. It names the row
+> `expandProject` comes first or the answer is `did: false` saying exactly that. It names the row
 > case-insensitively for the usual reason: the editor recases identifiers, so the spelling a script
 > holds may not be the spelling the tree is showing.
 >
@@ -2803,7 +2803,7 @@ tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm -F
 ```js
 import { open } from "./xlide-api.mjs";
 
-const api = await open({ workbook: "RenameFixture.xlsm" });
+const api = await open({ project: "RenameFixture.xlsm" });
 
 const health = await api.doctor();
 if (!health.healthy) { throw new Error(health.findings.join("; ")); }

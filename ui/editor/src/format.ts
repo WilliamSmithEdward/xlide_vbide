@@ -189,7 +189,7 @@ function respell(line: string): string {
 export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_OPTIONS): string {
   // Spaces, always. VBA's code store will not hold a tab: the editor expands every one it is
   // handed to the next four-column stop, so a module formatted with tabs read back as spaces and
-  // the page and the workbook disagreed for as long as it stayed open.
+  // the page and the project disagreed for as long as it stayed open.
   const unit = " ".repeat(Math.max(1, options.indentSize));
   const lines = text.split(/\r?\n/);
   const formatted: string[] = [];

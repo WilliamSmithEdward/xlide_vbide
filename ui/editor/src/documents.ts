@@ -1,8 +1,8 @@
 /*
- * The open documents, as live Monaco models - one per (workbook, module), for as long as the
+ * The open documents, as live Monaco models - one per (project, module), for as long as the
  * module's pane is open (decision 12).
  *
- * Identity is the pair, never the bare name: two workbooks holding a Module1 are two documents,
+ * Identity is the pair, never the bare name: two projects holding a Module1 are two documents,
  * and the model URI carries both parts so they cannot collide. WHICH documents are open is the
  * host's truth, published with the tabs; this store follows that list. Which model an editor
  * shows is the workspace's business, not this store's.
@@ -15,7 +15,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { VBA_LANGUAGE_ID } from "./vba.js";
 
-/** One open document's identity: the module, its workbook display name when known, and the
+/** One open document's identity: the module, its project display name when known, and the
  * FACE when it is not the code pane - a form's designer tab is the same module worn a second
  * way, and the two are two tabs. `design` is the designer; `history:<short>` is the module's
  * text at a commit, read-only, one tab per commit opened. */
@@ -68,9 +68,9 @@ export function docKeyOf(module: string, project: string | null | undefined, fac
 }
 
 /**
- * Whether a caller's spelling of a workbook names the one a tab is holding.
+ * Whether a caller's spelling of a project names the one a tab is holding.
  *
- * TWO SPELLINGS, BOTH OURS. `projects()` answers a `projectId` - the workbook's full path - and
+ * TWO SPELLINGS, BOTH OURS. `projects()` answers a `projectId` - the project's full path - and
  * a `project` - the name the tree draws. The host's routes take either, deliberately: its own
  * comment says an identity is accepted "because this product hands them out and then would not"
  * take them back. The PAGE's actions compared the caller's string to a tab's display name and
@@ -79,9 +79,9 @@ export function docKeyOf(module: string, project: string | null | undefined, fac
  * how it was found (2026-08-22).
  *
  * A tab carries the display name, so a path matches when its file name does. An unsaved
- * workbook has no path and falls through to the exact compare, which is the right answer for it.
+ * project has no path and falls through to the exact compare, which is the right answer for it.
  */
-export function namesTheSameWorkbook(held: string | null | undefined, asked: string): boolean {
+export function namesTheSameProject(held: string | null | undefined, asked: string): boolean {
   const mine = (held ?? "").toLowerCase();
   const theirs = asked.toLowerCase();
   if (mine === theirs) {

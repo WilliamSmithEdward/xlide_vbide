@@ -148,7 +148,7 @@ try {
   // The tree badges keep the WHOLE session while the panel shows one module: a scope is a
   // view, not a change to what the product knows. The workbook is expanded first, because a
   // collapsed one renders no rows at all and "no badge" would then mean "not looked at".
-  await api.act("expandWorkbook", { workbook: project.projectId }).catch(() => {});
+  await api.act("expandProject", { project: project.projectId }).catch(() => {});
   const badge = await waitFor("the tree to show the module the panel is scoped away from", async () => {
     const found = await ask(
       `(() => { const item = [...document.querySelectorAll("#sidebar-tree .tree-item")]`

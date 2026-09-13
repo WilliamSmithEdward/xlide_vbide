@@ -50,7 +50,7 @@ const TWIN_FOLDERS = {
   ThisWorkbook: null,
 };
 
-const book = (ui, name) => ui.explorer.workbooks.find((one) => one.name === name);
+const book = (ui, name) => ui.explorer.projects.find((one) => one.name === name);
 /** "A.B.C" -> ["a", "a.b", "a.b.c"]: the folders a module in that path is inside, lower-cased. */
 const ancestorsOf = (path) => {
   const segments = (path ?? "").split(".").filter((one) => one.length > 0);
@@ -153,7 +153,7 @@ try {
       JSON.stringify(book(ui, MAIN).folders));
   } else {
     ui = await api.ui();
-    const shownIn = ui.explorer.attentionWorkbook;
+    const shownIn = ui.explorer.attentionProject;
     const other = shownIn === MAIN ? TWIN : MAIN;
     check("the folders on the way to the module being edited are open and the others folded (fresh launch)",
       ui.explorer.active !== null && (shownIn === MAIN || shownIn === TWIN)
@@ -163,11 +163,11 @@ try {
   }
 
   // ---- the shape, per workbook ----
-  await api.act("expandWorkbook", { workbook: MAIN, open: true });
-  await api.act("expandWorkbook", { workbook: TWIN, open: true });
-  for (const workbook of [MAIN, TWIN]) {
-    for (const path of foldersOf(ui, workbook)) {
-      await api.act("expandFolder", { workbook, path, open: true });
+  await api.act("expandProject", { project: MAIN, open: true });
+  await api.act("expandProject", { project: TWIN, open: true });
+  for (const project of [MAIN, TWIN]) {
+    for (const path of foldersOf(ui, project)) {
+      await api.act("expandFolder", { project, path, open: true });
     }
   }
   const mainRows = await rowsOf(MAIN);
@@ -192,7 +192,7 @@ try {
     (twinRows ?? []).join(" "));
 
   // ---- folding one workbook's folder leaves the other's alone ----
-  const folded = await api.act("expandFolder", { workbook: MAIN, path: "Shared", open: false });
+  const folded = await api.act("expandFolder", { project: MAIN, path: "Shared", open: false });
   ui = await api.ui();
   check("folding Shared in the main workbook folds only that one",
     folded.did
@@ -201,7 +201,7 @@ try {
     JSON.stringify([book(ui, MAIN).folders, book(ui, TWIN).folders]));
   check("and its modules leave the tree while the twin's Shared keeps its module",
     !(await rowsOf(MAIN)).includes("module:Helpers") && (await rowsOf(TWIN)).includes("module:TwinOnly"));
-  await api.act("expandFolder", { workbook: MAIN, path: "Shared", open: true });
+  await api.act("expandFolder", { project: MAIN, path: "Shared", open: true });
 
   // ---- the follow opens the folders above the module being edited ----
   // From a module at the root first: the tree follows a CHANGE of module, and a folder folded
@@ -326,7 +326,7 @@ try {
     return (await api.settings()).explorerView === originalSettings.explorerView;
   });
   for (const path of ["Accounts", "Shared"]) {
-    await api.act("expandFolder", { workbook: MAIN, path, open: true }).catch(() => {});
+    await api.act("expandFolder", { project: MAIN, path, open: true }).catch(() => {});
   }
 }
 

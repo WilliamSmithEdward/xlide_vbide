@@ -30,7 +30,7 @@ import { colourPickerState, pickColour } from "./colourpicker.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
-import { knownFace, namesTheSameWorkbook } from "./documents.js";
+import { knownFace, namesTheSameProject } from "./documents.js";
 import { changesPaneProbe } from "./changespane.js";
 import { scmPaneProbe, type ScmPaneProbe } from "./scmpane.js";
 import { agentDialogProbe } from "./agentdialog.js";
@@ -243,7 +243,7 @@ export interface DevSurfaceParts {
   explorer: Explorer;
   bridge: EditorBridge;
   /** The Problems pane's fixes for a finding, as its right-click lists them; null when the page holds no text for the module. */
-  problemFixes(module: string, workbook: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
+  problemFixes(module: string, project: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
   /** The designer tabs, for driving the markup-apply path a Ctrl+S takes. */
   designer: {
     viewFor(module: string, project: string | null): {
@@ -549,7 +549,7 @@ function flag(value: unknown, whenMissing: boolean): boolean {
  * The result of an action: what it did, in words a failing test can print.
  *
  * `did` is false for "the page declined", which is a real answer and not an error: closing a tab
- * that is not open, unfolding a workbook that is not there. A script that treats those as throws
+ * that is not open, unfolding a project that is not there. A script that treats those as throws
  * ends up wrapped in try/catch and stops distinguishing them from a broken door.
  */
 export interface ActResult {
@@ -1498,7 +1498,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       // promise, so the honest answer is reachable; the first version returned immediately and
       // said `closed Watcher` five times over a tab that never moved.
       // The FACE too, as landed() compares it: a past-version tab or a designer tab beside its
-      // module's code tab leaves the strip while a name-and-workbook check still finds the
+      // module's code tab leaves the strip while a name-and-project check still finds the
       // code tab, and the close was reported as never answered (found in review, 2026-09-08).
       const held = () => workspace.snapshot().groups
         .some((group) => group.tabs.some((tab) =>
@@ -1577,9 +1577,9 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * a tab IS its identity - but until 2026-08-13 this act passed the caller's bare name
      * straight through, so `activate` with no project missed every tab whose project was set
      * and answered did:false about a tab that was on screen. A tab click needs no project, so
-     * the act must not either. A name two workbooks both hold falls to the shown project's
-     * tab; with no tab there it is refused by name rather than resolved to whichever workbook
-     * answers first, which is the same refusal the routes give an unmatched workbook.
+     * the act must not either. A name two projects both hold falls to the shown project's
+     * tab; with no tab there it is refused by name rather than resolved to whichever project
+     * answers first, which is the same refusal the routes give an unmatched project.
      */
     activate: (args) => {
       const module = String(args.module ?? "");
@@ -1597,7 +1597,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       const wantedFace = knownFace(typeof args.face === "string" ? args.face : undefined);
       const open = workspace.snapshot().groups.flatMap((group) => group.tabs);
       const matches = open.filter((tab) => tab.module.toLowerCase() === wantedModule
-        && (project === null || namesTheSameWorkbook(tab.project, project))
+        && (project === null || namesTheSameProject(tab.project, project))
         && (tab.face ?? undefined) === wantedFace);
 
       if (matches.length === 0) {
@@ -1627,11 +1627,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       let picked = matches[0]!;
       if (matches.length > 1) {
         const shownProject = workspace.activeDocument()?.project ?? "";
-        const inShown = matches.find((tab) => namesTheSameWorkbook(tab.project, shownProject));
+        const inShown = matches.find((tab) => namesTheSameProject(tab.project, shownProject));
         if (!inShown) {
           return {
             did: false,
-            detail: `${matches.length} workbooks hold an open ${module} and none is the shown project's; pass project`,
+            detail: `${matches.length} projects hold an open ${module} and none is the shown project's; pass project`,
           };
         }
         picked = inShown;
@@ -1655,7 +1655,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
        *
        * The same shape `closeActive` and `format` use: report what actually happened, having
        * waited for it to happen. The whole identity is compared, not the name: with the same
-       * name open from two workbooks, a name-only check would call the wrong workbook's tab
+       * name open from two projects, a name-only check would call the wrong project's tab
        * success.
        */
       const landed = () => {
@@ -1696,12 +1696,12 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
     // The tree, through the same methods its rows reach, so a script exercises the code a click
     // exercises rather than a parallel path that can drift away from it.
-    expandWorkbook: (args) => {
-      const workbook = String(args.workbook ?? "");
+    expandProject: (args) => {
+      const project = String(args.project ?? "");
       const open = flag(args.open, true);
-      return explorer.setWorkbookExpanded(workbook, open)
-        ? { did: true, detail: `${workbook} ${open ? "expanded" : "collapsed"}` }
-        : { did: false, detail: `no workbook named ${workbook}` };
+      return explorer.setProjectExpanded(project, open)
+        ? { did: true, detail: `${project} ${open ? "expanded" : "collapsed"}` }
+        : { did: false, detail: `no project named ${project}` };
     },
 
     unfoldModule: (args) => {
@@ -1709,7 +1709,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       if (!module) {
         return { did: false, detail: "no module given" };
       }
-      explorer.unfold(module, args.workbook === undefined ? undefined : String(args.workbook));
+      explorer.unfold(module, args.project === undefined ? undefined : String(args.project));
       return { did: true, detail: `toggled ${module}` };
     },
 
@@ -1729,17 +1729,17 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
-     * Opens or shuts a folder row the way a click does: `act("expandFolder", { workbook, path,
+     * Opens or shuts a folder row the way a click does: `act("expandFolder", { project, path,
      * open })`. The folder exists whether or not the folder layout is showing, so a script can
      * arrange the folders and then switch to them.
      */
     expandFolder: (args) => {
-      const workbook = String(args.workbook ?? "");
+      const project = String(args.project ?? "");
       const path = String(args.path ?? "");
       const open = flag(args.open, true);
-      return explorer.setFolderExpanded(workbook, path, open)
-        ? { did: true, detail: `${workbook}: ${path} ${open ? "expanded" : "collapsed"}` }
-        : { did: false, detail: `no folder ${path} in ${workbook}` };
+      return explorer.setFolderExpanded(project, path, open)
+        ? { did: true, detail: `${project}: ${path} ${open ? "expanded" : "collapsed"}` }
+        : { did: false, detail: `no folder ${path} in ${project}` };
     },
 
     /**
@@ -1747,37 +1747,37 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      *
      * Through the DOM, and deliberately: the menu hangs off a `contextmenu` listener on the tree,
      * so there is no method behind it to call. A real event on the real row is the only thing that
-     * exercises what a right-click exercises - which row was marked, which workbook the menu was
+     * exercises what a right-click exercises - which row was marked, which project the menu was
      * told about, which items the component's class earns.
      *
-     * `module` names a component row; `workbook` alone names a workbook row, and narrows a
+     * `module` names a component row; `project` alone names a project row, and narrows a
      * component row when the same name lives in two open books. Matching is case-insensitive,
      * because the editor unifies identifier case and the name a caller has may not be the spelling
      * the tree is showing.
      */
     treeMenu: (args) => {
       const module = args.module === undefined ? "" : String(args.module);
-      const workbook = args.workbook === undefined ? "" : String(args.workbook);
+      const project = args.project === undefined ? "" : String(args.project);
       const same = (a: string | undefined, b: string): boolean =>
         (a ?? "").toLowerCase() === b.toLowerCase();
 
-      if (!module && !workbook) {
-        return { did: false, detail: "name a module or a workbook" };
+      if (!module && !project) {
+        return { did: false, detail: "name a module or a project" };
       }
 
       const row = module
         ? [...document.querySelectorAll<HTMLElement>("[data-component]")].find((one) =>
-          same(one.dataset.component, module) && (!workbook || same(one.dataset.workbook, workbook)))
+          same(one.dataset.component, module) && (!project || same(one.dataset.inProject, project)))
         : [...document.querySelectorAll<HTMLElement>("[data-project]")].find((one) =>
-          same(one.dataset.project, workbook));
+          same(one.dataset.project, project));
 
       if (!row) {
         return {
           did: false,
           detail: module
-            ? `the tree has no row for ${module}${workbook ? ` in ${workbook}` : ""}`
-              + " (an unexpanded workbook has no rows)"
-            : `the tree has no row for the workbook ${workbook}`,
+            ? `the tree has no row for ${module}${project ? ` in ${project}` : ""}`
+              + " (an unexpanded project has no rows)"
+            : `the tree has no row for the project ${project}`,
         };
       }
 
@@ -1794,7 +1794,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       return labels.length > 0
         ? { did: true, detail: labels.join(" | ") }
-        : { did: false, detail: `right-clicking ${module || workbook} opened no menu` };
+        : { did: false, detail: `right-clicking ${module || project} opened no menu` };
     },
 
     /**
@@ -1819,11 +1819,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: "renameModule needs module and newName" };
       }
 
-      const workbook = args.workbook === undefined || args.workbook === null
+      const project = args.project === undefined || args.project === null
         ? null
-        : String(args.workbook);
+        : String(args.project);
 
-      const answer = await bridge.requestModuleRename(module, workbook, newName);
+      const answer = await bridge.requestModuleRename(module, project, newName);
       if (answer.refused) {
         return { did: false, detail: answer.refused };
       }
@@ -1836,7 +1836,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
-     * Presses a workbook row's plus and reports the menu it opened.
+     * Presses a project row's plus and reports the menu it opened.
      *
      * The plus is hidden until the row is hovered, and CSS :hover cannot be provoked from script,
      * so a probe reaching for it by pointer has to move a real mouse. It is a real button and the
@@ -1846,16 +1846,16 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * move a pointer.
      */
     treeAdd: (args) => {
-      const workbook = String(args.workbook ?? "");
-      if (!workbook) {
-        return { did: false, detail: "no workbook given" };
+      const project = String(args.project ?? "");
+      if (!project) {
+        return { did: false, detail: "no project given" };
       }
 
       const plus = [...document.querySelectorAll<HTMLElement>("[data-add-project]")].find((one) =>
-        (one.dataset.addProject ?? "").toLowerCase() === workbook.toLowerCase());
+        (one.dataset.addProject ?? "").toLowerCase() === project.toLowerCase());
 
       if (!plus) {
-        return { did: false, detail: `the tree has no row for the workbook ${workbook}` };
+        return { did: false, detail: `the tree has no row for the project ${project}` };
       }
 
       plus.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -1865,7 +1865,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       return labels.length > 0
         ? { did: true, detail: labels.join(" | ") }
-        : { did: false, detail: `the plus on ${workbook} opened no menu` };
+        : { did: false, detail: `the plus on ${project} opened no menu` };
     },
 
     /**
@@ -2662,13 +2662,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
     /**
      * The fixes the Problems pane's right-click carries for a finding - the same list the menu
-     * builds, without the menu - and, with `title`, runs the one named. `module`, `workbook`,
+     * builds, without the menu - and, with `title`, runs the one named. `module`, `project`,
      * `line` and `column` name the finding as its row does.
      */
     problemFixes: async (args) => {
       const module = String(args.module ?? "");
-      const workbook = args.workbook ? String(args.workbook) : null;
-      const fixes = await parts.problemFixes(module, workbook, Number(args.line ?? 0), Number(args.column ?? 1));
+      const project = args.project ? String(args.project) : null;
+      const fixes = await parts.problemFixes(module, project, Number(args.line ?? 0), Number(args.column ?? 1));
       if (fixes === null) {
         return { did: false, detail: `the page holds no text for ${module}` };
       }
@@ -2853,7 +2853,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * RENAME, the flagship, and the one feature here that rewrites the developer's code.
      *
      * It had no api at all until now: a change that edits every module using a symbol, across a
-     * workbook, with nothing able to drive it but a hand on F2. `newName` is required, and the
+     * project, with nothing able to drive it but a hand on F2. `newName` is required, and the
      * answer carries the provider's own refusal when it declines - which is what the rename box
      * shows the developer, word for word.
      *
@@ -3220,7 +3220,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      *
      * `undoRename` existed, and only undoes a rename. Everything else a probe did to a module
      * could be made and never taken back the way a person takes it back, so the one operation
-     * most likely to leave the workbook, the surface and the analyzer holding three different
+     * most likely to leave the project, the surface and the analyzer holding three different
      * texts was the one operation no check ever performed.
      *
      * UNDO THROUGH `xlide.undo`, WHICH IS WHAT THE KEY RUNS. Monaco's own undo is built in rather

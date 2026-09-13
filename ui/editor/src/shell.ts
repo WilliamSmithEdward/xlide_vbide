@@ -29,7 +29,7 @@ export interface ShellFinding {
   severity: FindingSeverity;
   line: number;
   column: number;
-  /** The workbook the module belongs to, when the host could say. */
+  /** The project the module belongs to, when the host could say. */
   project?: string | null;
 }
 
@@ -55,19 +55,19 @@ export interface ShellProperty {
 }
 
 export interface ShellHandlers {
-  /** The developer picked a module. The tree names the workbook; the tab strip cannot yet. */
-  activateModule(name: string, workbook?: string): void;
+  /** The developer picked a module. The tree names the project; the tab strip cannot yet. */
+  activateModule(name: string, project?: string): void;
   /** The developer pressed the explorer's other layout tab: a settings change, echoed back. */
   changeView(view: ExplorerView): void;
   /** The developer asked for a form's designer tab - markup beside the visual form. */
-  openDesigner(name: string, workbook?: string): void;
+  openDesigner(name: string, project?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
-  navigate(module: string, line: number, column: number, selectLine?: boolean, workbook?: string): void;
+  navigate(module: string, line: number, column: number, selectLine?: boolean, project?: string): void;
   /**
    * A tree row is being dragged toward the editor: a module, or a procedure with its line.
    * The workspace runs the gesture; `became` says the press turned into a real drag.
    */
-  dragFromTree(payload: { module: string; workbook?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
+  dragFromTree(payload: { module: string; project?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
   layoutChanged(): void;
   /** A toolbar command was chosen. */
@@ -75,15 +75,15 @@ export interface ShellHandlers {
   /** Whether an editor command exists in this build. Buttons for missing ones are not drawn. */
   commandAvailable(command: ToolbarCommand): boolean;
   /** The developer asked to suppress one finding inline, from the problems pane's menu. */
-  suppressFinding(module: string, workbook: string | null, line: number, code: string): void;
+  suppressFinding(module: string, project: string | null, line: number, code: string): void;
   /**
    * The quick fixes a finding offers, each with the act of applying it - what the lightbulb shows
    * at the squiggle, for the Problems pane's menu. Null when the page holds no text for the module,
    * which is when there is nothing to compute offsets against.
    */
-  quickFixesFor(module: string, workbook: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
+  quickFixesFor(module: string, project: string | null, line: number, column: number): Promise<{ title: string; run: () => void }[] | null>;
   /** Goes to the finding and opens the editor's own quick-fix menu there. */
-  quickFixAt(module: string, workbook: string | null, line: number, column: number): void;
+  quickFixAt(module: string, project: string | null, line: number, column: number): void;
   /** The developer asked to turn one analyzer rule off machine-wide, from the same menu. */
   turnOffRule(code: string): void;
   /** Whether the analyzer permits turning this rule off - the menu leaves the item out otherwise. */
@@ -99,7 +99,7 @@ export interface ShellHandlers {
   /** The developer selected a component in the explorer without opening it. */
   selectComponent(name: string): void;
   /** The developer renamed a module, and everything that names it follows. */
-  renameModule(name: string, workbook: string | null, newName: string): void;
+  renameModule(name: string, project: string | null, newName: string): void;
   /** The developer opened a menu; the host is asked for its items. [] is the bar itself. */
   menuRequest(path: number[]): void;
   /** The developer chose a menu item, named by its position chain. */
@@ -111,16 +111,16 @@ export interface ShellHandlers {
   /** The developer pressed Browse on a picture row. The HOST raises the file dialog, because a
    * page cannot hand back a path, and writes the property with whatever they chose. */
   pickPicture(component: string, name: string): void;
-  /** The developer closed a module's tab, however they did it; the workbook when known. The
+  /** The developer closed a module's tab, however they did it; the project when known. The
    * action carries their answer to the unsaved-changes question - "save" or "discard" - and
    * is absent on the plain close the host checks. */
-  closeModule(name: string, workbook?: string, action?: string): void;
+  closeModule(name: string, project?: string, action?: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
-  /** The developer confirmed removing a component; the workbook when the tree could say which. */
-  removeComponent(name: string, workbook?: string): void;
+  /** The developer confirmed removing a component; the project when the tree could say which. */
+  removeComponent(name: string, project?: string): void;
   /** A module's procedures, for its unfolded node in the tree; null when no answer came. */
-  requestOutline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
+  requestOutline(module: string, project?: string): Promise<ExplorerProcedure[] | null>;
   /** A line for the host's log, from the corners only the log's data cadence explains. */
   trace(text: string): void;
   /** The Tests pane came forward; it rediscovers so the tree matches the code as it stands. */
@@ -138,7 +138,7 @@ const SEVERITY_MARK: Record<FindingSeverity, string> = {
   hint: "i",
 };
 
-/** One tab: the module, and the workbook it belongs to when the host could say. */
+/** One tab: the module, and the project it belongs to when the host could say. */
 interface TabIdentity {
   name: string;
   project: string | null;
@@ -209,7 +209,7 @@ export class Shell {
   /** Which module's problems the list shows: everything, the active tab's, or one named. */
   private readonly problemsScope: ScopeSelect;
 
-  /** The active tab's module and workbook, for the Current Module scope. */
+  /** The active tab's module and project, for the Current Module scope. */
   private activeModuleName: string | null = null;
   private activeModuleProject: string | null = null;
 
@@ -291,13 +291,13 @@ export class Shell {
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
       changeView: (view) => handlers.changeView(view),
-      open: (name, workbook) => handlers.activateModule(name, workbook),
-      context: (name, kind, x, y, workbook) => this.componentMenu(name, kind, x, y, workbook),
-      projectContext: (project, x, y) => this.workbookMenu(project, x, y),
+      open: (name, project) => handlers.activateModule(name, project),
+      context: (name, kind, x, y, project) => this.componentMenu(name, kind, x, y, project),
+      projectContext: (project, x, y) => this.projectMenu(project, x, y),
       projectAdd: (project, x, y) => showContextMenu(x, y, this.newComponentItems(project)),
-      outline: (module, workbook) => handlers.requestOutline(module, workbook),
-      openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
-      openDesigner: (module, workbook) => handlers.openDesigner(module, workbook),
+      outline: (module, project) => handlers.requestOutline(module, project),
+      openProcedure: (module, line, project) => handlers.navigate(module, line, 1, true, project),
+      openDesigner: (module, project) => handlers.openDesigner(module, project),
       dragRow: (payload, start, became) => handlers.dragFromTree(payload, start, became),
       trace: (text) => handlers.trace(text),
     }, root.querySelector("#explorer-views") as HTMLElement | null);
@@ -459,7 +459,7 @@ export class Shell {
       const module = row.dataset.moduleName ?? "";
       const line = Number(row.dataset.line ?? "0");
       const column = Number(row.dataset.column ?? "1");
-      const workbook = row.dataset.project || null;
+      const project = row.dataset.project || null;
       const at = { x: event.clientX, y: event.clientY };
 
       void (async () => {
@@ -476,9 +476,9 @@ export class Shell {
           // right click here too?"). Asked of the host for the finding's module, which need not
           // be the shown one. A module the page holds no text for gets the one item that goes
           // there and opens the editor's own menu, since there is nothing here to place a fix on.
-          const fixes = await this.handlers.quickFixesFor(module, workbook, line, column);
+          const fixes = await this.handlers.quickFixesFor(module, project, line, column);
           if (fixes === null) {
-            items.push({ label: "Quick Fix...", run: () => this.handlers.quickFixAt(module, workbook, line, column) });
+            items.push({ label: "Quick Fix...", run: () => this.handlers.quickFixAt(module, project, line, column) });
             items.push({});
           } else if (fixes.length > 0) {
             for (const fix of fixes) {
@@ -494,7 +494,7 @@ export class Shell {
           if (this.handlers.canSuppressRule(code)) {
             items.push({
               label: `Suppress '${code}' Here (inline comment)`,
-              run: () => this.handlers.suppressFinding(module, workbook, line, code),
+              run: () => this.handlers.suppressFinding(module, project, line, code),
             });
           }
 
@@ -645,7 +645,7 @@ export class Shell {
     this.renderPanel();
 
     // And so does the change log's, for the stronger reason: a file that has closed must stop
-    // being offered at all, or the pane goes on answering about a workbook nobody has open.
+    // being offered at all, or the pane goes on answering about a project nobody has open.
     this.projectsChanged?.();
   }
 
@@ -679,8 +679,8 @@ export class Shell {
     }
 
     // Nothing open means nothing is being worked on, so the tree stops claiming otherwise and
-    // folds all the way back: procedures and workbooks both. Opening anything unfolds its
-    // workbook again on the way in.
+    // folds all the way back: procedures and projects both. Opening anything unfolds its
+    // project again on the way in.
     if (empty) {
       this.explorer.collapseAll();
     }
@@ -1475,7 +1475,7 @@ export class Shell {
 
   /**
    * The host is holding a tab close because the module has unsaved changes. Ask, and answer
-   * the close with the choice: Save writes the workbook and closes, Don't Save puts the
+   * the close with the choice: Save writes the project and closes, Don't Save puts the
    * module back to its saved text and closes, Cancel leaves everything as it is. Questions
    * queue one at a time - a Close Others across several dirty modules asks about each in
    * turn, the way answering one file at a time reads everywhere else.
@@ -1619,7 +1619,7 @@ export class Shell {
    * for the class are left out rather than disabled; the host's own operations arrive as the
    * classes grow them.
    */
-  private componentMenu(name: string, kind: number, x: number, y: number, workbook?: string): void {
+  private componentMenu(name: string, kind: number, x: number, y: number, project?: string): void {
     /*
      * WHAT A MENU IS FOR IS WHAT HAS NO SHORTER GESTURE (the developer, 2026-08-10).
      *
@@ -1632,22 +1632,22 @@ export class Shell {
      * remove it.
      */
     const items: ContextMenuItem[] = [
-      // WITH THE WORKBOOK. Every call site outside this menu passed one and this one did not, so
-      // a module named the same in two workbooks was renamed in whichever answered first.
-      { label: "Rename...", run: () => this.beginRename(name, workbook ?? null) },
+      // WITH THE PROJECT. Every call site outside this menu passed one and this one did not, so
+      // a module named the same in two projects was renamed in whichever answered first.
+      { label: "Rename...", run: () => this.beginRename(name, project ?? null) },
     ];
 
     // A form's designer HAS no shorter gesture - the click opens the code-behind - so the
     // menu is exactly where it belongs by this menu's own rule.
     if (kind === ComponentKind.Form) {
-      items.unshift({ label: "Open Designer", run: () => this.handlers.openDesigner(name, workbook) }, {});
+      items.unshift({ label: "Open Designer", run: () => this.handlers.openDesigner(name, project) }, {});
     }
 
-    // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the workbook
+    // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the project
     // and the host refuses Remove on them. Left out rather than shown greyed, the way the rest of
     // this menu treats what does not apply.
     if (kind !== ComponentKind.Document) {
-      items.push({}, { label: "Remove...", run: () => this.confirmRemove(name, kind, workbook) });
+      items.push({}, { label: "Remove...", run: () => this.confirmRemove(name, kind, project) });
     }
 
     // The tree marked the row this menu is about, and that mark is part of the gesture. It comes
@@ -1660,11 +1660,11 @@ export class Shell {
    * Asks before removing a component, because nothing brings one back.
    *
    * The editor's undo stack is per module and dies with the module, so a removal is not undoable
-   * by any route the developer has - not Ctrl+Z, not closing the workbook without saving once the
+   * by any route the developer has - not Ctrl+Z, not closing the project without saving once the
    * host has written it. That is the whole reason this asks at all, and the reason Cancel is what
    * has focus: the safe answer is the one a stray Return should pick.
    */
-  private confirmRemove(name: string, kind: number, workbook?: string): void {
+  private confirmRemove(name: string, kind: number, project?: string): void {
     if (document.getElementById("remove-confirm-backdrop")) {
       return;
     }
@@ -1678,7 +1678,7 @@ export class Shell {
       role: "alertdialog",
       closed: () => {
         if (removing) {
-          this.handlers.removeComponent(name, workbook);
+          this.handlers.removeComponent(name, project);
         }
 
         // The question took focus; the editor is where it belongs afterwards.
@@ -1695,7 +1695,7 @@ export class Shell {
     detail.id = "remove-confirm-detail";
     detail.className = "modal-detail";
     detail.textContent = `The ${kindWord(kind)} and all of its code will be deleted`
-      + `${workbook ? ` from ${workbook}` : ""}. This cannot be undone. `
+      + `${project ? ` from ${project}` : ""}. This cannot be undone. `
       + "Export it first if you want to keep a copy.";
 
     const buttons = document.createElement("div");
@@ -1725,14 +1725,14 @@ export class Shell {
   }
 
   /**
-   * The workbook's menu: the project's own dialogs, and nothing else.
+   * The project's menu: the project's own dialogs, and nothing else.
    *
    * Adding a component is the PLUS on the row, which is visible, one press, and already
    * offers the three kinds - so the right-click menu offering them too was the same list in
    * two places, with the longer path (the owner, 2026-08-20). The dialogs stay here because
    * nothing else on the row can reach them.
    */
-  private workbookMenu(project: string, x: number, y: number): void {
+  private projectMenu(project: string, x: number, y: number): void {
     showContextMenu(x, y, [
       { label: "References...", run: () => this.hostCommand("references", project) },
       { label: "Project Properties...", run: () => this.hostCommand("projectProperties", project) },
@@ -1740,9 +1740,9 @@ export class Shell {
   }
 
   /**
-   * What the plus on a workbook's row offers: the same three things, and only those three.
+   * What the plus on a project's row offers: the same three things, and only those three.
    *
-   * The PLUS's list, and the only place that offers to add a component to a workbook. The
+   * The PLUS's list, and the only place that offers to add a component to a project. The
    * right-click menu carried a copy until 2026-08-20; one list means the next component kind
    * is added in one place.
    */
@@ -1767,14 +1767,14 @@ export class Shell {
   }
 
   /**
-   * Renames a module, and with it everything in the workbook that names it.
+   * Renames a module, and with it everything in the project that names it.
    *
    * This used to open the Properties panel and leave the developer to retype "(Name)" - which
    * renames the component and leaves every `OldName.Something` in every other module pointing at
    * a module that no longer exists. The rename goes through the host now; the panel is still
    * where a name can be edited by hand for anyone who wants only that.
    */
-  private beginRename(name: string, workbook: string | null): void {
+  private beginRename(name: string, project: string | null): void {
     const wanted = window.prompt(`Rename ${name} to:`, name);
     if (wanted === null) {
       return;
@@ -1785,14 +1785,14 @@ export class Shell {
       return;
     }
 
-    this.handlers.renameModule(name, workbook, trimmed);
+    this.handlers.renameModule(name, project, trimmed);
   }
 
   /** What the panel was last built from, so an identical publish does not rebuild it. */
   private lastPanelKey: string | null = null;
 
   private renderPanel(): void {
-    // A module name findings know from more than one workbook names its workbook in each row,
+    // A module name findings know from more than one project names its project in each row,
     // the way the tabs do; a unique name stays bare.
     const findingHomes = new Map<string, Set<string>>();
     for (const finding of this.findings) {
@@ -1834,7 +1834,7 @@ export class Shell {
     // EVERY OPEN FILE AND EVERY MODULE IN IT IS OFFERED, not only the ones with findings.
     // Drawing the lists from the findings alone meant a clean session had nothing to choose
     // between, so the way to narrow only appeared once something was already wrong (the owner,
-    // 2026-08-20: "i dont see workbook scoping on problems pane", then "shouldn't we show
+    // 2026-08-20: "i dont see project scoping on problems pane", then "shouldn't we show
     // modules in the dropdown even if no errors?"). A module with nothing wrong is a scope
     // worth choosing - it answers "nothing here", which is the answer being looked for.
     for (const project of this.explorer.snapshot()) {
@@ -2029,7 +2029,7 @@ export class Shell {
 
   /**
    * Counts per component change with the findings, so the tree follows them. Filed by
-   * (workbook, module), because a count belongs to one workbook's module and a shared name
+   * (project, module), because a count belongs to one project's module and a shared name
    * must not pool them. The tab badges are the workspace's, fed the same findings - and all
    * of them count the WHOLE workspace, whatever the panel's scope is showing.
    */

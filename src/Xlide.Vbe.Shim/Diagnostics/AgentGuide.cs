@@ -145,16 +145,16 @@ internal static class AgentGuide
             "GET project", true, DoorPolicy.Open),
         new("documents", "GET", "-",
             "The modules the EDITOR holds text for, one row each: module, project, lines, whether "
-            + "it has unwritten edits, and whether it is active. Not the open workbooks - `projects` "
+            + "it has unwritten edits, and whether it is active. Not the open projects - `projects` "
             + "answers those. An empty answer means no module has been activated yet, which is the "
             + "ordinary state of a session nobody has clicked into.",
             "GET documents", true, DoorPolicy.Open,
             "A module with a TAB and no text is the state most of a workspace is in, so this list "
             + "is shorter than the tab strip and shorter still than the project. Reading it as a "
-            + "list of workbooks makes an empty answer look like the api cannot see an open file."),
+            + "list of projects makes an empty answer look like the api cannot see an open file."),
         new("module", "GET|POST", "name=<module> project=<display>? live=1? body:<source on POST>",
             "Reads a module's code, or replaces it with the POSTed body. `live=1` reads the "
-            + "EDITOR's copy instead of the workbook's.",
+            + "EDITOR's copy instead of the project's.",
             "GET module?name=Module1", true, DoorPolicy.Open,
             "The two copies differ for as long as the developer has typed and the write-back has "
             + "not fired, which is the window every typing behaviour lives in: smart Enter, comment "
@@ -188,7 +188,7 @@ internal static class AgentGuide
 
         // The editor surface.
         new("windows", "GET", "-",
-            "Every VBE window per workbook: panes, designers, captions, visibility.",
+            "Every VBE window per project: panes, designers, captions, visibility.",
             "GET windows", true, DoorPolicy.Open),
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
@@ -230,17 +230,17 @@ internal static class AgentGuide
             "git runs on the pool thread and the host thread is crossed only to read and write "
             + "the project, so it never blocks the editor; the inside door holds that very "
             + "thread, which is why the route is HTTP only. Commit is refused with an empty "
-            + "message and with nothing to commit; checkout is refused while the workbook - or "
-            + "any open workbook in the same repository - is dirty, naming it; import and "
+            + "message and with nothing to commit; checkout is refused while the project - or "
+            + "any open project in the same repository - is dirty, naming it; import and "
             + "restore are refused outside design mode; browse blocks in the folder chooser."),
-        new("workbook", "POST", "action=close&project=<name>&saveChanges=0|1",
-            "Closes one open workbook, the host's own File Close with the save question answered "
+        new("file", "POST", "action=close&project=<name>&saveChanges=0|1",
+            "Closes one open file, the host's own File Close with the save question answered "
             + "in the request. The ONE safe route for the gesture: an immediate-window line runs "
             + "inside the active project, so a close typed there tears down its own host and "
             + "kills the editor - the evaluator refuses those lines and points here.",
-            "POST workbook?action=close&project=Book1&saveChanges=0", false, DoorPolicy.Open,
+            "POST file?action=close&project=Book1&saveChanges=0", false, DoorPolicy.Open,
             "saveChanges is required - a close that picked silently would lose work or write a "
-            + "file nobody asked for. saveChanges=1 on a never-saved workbook raises the host's "
+            + "file nobody asked for. saveChanges=1 on a never-saved file raises the host's "
             + "own Save As dialog."),
         new("analysis", "GET", "rule=<code>?&severity=off|warning|error|information|default?&module=?&line=?&code=?&project=?",
             "The analyzer rule catalog with each rule's LEGAL severity moves and this machine's "
@@ -443,7 +443,7 @@ internal static class AgentGuide
                 + "every route; the documented method is the convention. POST bodies are raw text "
                 + "(module source, page scripts). Every reply is JSON except capture, which is a "
                 + "PNG. There is no pagination and no auth beyond the token already in the base URL.",
-            InsideDoor: "Code already running on this machine - a workbook's VBA, or any "
+            InsideDoor: "Code already running on this machine - a project's VBA, or any "
                 + "automation client - reaches the same routes without HTTP: "
                 + "GetObject(, \"Xlide.Api\").Request(\"route?args\"[, body]) answers the same "
                 + "JSON, and .Guide answers this very reply. No Trust Center setting is "
@@ -457,7 +457,7 @@ internal static class AgentGuide
             [
                 "GET agent/routes for the route table.",
                 "GET state to see what the session is showing.",
-                "GET projects for the open workbooks, and GET documents for the modules the editor is holding text for - two different questions.",
+                "GET projects for the open projects, and GET documents for the modules the editor is holding text for - two different questions.",
                 "GET module?name=<module> to read code; POST the body back to write it.",
                 "GET model and GET analyzer for what the language service knows: the host's object model and the diagnostic rules.",
                 "GET agent/examples for full recipes, including the breakpoint round trip.",
@@ -505,7 +505,7 @@ internal static class AgentGuide
                     [
                         "GET agent            - who am I talking to, which Office host",
                         "GET state            - what the editor is showing",
-                        "GET documents        - the open workbooks",
+                        "GET documents        - the open projects",
                         "GET projects         - the open VBA projects",
                     ],
                     null),
@@ -517,7 +517,7 @@ internal static class AgentGuide
                         "GET problems?module=Module1          - what the analyzer thinks of it",
                     ],
                     "POST module writes an EXISTING module; component?action=add creates one. "
-                    + "Add project=<display name> to either call when two workbooks are open."),
+                    + "Add project=<display name> to either call when two projects are open."),
                 new DebugAgentExample(
                     "Create a module, prove the edit landed everywhere, clean up",
                     [

@@ -16,7 +16,7 @@ import { openModal } from "./modal.js";
 
 /** What the dialog needs of the world: where to go when a row is picked. */
 export interface ReferencesHandlers {
-  navigate(module: string, line: number, column: number, workbook: string | null): void;
+  navigate(module: string, line: number, column: number, project: string | null): void;
 }
 
 let open: { dismiss: () => void } | null = null;
@@ -70,7 +70,7 @@ export function openReferencesDialog(
   if (count === 0) {
     const empty = document.createElement("p");
     empty.className = "references-empty";
-    empty.textContent = "Nothing in this workbook uses it.";
+    empty.textContent = "Nothing in this project uses it.";
     body.appendChild(empty);
   }
 
@@ -120,7 +120,7 @@ export function openReferencesDialog(
           location.module,
           location.line,
           location.column,
-          location.workbook ?? null);
+          location.project ?? null);
       });
 
       group.appendChild(row);

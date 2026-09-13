@@ -152,8 +152,8 @@ export interface SetTestsState {
 }
 
 /**
- * One library the Object Browser lists: a referenced type library, or an open workbook's
- * project - the kind says which, and only a project's members can be navigated to.
+ * One library the Object Browser lists: a referenced type library, or an open project
+ * itself - the kind says which, and only a project's members can be navigated to.
  */
 export interface ObLibrary {
   name: string;
@@ -310,9 +310,9 @@ export interface HostProcedure {
   line: number;
 }
 
-/** One search hit as the host answers it; workbook is the display name, or null unsaid. */
+/** One search hit as the host answers it; project is the display name, or null unsaid. */
 export interface HostSearchMatch {
-  workbook?: string | null;
+  project?: string | null;
   module: string;
   line: number;
   column: number;
@@ -395,12 +395,12 @@ export interface HostSemanticToken {
 }
 
 /**
- * One place in the workbook: which module, its workbook when the host names one, and a 1-based
+ * One place in a project: which module, the project when the host names one, and a 1-based
  * line and column into that module's live text.
  */
 export interface HostLocation {
   module: string;
-  workbook?: string | null;
+  project?: string | null;
   line: number;
   column: number;
   length: number;
@@ -883,7 +883,7 @@ export class EditorBridge {
     this.transport.post(timings ? { type: "ready", timings } : { type: "ready" });
   }
 
-  /** Asks the host to show a module. The tree names the workbook it means; a tab cannot yet.
+  /** Asks the host to show a module. The tree names the project it means; a tab cannot yet.
    * face "design" asks for a form's designer tab instead of its code pane. */
   activateModule(moduleName: string, project?: string, face?: string): void {
     this.transport.post({
@@ -1113,7 +1113,7 @@ export class EditorBridge {
 
   /**
    * Places the waiting caret if the shown module is the one it belongs to. A navigation that
-   * named no workbook matches the module by name alone - a finding that could not say still
+   * named no project matches the module by name alone - a finding that could not say still
    * navigates - and one that named it must match both parts.
    */
   private applyPendingCaret(): void {
@@ -1197,8 +1197,8 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host for a new component: 1 module, 2 class module, 3 form. Named workbook when
-   * the request came from a workbook's own menu; the active project otherwise.
+   * Asks the host for a new component: 1 module, 2 class module, 3 form. Named project when
+   * the request came from a project's own menu; the active project otherwise.
    */
   insertComponent(kind: number, project?: string): void {
     this.transport.post({ type: "insertComponent", kind, ...(project ? { project } : {}) });
@@ -1216,7 +1216,7 @@ export class EditorBridge {
   /**
    * Asks the host to perform an action of its own: a quick fix that is not a text edit, or a
    * menu item that changes the project rather than the text. `applyAttributes` with a module and
-   * its workbook is the first; the host names the rest in its own table.
+   * its project is the first; the host names the rest in its own table.
    */
   hostAction(command: string, args: (string | null | undefined)[]): void {
     this.transport.post({ type: "hostAction", command, arguments: args.map((one) => one ?? null) });
@@ -1400,7 +1400,7 @@ export class EditorBridge {
    * xlide api's `scm` route takes, with the body carrying module names one per line where an
    * action wants them.
    *
-   * The budget is long because the answer may run git and a save of the workbook before it -
+   * The budget is long because the answer may run git and a save of the file before it -
    * a push to a remote is bounded at two minutes host-side, and the page must outwait it rather
    * than report a timeout over an action that then lands. Every value is posted as a string,
    * because the host copies only string fields into the route's arguments.
@@ -1471,7 +1471,7 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host where the symbol at an offset is declared, or everywhere in the workbook it is
+   * Asks the host where the symbol at an offset is declared, or everywhere in the project it is
    * used. Resolves empty rather than rejecting: navigation that fails is a click that does not
    * move the cursor.
    */
@@ -1487,7 +1487,7 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host to rename a symbol everywhere it is used in the workbook.
+   * Asks the host to rename a symbol everywhere it is used in the project.
    *
    * The HOST does the renaming, not the page: modules with no tab open have no model to edit,
    * and they are exactly the ones a rename must not miss. So nothing comes back but a summary,
@@ -1521,7 +1521,7 @@ export class EditorBridge {
    * touched is an ordinary undo - and that module must be exactly where the rename left it, so
    * anything typed since is taken back first, in the order it was done.
    *
-   * Matched on the project as well as the name, because two workbooks can both hold a Module1
+   * Matched on the project as well as the name, because two projects can both hold a Module1
    * and only one of them was renamed.
    */
   renameIsNextUndo(model: monaco.editor.ITextModel): boolean {
@@ -1845,7 +1845,7 @@ export class EditorBridge {
 
   /** The model a host location names, or null when that module has no tab open. */
   modelForLocation(location: HostLocation): monaco.editor.ITextModel | null {
-    return this.documents.get(location.module, location.workbook ?? null);
+    return this.documents.get(location.module, location.project ?? null);
   }
 
   /** Documents asked for and not yet arrived, so a second ask joins the first. */
@@ -1909,7 +1909,7 @@ export class EditorBridge {
       location.line,
       location.column,
       false,
-      location.workbook ?? undefined);
+      location.project ?? undefined);
   }
 
   /**
@@ -2448,7 +2448,7 @@ export class EditorBridge {
     // Tab cycling arrives from the host because the browser swallows Ctrl+PageDown for its own
     // tab switching before the page could ever see the key. Cycling is within the active group.
     if (id === "xlide.tab.close") {
-      // The workspace knows which tab is active and which workbook it belongs to, so nothing has
+      // The workspace knows which tab is active and which project it belongs to, so nothing has
       // to be guessed from a name. It goes through the same gate the tab's own X uses, so a
       // module with unsaved changes still gets the question.
       this.workspace?.closeActive();
@@ -3122,7 +3122,7 @@ export function demoTransport(): HostTransport {
   // as the same document. A tree-row drag of an OPEN module then found no tab to move (found
   // 2026-08-12 while building the drag targets, where the demo's own inconsistency masqueraded
   // as a feature bug).
-  const DEMO_WORKBOOK = "Book1.xlsm";
+  const DEMO_PROJECT = "Book1.xlsm";
 
   /*
    * A REPOSITORY ON REQUEST, with `?scm=1`.
@@ -3152,9 +3152,9 @@ export function demoTransport(): HostTransport {
     send({
       type: "setModules",
       modules,
-      projects: modules.map(() => DEMO_WORKBOOK),
+      projects: modules.map(() => DEMO_PROJECT),
       active: activeModule,
-      activeProject: activeModule === null ? null : DEMO_WORKBOOK,
+      activeProject: activeModule === null ? null : DEMO_PROJECT,
       activeFace,
       dirty: [...openModules.map((name) => dirtyModules.has(name)), ...historyTabs.map(() => false)],
       ...(historyTabs.length > 0
@@ -3184,8 +3184,8 @@ export function demoTransport(): HostTransport {
   const demoStatus = (): Record<string, unknown> => (scmDemo
     ? {
       detail: "ready",
-      project: DEMO_WORKBOOK,
-      projectId: DEMO_WORKBOOK,
+      project: DEMO_PROJECT,
+      projectId: DEMO_PROJECT,
       state: "ready",
       folder: "C:\\Demo\\Book1",
       repository: "C:\\Demo\\Book1",
@@ -3214,8 +3214,8 @@ export function demoTransport(): HostTransport {
     }
     : {
       detail: scmNoFolder ? "choose the folder the modules are exported to" : "the demo page has no git behind it",
-      project: DEMO_WORKBOOK,
-      projectId: DEMO_WORKBOOK,
+      project: DEMO_PROJECT,
+      projectId: DEMO_PROJECT,
       state: scmNoFolder ? "noFolder" : "noGit",
       folder: "",
       repository: "",
@@ -3305,7 +3305,7 @@ export function demoTransport(): HostTransport {
         return { detail: "imported", imported: ["Module2"], skipped: [], status: demoStatus() };
       case "checkout":
         if (dirtyModules.size > 0) {
-          return { error: `the workbook has unsaved changes; save it before checking out ${ref}` };
+          return { error: `the project has unsaved changes; save it before checking out ${ref}` };
         }
         demoBranch = ref;
         return demoStatus();
@@ -3316,7 +3316,7 @@ export function demoTransport(): HostTransport {
 
   // The demo's tree, held rather than sent once, so removing a component can take it out of both
   // lists and republish - which is what the host does, and what makes the removal exercisable
-  // here at all. Two workbooks, and a name that lives in only one of them.
+  // here at all. Two projects, and a name that lives in only one of them.
   // Book1's modules carry folders, so the folder view has something to draw headless: a nested
   // path, two spellings of one folder, and two rows at the root.
   const demoProjects: ExplorerProject[] = [
@@ -3339,17 +3339,17 @@ export function demoTransport(): HostTransport {
   ];
 
   /*
-   * ONE WORKBOOK ON REQUEST, with `?books=1`.
+   * ONE PROJECT ON REQUEST, with `?books=1`.
    *
-   * The tree behaves differently at one workbook than at several: closing the last tab folds the
-   * workbooks away, unless there is only one, where folding the only row would hide the whole
+   * The tree behaves differently at one project than at several: closing the last tab folds the
+   * projects away, unless there is only one, where folding the only row would hide the whole
    * project behind a click with one possible answer. Two branches, and the demo could only ever
    * reach the first, so the interesting one was verifiable against a real Excel and nowhere else.
    *
    * The demo exists to make the page drivable without a host, and a demo that cannot reach half
    * the states the page has is only half a demo.
    */
-  const soleWorkbook = new URLSearchParams(location.search).get("books") === "1";
+  const soleProject = new URLSearchParams(location.search).get("books") === "1";
 
   /*
    * THE HOST SAYS WHEN NOTHING IS OPEN, and the demo did not.
@@ -3367,7 +3367,7 @@ export function demoTransport(): HostTransport {
   };
 
   const sendProjects = (): void => {
-    const shown = soleWorkbook ? demoProjects.slice(0, 1) : demoProjects;
+    const shown = soleProject ? demoProjects.slice(0, 1) : demoProjects;
     send({ type: "setProjects", projects: shown.map((one) => ({ ...one })) });
   };
 
@@ -3375,8 +3375,8 @@ export function demoTransport(): HostTransport {
     post(message) {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
-        send({ type: "openDocument", moduleName: "Module1", project: DEMO_WORKBOOK, text: DEMO_MODULE });
-        send({ type: "openDocument", moduleName: "Module2", project: DEMO_WORKBOOK, text: DEMO_MODULE_2 });
+        send({ type: "openDocument", moduleName: "Module1", project: DEMO_PROJECT, text: DEMO_MODULE });
+        send({ type: "openDocument", moduleName: "Module2", project: DEMO_PROJECT, text: DEMO_MODULE_2 });
         sendModules();
         send({
           type: "setSettings",
@@ -3457,7 +3457,7 @@ export function demoTransport(): HostTransport {
           send({
             type: "openDocument",
             moduleName: message.moduleName,
-            project: DEMO_WORKBOOK,
+            project: DEMO_PROJECT,
             text: moduleTexts[message.moduleName]!,
           });
         }
@@ -3491,7 +3491,7 @@ export function demoTransport(): HostTransport {
           send({ type: "confirmClose", name: message.name, project: message.project ?? null });
         } else {
           if (message.action === "save") {
-            // Saving the workbook cleans every module in it, the way the editor saves.
+            // Saving the project cleans every module in it, the way the editor saves.
             dirtyModules.clear();
           } else {
             dirtyModules.delete(message.name);
@@ -3694,8 +3694,8 @@ export function demoTransport(): HostTransport {
           type: "searchResult",
           id: message.id,
           matches: message.type === "replaceAll" ? [] : [
-            { workbook: "Book1.xlsm", module: "Module1", line: 4, column: 8, length: message.query.length, preview: "    Const Banner As String = (demo match)" },
-            { workbook: "Book1.xlsm", module: "Module2", line: 12, column: 5, length: message.query.length, preview: "    total = total + 1 (demo match)" },
+            { project: "Book1.xlsm", module: "Module1", line: 4, column: 8, length: message.query.length, preview: "    Const Banner As String = (demo match)" },
+            { project: "Book1.xlsm", module: "Module2", line: 12, column: 5, length: message.query.length, preview: "    total = total + 1 (demo match)" },
           ],
           truncated: false,
           replaced: message.type === "replaceAll" ? 2 : 0,

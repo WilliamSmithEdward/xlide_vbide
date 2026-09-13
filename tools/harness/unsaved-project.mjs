@@ -10,7 +10,7 @@
  * Runs against whatever fixture is live. The workbook it makes is its own, and closing it
  * goes through the route this suite exists to drive.
  *
- *   node tools\harness\unsaved-workbook.mjs
+ *   node tools\harness\unsaved-project.mjs
  */
 
 import { open, reporter, waitFor } from "./xlide-api.mjs";
@@ -51,7 +51,7 @@ try {
 
   // The route the refusal points at: the host's own File Close, the save question answered in
   // the request. Discard, because the workbook is this suite's own scratch.
-  const closed = await api.workbook("close", { project: name, saveChanges: 0 });
+  const closed = await api.file("close", { project: name, saveChanges: 0 });
   check("workbook close through the door closes it",
     closed.closed === true, JSON.stringify(closed));
 
@@ -66,7 +66,7 @@ try {
   const leftover = (await api.projects().catch(() => ({ projects: [] }))).projects
     .find((one) => /^Book\d+$/i.test(one.project));
   if (leftover) {
-    await api.workbook("close", { project: leftover.project, saveChanges: 0 }).catch(() => {});
+    await api.file("close", { project: leftover.project, saveChanges: 0 }).catch(() => {});
   }
 }
 

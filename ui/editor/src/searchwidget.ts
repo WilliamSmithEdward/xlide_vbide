@@ -7,7 +7,7 @@
  * Scope decides the engine. Module scope is live: matches found in the current model as the
  * query is typed, painted with Monaco's own find-match decoration classes, walked with
  * Enter/F3, replaced through executeEdits so a replace-all is one undoable step that flows
- * the normal didChange path to the host. Workbook and All scopes ask the host's engine (the
+ * the normal didChange path to the host. Project and All scopes ask the host's engine (the
  * panel's old protocol, unchanged) and render the grouped results inside the widget; rows
  * navigate through the same route problem rows use.
  *
@@ -21,7 +21,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 
 /** One search hit as the widget draws it; structurally what the host sends. */
 export interface SearchMatch {
-  workbook?: string | null;
+  project?: string | null;
   module: string;
   line: number;
   column: number;
@@ -35,7 +35,7 @@ export interface SearchWidgetHandlers {
   /** Replace across the scope; answered like a search, plus the replaced count. */
   replaceAll(query: string, matchCase: boolean, wholeWord: boolean, scope: string, replacement: string): number;
   /** Jump to a result row's line. */
-  navigate(module: string, line: number, column: number, selectLine: boolean, workbook?: string): void;
+  navigate(module: string, line: number, column: number, selectLine: boolean, project?: string): void;
 }
 
 export class SearchWidget {
@@ -94,7 +94,7 @@ export class SearchWidget {
   /**
    * The last answer to a scoped search, as the host reported it.
    *
-   * The module-scope engine below keeps `matches` and `current`; a project or workbook search is
+   * The module-scope engine below keeps `matches` and `current`; a project or project search is
    * answered by the host and its result lived only in the rows this panel drew. So the two fields
    * a reader would naturally check were 0 and -1 for every scope but one.
    */
@@ -115,7 +115,7 @@ export class SearchWidget {
     this.wordButton = this.makeToggle("ab", "Whole word");
     this.scopeSelect = document.createElement("select");
     this.scopeSelect.setAttribute("aria-label", "Search scope");
-    for (const [value, label] of [["module", "Module"], ["project", "Workbook"], ["all", "All workbooks"]] as const) {
+    for (const [value, label] of [["module", "Module"], ["project", "Project"], ["all", "All projects"]] as const) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -237,12 +237,12 @@ export class SearchWidget {
 
     let groupKey = "";
     for (const match of matches) {
-      const key = `${(match.workbook ?? "").toLowerCase()}|${match.module.toLowerCase()}`;
+      const key = `${(match.project ?? "").toLowerCase()}|${match.module.toLowerCase()}`;
       if (key !== groupKey) {
         groupKey = key;
         const header = document.createElement("div");
         header.className = "search-group";
-        header.textContent = match.workbook ? `${match.module} - ${match.workbook}` : match.module;
+        header.textContent = match.project ? `${match.module} - ${match.project}` : match.module;
         this.results.appendChild(header);
       }
 
@@ -264,7 +264,7 @@ export class SearchWidget {
 
       const target = match;
       row.addEventListener("click", () => {
-        this.handlers.navigate(target.module, target.line, target.column, true, target.workbook ?? undefined);
+        this.handlers.navigate(target.module, target.line, target.column, true, target.project ?? undefined);
       });
 
       this.results.appendChild(row);
@@ -414,8 +414,8 @@ export class SearchWidget {
       run: () => this.open({ scope: "module", withReplace: true }),
     });
     editor.addAction({
-      id: "xlide.search.workbook",
-      label: "Search Workbook",
+      id: "xlide.search.project",
+      label: "Search Project",
       keybindings: [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyF],
       run: () => this.open({ scope: "project" }),
     });

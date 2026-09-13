@@ -73,7 +73,7 @@ import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
 import { tokensFitTheText } from "./semanticfit.js";
 import { openReferencesDialog } from "./referencesdialog.js";
 import { openExtractDialog } from "./extractdialog.js";
-import { DocumentStore, docKeyOf, docUriOf, historyShortOf, historyUriOf, isDesignFace, isHistoryFace, namesTheSameWorkbook, type DocumentId } from "./documents.js";
+import { DocumentStore, docKeyOf, docUriOf, historyShortOf, historyUriOf, isDesignFace, isHistoryFace, namesTheSameProject, type DocumentId } from "./documents.js";
 import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
@@ -145,8 +145,8 @@ const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
 
 /**
  * Where each URI the editor was handed came from, so the opener below can name a module to the
- * host the way the host spelled it. A URI has to lowercase the workbook to be a stable identity;
- * the host wants its own spelling back. Bounded by the workbook: one entry per module ever
+ * host the way the host spelled it. A URI has to lowercase the project to be a stable identity;
+ * the host wants its own spelling back. Bounded by the project: one entry per module ever
  * offered as a target.
  */
 const offeredTargets = new Map<string, HostLocation>();
@@ -169,7 +169,7 @@ function toEditorLocations(
     // An open module's own model URI, not a rebuilt one: both come from the same parts, but the
     // model already exists and its spelling is the one the editor knows it by.
     const uri = bridge.modelForLocation(location)?.uri
-      ?? docUriOf(location.module, location.workbook ?? null);
+      ?? docUriOf(location.module, location.project ?? null);
     offeredTargets.set(uri.toString(), location);
 
     return {
@@ -495,8 +495,8 @@ async function showReferencesAt(
   }
 
   openReferencesDialog(answer.word || "this symbol", answer.found, {
-    navigate: (module, line, column, workbook) =>
-      bridge.navigate(module, line, column, false, workbook ?? undefined),
+    navigate: (module, line, column, project) =>
+      bridge.navigate(module, line, column, false, project ?? undefined),
   });
 
   return true;
@@ -642,7 +642,7 @@ function boot(): void {
     // The width is the DEVELOPER'S choice, not a constant; the character is not a choice at all.
     //
     // Spaces, always: VBA's code store will not hold a tab, and expands any it is handed, so a
-    // module indented with tabs read back as spaces and the page disagreed with the workbook for
+    // module indented with tabs read back as spaces and the page disagreed with the project for
     // as long as it stayed open. The "indent with tabs" setting was removed the day that was
     // measured (2026-08-07).
     //
@@ -721,8 +721,8 @@ function boot(): void {
     search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
     replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
       bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
-    navigate: (module, line, column, selectLine, workbook) =>
-      bridge.navigate(module, line, column, selectLine, workbook),
+    navigate: (module, line, column, selectLine, project) =>
+      bridge.navigate(module, line, column, selectLine, project),
   });
   bridge.searchWidget = searchWidget;
 
@@ -778,7 +778,7 @@ function boot(): void {
         // asked this view to apply in the first place; "save" here would loop forever. F5
         // comes back through "runOnly", the launch alone: the native editor never saves on
         // Run, and the save that used to ride here raised Save As over a never-saved
-        // workbook, wedged it behind the modal form, and cancelling that dialog after the
+        // project, wedged it behind the modal form, and cancelling that dialog after the
         // form closed could take the host down (the owner, 2026-08-27).
         saveOrRun: (run) => bridge.runCommand({
           id: run ? "runOnly" : "saveOnly", target: "host", icon: "", label: run ? "Run" : "Save",
@@ -914,7 +914,7 @@ function boot(): void {
      * can know to hold the close.
      *
      * Save means what Ctrl+S means on this tab - apply the document to the form, then save the
-     * workbook - which is `applyNow`, the same path the key takes. The close follows the apply
+     * project - which is `applyNow`, the same path the key takes. The close follows the apply
      * rather than racing it.
      */
     close: (id, action) => {
@@ -1016,9 +1016,9 @@ function boot(): void {
    * posts its command; a text fix edits the module's model, the same road the lightbulb's edit
    * takes, so the host hears it as typing. Null for a module the page has no model for.
    */
-  const problemQuickFixes = async (module: string, workbook: string | null, line: number, column: number)
+  const problemQuickFixes = async (module: string, project: string | null, line: number, column: number)
     : Promise<{ title: string; run: () => void }[] | null> => {
-    const model = bridge.modelForLocation({ module, workbook, line, column, length: 0 });
+    const model = bridge.modelForLocation({ module, project, line, column, length: 0 });
     if (!model) {
       return null;
     }
@@ -1028,7 +1028,7 @@ function boot(): void {
     const word = model.getWordAtPosition({ lineNumber: line, column });
     const start = model.getOffsetAt({ lineNumber: line, column: word?.startColumn ?? column });
     const end = model.getOffsetAt({ lineNumber: line, column: word?.endColumn ?? column });
-    const offered = await bridge.requestCodeActions(start, end, { module, project: workbook });
+    const offered = await bridge.requestCodeActions(start, end, { module, project });
     return offered.map((action) => ({
       title: action.title,
       run: () => {
@@ -1045,38 +1045,38 @@ function boot(): void {
   };
 
   shell = new Shell(document.body, {
-    activateModule: (name, workbook) => bridge.activateModule(name, workbook),
+    activateModule: (name, project) => bridge.activateModule(name, project),
     // The layout is a setting: the same whole-object post the dialog makes, echoed back.
     changeView: (view) => bridge.updateSettings({ ...currentSettings(), explorerView: view }),
-    openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
-    navigate: (module, line, column, selectLine, workbook) =>
-      bridge.navigate(module, line, column, selectLine, workbook),
+    openDesigner: (name, project) => bridge.activateModule(name, project, "design"),
+    navigate: (module, line, column, selectLine, project) =>
+      bridge.navigate(module, line, column, selectLine, project),
     // The drop ends in the same state the row's own click ends in - the module's activate, or
     // the procedure's navigate with its line - with only the PLACEMENT added: the workspace
     // remembers the group and index the drop chose and the arriving tab lands there.
     dragFromTree: (payload, start, became) =>
       workspace.beginDocumentDrag(
-        { module: payload.module, project: payload.workbook ?? null },
+        { module: payload.module, project: payload.project ?? null },
         payload.member ? `${payload.module} - ${payload.member}` : payload.module,
         start,
         {
           became,
           open: payload.line === undefined
-            ? () => bridge.activateModule(payload.module, payload.workbook)
-            : () => bridge.navigate(payload.module, payload.line!, 1, true, payload.workbook),
+            ? () => bridge.activateModule(payload.module, payload.project)
+            : () => bridge.navigate(payload.module, payload.line!, 1, true, payload.project),
         }),
     layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
-    suppressFinding: (module, workbook, line, code) =>
-      bridge.suppressFinding(module, workbook, line, code),
+    suppressFinding: (module, project, line, code) =>
+      bridge.suppressFinding(module, project, line, code),
     quickFixesFor: problemQuickFixes,
-    quickFixAt: (module, workbook, line, column) => {
+    quickFixAt: (module, project, line, column) => {
       // Go there, and once the editor is showing that line, open its own quick-fix menu.
-      bridge.navigate(module, line, column, false, workbook ?? undefined);
+      bridge.navigate(module, line, column, false, project ?? undefined);
       const until = Date.now() + 3000;
       const tick = (): void => {
         const editor = workspace.activeEditor();
         const model = editor.getModel();
-        const wanted = bridge.modelForLocation({ module, workbook, line, column, length: 0 });
+        const wanted = bridge.modelForLocation({ module, project, line, column, length: 0 });
         if (model && wanted && model === wanted && editor.getPosition()?.lineNumber === line) {
           void editor.getAction("editor.action.quickFix")?.run();
           return;
@@ -1136,7 +1136,7 @@ function boot(): void {
           },
           () => workspace.activeEditor().focus(),
           // WHICH PROJECTS ARE OPEN, so the dialog can be pointed at one explicitly and say so
-          // in every request. The tree's own list, and the workbook of the document being looked
+          // in every request. The tree's own list, and the project of the document being looked
           // at as the one to start on - which is the answer to "which file am I working on" that
           // the developer would give.
           {
@@ -1215,17 +1215,17 @@ function boot(): void {
     },
     pickPicture: (component, name) => bridge.pickPicture(component, name),
     selectComponent: (name) => bridge.selectComponent(name),
-    renameModule: (name, workbook, newName) => {
-      void bridge.requestModuleRename(name, workbook, newName).then((answer) => {
+    renameModule: (name, project, newName) => {
+      void bridge.requestModuleRename(name, project, newName).then((answer) => {
         bridge.shell?.notify(answer.refused
           ?? `Renamed ${name} to ${newName}: ${answer.replaced} mention${answer.replaced === 1 ? "" : "s"}`
             + ` in ${answer.modules.length} module${answer.modules.length === 1 ? "" : "s"}.`);
       });
     },
-    closeModule: (name, workbook, action) => bridge.closeModule(name, workbook, action),
+    closeModule: (name, project, action) => bridge.closeModule(name, project, action),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     removeComponent: (name, project) => bridge.removeComponent(name, project),
-    requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
+    requestOutline: (module, project) => bridge.requestOutline(module, project),
     trace: (text) => bridge.trace(text),
     testsShown: () => bridge.testsAction("show"),
     changesShown: () => changesPane?.shown(),
@@ -2055,7 +2055,7 @@ function boot(): void {
     ],
   });
 
-  // Go to definition, across the modules of one workbook and never past it.
+  // Go to definition, across the modules of one project and never past it.
   //
   // Nothing but an answer comes out of here. Every command that asks - F12, Ctrl+click, Shift+F2,
   // and Peek Definition - comes through this one provider, and it cannot tell which is asking, so
@@ -2077,7 +2077,7 @@ function boot(): void {
       // anything, which is what makes a peek a peek.
       await Promise.all(found
         .filter((location) => !bridge.modelForLocation(location))
-        .map((location) => bridge.ensureDocument(location.module, location.workbook ?? null)));
+        .map((location) => bridge.ensureDocument(location.module, location.project ?? null)));
 
       return toEditorLocations(bridge, found);
     },
@@ -2117,7 +2117,7 @@ function boot(): void {
             column: selectionOrPosition.startColumn,
           };
 
-      bridge.navigate(target.module, at.lineNumber, at.column, false, target.workbook ?? undefined);
+      bridge.navigate(target.module, at.lineNumber, at.column, false, target.project ?? undefined);
       return true;
     },
   });
@@ -2136,7 +2136,7 @@ function boot(): void {
   // menu and off Shift+F12: both are gated on there being a reference provider at all, so the
   // menu has no entry to duplicate and the key is free for xlide's (the developer, 2026-08-07).
 
-  // Rename, across every module of the workbook that uses the symbol, whether its tab is open or
+  // Rename, across every module of the project that uses the symbol, whether its tab is open or
   // not (the developer, 2026-08-06).
   //
   // The HOST does the renaming, so this returns no edits. A module with no tab has no model to
@@ -2320,7 +2320,7 @@ function boot(): void {
       viewFor: (module, project) => {
         for (const view of designerViews.values()) {
           if (view.id.module.toLowerCase() === module.toLowerCase()
-            && (project === null || namesTheSameWorkbook(view.id.project, project))) {
+            && (project === null || namesTheSameProject(view.id.project, project))) {
             return view;
           }
         }

@@ -21,7 +21,7 @@
  */
 import { open, reporter, scratchModule, waitFor } from "./xlide-api.mjs";
 
-// XLIDE_PID / XLIDE_WORKBOOK pick the session when several are live; open() reads them itself.
+// XLIDE_PID / XLIDE_PROJECT pick the session when several are live; open() reads them itself.
 const api = await open();
 const project = await api.project();
 const name = `Colour${process.pid}`;

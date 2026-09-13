@@ -94,7 +94,7 @@ export interface ScmStatus {
   suggestedMessage: string;
   covers: string;
   /** A folder the host offers when none is remembered: the sync folder, or one beside the
-   * workbook. Read from `suggestedFolder`, then `syncFolder`, then `folder`. */
+   * project. Read from `suggestedFolder`, then `syncFolder`, then `folder`. */
   suggestedFolder: string;
 }
 
@@ -445,7 +445,7 @@ export class ScmPane {
     });
 
     // Picking a branch IS the checkout. The select is redrawn from the status that comes back,
-    // so a refused checkout (a dirty workbook) leaves it showing the branch that is still current.
+    // so a refused checkout (a dirty project) leaves it showing the branch that is still current.
     // The last entry is not a branch: the select goes back to the one that is, and a card asks
     // for the new one's name.
     //
@@ -587,7 +587,7 @@ export class ScmPane {
       this.file.appendChild(option);
     }
 
-    // One file is not a choice; the name beside it goes the other way, so the workbook is said
+    // One file is not a choice; the name beside it goes the other way, so the project is said
     // exactly once either way.
     this.file.hidden = names.length < 2;
     this.title.hidden = !this.file.hidden;
@@ -1360,7 +1360,7 @@ export class ScmPane {
         text.textContent = "No project is open.";
         break;
       case "unsaved":
-        text.textContent = "Save the workbook first. An unsaved workbook has no path for a repository "
+        text.textContent = "Save the file first. An unsaved file has no path for a repository "
           + "folder to be remembered against.";
         break;
       case "noFolder": {
@@ -1566,7 +1566,7 @@ export class ScmPane {
 
   /**
    * The card behind New branch...: a name, and Create. The branch is cut from the head and stays
-   * on its commit, so nothing is imported and a dirty workbook is no bar; the card says so. A
+   * on its commit, so nothing is imported and a dirty project is no bar; the card says so. A
    * refusal - a name git will not take, a name already taken - is shown in the card, with the
    * input live again for another go.
    */

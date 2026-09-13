@@ -14,7 +14,7 @@ import { runPageProbe } from "./page-probe.mjs";
 const DRIVE = `(async () => {
   const sleep = (ms) => new Promise((settle) => setTimeout(settle, ms));
   const act = (name, args) => window.xlideUi.act(name, args ?? {});
-  const books = () => window.xlideUi.state().explorer.workbooks;
+  const books = () => window.xlideUi.state().explorer.projects;
   const tabs = () => [...document.querySelectorAll('.tab')].length;
 
   const checks = [];
@@ -25,7 +25,7 @@ const DRIVE = `(async () => {
   check('the demo is serving a single workbook', books().length === 1,
     books().map((one) => one.name).join(', '));
 
-  act('expandWorkbook', { workbook: books()[0].name, open: true });
+  act('expandProject', { project: books()[0].name, open: true });
   await sleep(400);
   check('and it is open to start with', books()[0].expanded === true, JSON.stringify(books()[0].expanded));
 
@@ -57,7 +57,7 @@ const DRIVE = `(async () => {
 })()`;
 
 await runPageProbe({
-  label: "xlide-sole-workbook",
+  label: "xlide-sole-project",
   path: "/index.html?books=1",
   drive: DRIVE,
 });

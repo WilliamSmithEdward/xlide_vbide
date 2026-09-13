@@ -86,7 +86,7 @@ export function instructionsFor(state: ApiState): string {
     return "";
   }
 
-  const where = state.project ? state.project : "no workbook open yet";
+  const where = state.project ? state.project : "no project open yet";
   return [
     `xlide is running inside ${state.host || "Office"} and has opened a local api for you.`,
     "",
@@ -130,12 +130,12 @@ export function instructionsFor(state: ApiState): string {
     "  moment the project is clean or when the wait runs out, and `POST mark?text=<label>` then",
     "  `GET log?match=analysis:&waitMs=10000` answers when the next pass has reported.",
     "  `tests?action=run` and `compile` answer only when they have finished.",
-    "- The workbook itself is a line away. `POST immediate?text=?ActiveSheet.Name` evaluates a",
-    "  line in the Immediate window against the live workbook; a statement there, such as",
+    "- The project itself is a line away. `POST immediate?text=?ActiveSheet.Name` evaluates a",
+    "  line in the Immediate window against the live project; a statement there, such as",
     "  `Range(\"A1\").Value = 1`, takes effect at once and Excel's own undo does not cover it.",
     "  For more than a line, write a Sub, aim `caret` at it and `command?name=run`.",
     "  `model?type=Worksheet` says what the host's object model has. Nothing here saves the",
-    "  workbook; `command?name=save` does.",
+    "  project; `command?name=save` does.",
     "- Prefer the named routes to `eval`. `eval` runs script in the editor's own page; it exists",
     "  for diagnosis, not for getting work done.",
     "",

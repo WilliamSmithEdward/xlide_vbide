@@ -1968,9 +1968,9 @@ try {
     const baseline = await api.designerBaseline(form, project);
     check("the saved workbook answers a baseline for a form it has been saved with",
       baseline.saved === true && baseline.controls.length > 0,
-      JSON.stringify({ saved: baseline.saved, workbook: baseline.workbook, rows: baseline.controls.length }));
+      JSON.stringify({ saved: baseline.saved, file: baseline.file, rows: baseline.controls.length }));
 
-    if (baseline.saved && baseline.workbook) {
+    if (baseline.saved && baseline.file) {
       // Excel is holding the workbook open. The host reads it shared; this side uses plain
       // readFileSync, so a lock is a reason the comparison cannot run rather than a failure of
       // the thing being compared.
@@ -1978,7 +1978,7 @@ try {
       let mine = null;
       let locked = null;
       try {
-        mine = readSavedDesign(baseline.workbook).get(form) ?? new Map();
+        mine = readSavedDesign(baseline.file).get(form) ?? new Map();
       } catch (why) {
         locked = why.message;
       }

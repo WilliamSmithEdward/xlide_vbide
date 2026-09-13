@@ -5051,8 +5051,8 @@ internal sealed partial class AddInSession
                     new DebugProjectsReply([.. found]), DebugJsonContext.Default.DebugProjectsReply);
             }
 
-            case "workbook" when request.Query.TryGetValue("action", out var workbookAction)
-                && string.Equals(workbookAction, "close", StringComparison.OrdinalIgnoreCase):
+            case "file" when request.Query.TryGetValue("action", out var fileAction)
+                && string.Equals(fileAction, "close", StringComparison.OrdinalIgnoreCase):
             {
                 /*
                  * THE ONE SAFE WAY TO CLOSE A WORKBOOK FROM OUTSIDE. The immediate window used
@@ -5076,14 +5076,14 @@ internal sealed partial class AddInSession
                 request.Query.TryGetValue("project", out var closeTarget);
                 if (closeTarget is not { Length: > 0 })
                 {
-                    return HostError("workbook?action=close needs project=<name>; "
+                    return HostError("file?action=close needs project=<name>; "
                         + "a close aimed at nothing closes nothing");
                 }
 
                 if (!(request.Query.TryGetValue("saveChanges", out var saveWord)
                     && saveWord is "0" or "1" or "true" or "false"))
                 {
-                    return HostError("workbook?action=close needs saveChanges=0|1 - the same "
+                    return HostError("file?action=close needs saveChanges=0|1 - the same "
                         + "question the native close asks, answered in the request");
                 }
 
@@ -5103,8 +5103,8 @@ internal sealed partial class AddInSession
                 Log.Info($"workbook: closed {closeDisplay}, changes {(saveIt ? "saved" : "discarded")}");
 
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugWorkbookReply(true, closeDisplay!, saveIt),
-                    DebugJsonContext.Default.DebugWorkbookReply);
+                    new DebugFileReply(true, closeDisplay!, saveIt),
+                    DebugJsonContext.Default.DebugFileReply);
             }
 
             case "project":

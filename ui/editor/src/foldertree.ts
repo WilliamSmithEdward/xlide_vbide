@@ -9,7 +9,7 @@
  * called it. Folders come before modules at every level and sort by name; the modules keep the
  * order the flat tree gives them, which the caller supplies.
  *
- * A module with no annotation sits at the workbook's root, which is where the original puts
+ * A module with no annotation sits at the project's root, which is where the original puts
  * them too (its default folder is named after the project, and here the project IS the root).
  */
 

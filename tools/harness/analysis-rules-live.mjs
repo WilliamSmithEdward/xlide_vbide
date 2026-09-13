@@ -167,7 +167,7 @@ try {
   await api.pane("open", { module: NAME, project: project.projectId });
   await api.caret(1, { module: NAME, column: 1, project: project.projectId });
   const added = await api.act("problemFixes", {
-    module: NAME, workbook: project.projectId, line: 1, column: 1, title: "Add Option Explicit",
+    module: NAME, project: project.projectId, line: 1, column: 1, title: "Add Option Explicit",
   });
   check("the Add Option Explicit fix runs from the finding", added.did === true, added.detail);
 

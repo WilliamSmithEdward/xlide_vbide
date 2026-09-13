@@ -254,9 +254,9 @@ try {
   const usesFixes = await api.act("quickFixes", { line: 8, column: 17 });
   check("the finding's lightbulb offers to make the class predeclared",
     (usesFixes.data ?? []).some((one) => one.title === predeclareTitle), (usesFixes.data ?? []).map((one) => one.title).join(" | "));
-  const menuFixes = await api.act("problemFixes", { module: "Uses", workbook: BOOK, line: 8, column: 17 });
+  const menuFixes = await api.act("problemFixes", { module: "Uses", project: BOOK, line: 8, column: 17 });
   check("the Problems pane's right-click carries the same fix", (menuFixes.data ?? []).includes(predeclareTitle), JSON.stringify(menuFixes));
-  const ranFix = await api.act("problemFixes", { module: "Uses", workbook: BOOK, line: 8, column: 17, title: predeclareTitle });
+  const ranFix = await api.act("problemFixes", { module: "Uses", project: BOOK, line: 8, column: 17, title: predeclareTitle });
   const predeclaredFromUses = await settles("Registry predeclared from Uses' fix", async () =>
     (await describe("Registry")).attributes?.predeclaredId === true, { budgetMs: 25000 });
   const registryNow = (await api.readModule("Registry", BOOK)).text ?? "";

@@ -18,12 +18,12 @@ export interface EditorSettings {
   insertOptionExplicit: boolean;
   /**
    * The tree follows the editor: the module being worked on unfolds its procedures, the folders
-   * on the way to it open while the workbook's others fold, and everything folds away when the
+   * on the way to it open while the project's others fold, and everything folds away when the
    * last tab closes. Off leaves the tree to the hand that opened it.
    */
   treeFollowsEditor: boolean;
   /**
-   * How the explorer lays a workbook out: "tree" is the flat list by kind, "folders" groups
+   * How the explorer lays a project out: "tree" is the flat list by kind, "folders" groups
    * modules by their '@Folder("Parent.Child") annotation. The tabs at the top of the pane.
    */
   explorerView: "tree" | "folders";

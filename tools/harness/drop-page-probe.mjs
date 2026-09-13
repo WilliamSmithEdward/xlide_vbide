@@ -314,7 +314,7 @@ await runPageProbe({
     // the NEXT honest click is the one that gets eaten. The developer's report was exactly
     // this: "clicking the workbook row sometimes takes two clicks" (2026-08-12).
     const workbookRow = await inPage(`(() => {
-      const row = [...document.querySelectorAll("#sidebar-tree .tree-workbook[data-project]")]
+      const row = [...document.querySelectorAll("#sidebar-tree .tree-project[data-project]")]
         .find((one) => (one.dataset.project ?? "").includes("Book1"));
       if (!row) { return null; }
       const r = row.getBoundingClientRect();

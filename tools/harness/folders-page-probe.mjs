@@ -24,7 +24,7 @@ const DRIVE = `(async () => {
     row.dataset.folder !== undefined ? 'folder:' + row.dataset.folder
       : row.dataset.component ? 'module:' + row.dataset.component
       : row.dataset.procModule ? 'proc:' + row.textContent.trim()
-      : row.dataset.project ? 'workbook:' + row.dataset.project
+      : row.dataset.project ? 'project:' + row.dataset.project
       : 'other');
   const depthOf = (selector) => document.querySelector(selector)?.style.getPropertyValue('--tree-depth') || '0';
   const waitFor = async (what, until) => {
@@ -40,7 +40,7 @@ const DRIVE = `(async () => {
 
   // The demo publishes the tree a beat after load; nothing below means anything until it has.
   await waitFor('tabs', () => tabs().length >= 2);
-  act('expandWorkbook', { workbook: 'Book1.xlsm', open: true });
+  act('expandProject', { project: 'Book1.xlsm', open: true });
   await waitFor('rows', () => rows().includes('module:Module1'));
 
   // ---- the tabs ----
@@ -52,8 +52,8 @@ const DRIVE = `(async () => {
     state().explorer.view + ' / ' + tabsDrawn[0].getAttribute('aria-selected'));
   check('the flat tree draws no folder rows', !rows().some((row) => row.startsWith('folder:')), rows().join(' '));
   check('the folders exist as data whichever layout is showing',
-    state().explorer.workbooks[0].folders.map((one) => one.path).join(',') === 'Sales,Sales.Import',
-    JSON.stringify(state().explorer.workbooks[0].folders));
+    state().explorer.projects[0].folders.map((one) => one.path).join(',') === 'Sales,Sales.Import',
+    JSON.stringify(state().explorer.projects[0].folders));
 
   // ---- switching by the api, which is a settings change echoed back ----
   const asked = act('explorerView', { view: 'folders' });
@@ -65,8 +65,8 @@ const DRIVE = `(async () => {
   // ---- the shape ----
   const book1 = () => {
     const all = rows();
-    const start = all.indexOf('workbook:Book1.xlsm');
-    const end = all.indexOf('workbook:Book2.xlsm');
+    const start = all.indexOf('project:Book1.xlsm');
+    const end = all.indexOf('project:Book2.xlsm');
     return all.slice(start + 1, end < 0 ? undefined : end);
   };
   check('folders come first, parents before children, then the root modules by kind',
@@ -84,7 +84,7 @@ const DRIVE = `(async () => {
     document.querySelector('[data-folder="Sales.Import"]').title === '\\'@Folder("Sales.Import")',
     document.querySelector('[data-folder="Sales.Import"]').title);
   check('the module rows keep the attributes the flat tree gives them',
-    document.querySelector('[data-component="Module1"]').dataset.workbook === 'Book1.xlsm'
+    document.querySelector('[data-component="Module1"]').dataset.inProject === 'Book1.xlsm'
       && document.querySelector('[data-component="Module1"]').dataset.kind === '1');
 
   // ---- folding ----
@@ -98,13 +98,13 @@ const DRIVE = `(async () => {
       && document.querySelector('[data-folder="Sales"]').getAttribute('aria-expanded') === 'false',
     document.querySelector('[data-folder="Sales"]')?.textContent);
   check('the snapshot says which folders are shut',
-    JSON.stringify(state().explorer.workbooks[0].folders) === JSON.stringify([
+    JSON.stringify(state().explorer.projects[0].folders) === JSON.stringify([
       { path: 'Sales', expanded: false, modules: 2 }, { path: 'Sales.Import', expanded: true, modules: 1 }]),
-    JSON.stringify(state().explorer.workbooks[0].folders));
+    JSON.stringify(state().explorer.projects[0].folders));
 
-  const reopened = act('expandFolder', { workbook: 'Book1.xlsm', path: 'sales', open: true });
+  const reopened = act('expandFolder', { project: 'Book1.xlsm', path: 'sales', open: true });
   check('expandFolder opens it again, by path without regard to case', reopened.did && rows().includes('module:Module1'), reopened.detail);
-  const missing = act('expandFolder', { workbook: 'Book1.xlsm', path: 'Nowhere', open: true });
+  const missing = act('expandFolder', { project: 'Book1.xlsm', path: 'Nowhere', open: true });
   check('and says so for a folder that does not exist', !missing.did, missing.detail);
 
   // ---- the follow ----
@@ -113,12 +113,12 @@ const DRIVE = `(async () => {
   act('activate', { module: 'Module2' });
   await waitFor('active', () => state().explorer.active === 'Module2');
   check('moving to a module outside the folder folds it, the way leaving a workbook folds the workbook',
-    !rows().includes('module:Module1') && state().explorer.workbooks[0].folders.every((one) => !one.expanded),
-    JSON.stringify(state().explorer.workbooks[0].folders));
+    !rows().includes('module:Module1') && state().explorer.projects[0].folders.every((one) => !one.expanded),
+    JSON.stringify(state().explorer.projects[0].folders));
   act('activate', { module: 'Module1' });
   await waitFor('active', () => state().explorer.active === 'Module1');
   check('following the editor back into it opens the folders above the module',
-    rows().includes('module:Module1') && state().explorer.workbooks[0].folders.every((one) => one.expanded),
+    rows().includes('module:Module1') && state().explorer.projects[0].folders.every((one) => one.expanded),
     rows().join(' '));
   check('and the accordion unfolds the module there, under its folder',
     state().explorer.unfolded?.module === 'Module1' && rows().indexOf('proc:Sub Recalculate') > rows().indexOf('module:Module1'),

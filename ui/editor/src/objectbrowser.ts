@@ -3,7 +3,7 @@
  * opens beside the editor (the developer's choice, 2026-08-05 - the native browser can
  * neither float nor be adopted, lesson 32, so it retired in favour of this).
  *
- * A library picker chooses the subject: each open workbook's project, or any type library
+ * A library picker chooses the subject: each open project, or any type library
  * the projects reference - Excel, VBA, Office, stdole - served by the host's typelib reader.
  * Types on the left, members with VBA-spelled signatures on the right, the selected member's
  * full signature in the detail strip. Project members carry their line and jump to their
