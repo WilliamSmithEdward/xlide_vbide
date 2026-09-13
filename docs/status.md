@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-10, at v0.16.1.
+Updated 2026-09-13, at v0.16.2.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -25,7 +25,7 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   is a floating themed window of xlide's own. Nothing native shows through the canvas.
 - **There is no menu bar.** All ten of the editor's menus are suppressed; a wrench at the head of
   the toolbar holds the five dialogs that are genuinely the editor's own. Everything the other
-  menus carried has a home: modules are added from a plus on each workbook row in the tree and
+  menus carried has a home: modules are added from a plus on each project row in the tree and
   removed from the module's own right-click menu, import and export are the sync dialog, and
   running, stepping, compiling and Design Mode are toolbar buttons.
 - **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe`, 31.6 MB,
@@ -71,7 +71,7 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   into the rows and its message into the box; history with Open this version and Restore, a
   restore landing as a Changes round; blame at the end of every committed line of the active
   module; a branch select whose pick is a checkout followed by an import, refused over a dirty
-  workbook, ending in New branch... and listing the remote's branches after a fetch; Fetch and
+  project, ending in New branch... and listing the remote's branches after a fetch; Fetch and
   Push that answer git's words, and a Pull with a checkout's shape - the merge, then the import
   into every open project the repository holds, a conflict shown as the conflicted state. The
   divider between the rows and the comparison drags. The folder is remembered per project as
