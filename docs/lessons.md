@@ -2515,6 +2515,15 @@ The Excel branch beside it had always walked every `XLMAIN`; Word walks every
 frame now, and answers with the frame itself when no frame holds a pane,
 because a Word frame carries the object model the way an Access frame does.
 
+**That last clause was wrong, and finding 85 is what it cost.** Measured
+against a live Word session two days later, an `OpusApp` frame does not carry
+the object model: both frames of a two-frame session refuse `OBJID_NATIVEOM`
+with E_FAIL, and it is the second PANE that answers. The reading that mattered
+here - that the lookup depended on window order - was right. The repair built
+on top of it was a guess that nothing measured, and it read as a fix because
+the suite went green for a different reason: that run's window order happened
+to put an answering pane first.
+
 Test-CloseVbe had the other half. It picked its session from `XLIDE_PID` and
 then reached for Excel through `GetActiveObject`, which hands back whichever
 Excel registered itself: with a second Excel running the add-in - a recovery
@@ -2567,3 +2576,29 @@ called it a stranger and the launcher then died reaching for the duplicate it
 had started; on the new one it is closed by id and a single Excel holds the
 file. Believing an empty read is the defect; the ten places that read COM to
 decide something about a process are where to look for the rest of it.
+
+**And the product had the same defect, in the place finding 84 thought it had
+fixed.** The gate's next run failed on Word: 106 E_FAILs in one session, every
+feature that needs the host reporting "The host application could not be
+reached", and the suite dying with no verdict at all. `HostApplication.Find()`
+took the first `_WwG` pane it found and asked that one for `OBJID_NATIVEOM`.
+Finding a window of the right class is not finding the one that answers.
+
+Counted on a live two-frame Word session, the lookup has four candidates - two
+panes, then two frames - and exactly ONE of them answers; the other pane and
+both frames refuse with E_FAIL. Which pane comes first is z-order, so the
+lookup was a coin toss that had been landing heads. Raising the other frame
+with `SetWindowPos` flips it deterministically, which is the failing gate
+state on demand, and it also retires finding 84's frame fallback: a Word frame
+does not carry the object model, so that fallback could never have rescued
+anything.
+
+`Find()` now offers its candidates in order and asks each until one answers.
+In the deliberately reversed state the suite goes 26 of 26 and the log says
+"the object model came from candidate window 2" seven times. One lookup, one
+log line: the old code wrote an error per attempt and a failing session buried
+its own first timestamp under a hundred copies of the same sentence.
+
+The shape to watch for: a search that returns the first thing of the right
+KIND, when what the caller needs is the first thing that WORKS. Both defects
+this day were that, one in PowerShell and one in C#.
