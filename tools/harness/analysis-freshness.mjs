@@ -69,12 +69,18 @@ const CALLED = `XlideAdd${RUN}`;
 
 // The caller's text, written once and never touched again. Every finding that appears or clears
 // below does so because the OTHER module moved, which is the only thing this suite is about.
+//
+// SO THE CALLER ITSELF HAS TO BE CLEAN, and `r` is READ for that reason. The analyzer began
+// reporting dead code in 8.3.0, and a result that is only assigned is `variable-never-read`:
+// left unread, the caller carried a standing finding of its own and three checks here failed on
+// it - "the caller is clean", and the two that count its findings back to zero (2026-09-17).
 const CALLER_SOURCE = [
   "Option Explicit",
   "",
   "Public Sub CallsAcross()",
   "    Dim r As Long",
   `    r = ${CALLED}(1)`,
+  "    Debug.Print r",
   "End Sub",
   "",
 ].join("\r\n");

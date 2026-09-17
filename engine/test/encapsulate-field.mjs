@@ -51,6 +51,11 @@ const has = (answer, text) => answer.lines.some((one) => one.trim() === text);
 
 /* ---- a value field ---------------------------------------------------------------------------- */
 
+// m_Count is here to give the declaration-ordering check below a second declaration to be
+// ordered among, and it is READ so that the module is clean code in its own right. The last
+// check in this file asserts the encapsulated class reports nothing at all, and the analyzer
+// began reporting dead code in 8.3.0: left unread, this field made that check fail on a true
+// finding about the fixture rather than anything the refactoring wrote (2026-09-17).
 const value = await encapsulate([
     'Option Explicit',
     '',
@@ -59,6 +64,7 @@ const value = await encapsulate([
     '',
     'Public Sub Announce()',
     '    Debug.Print Name',
+    '    Debug.Print m_Count',
     'End Sub',
 ], 'Name');
 
