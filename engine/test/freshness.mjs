@@ -29,12 +29,16 @@ const PROJECT = 'freshness.xlsm';
 
 // The caller's text, written once and never changed again. Everything below happens because the
 // OTHER module moved.
+// `r` is READ so the caller is clean on its own: every check here is about a finding that
+// appears or clears because Add moved, and the analyzer's 8.3.0 dead-code rules report a result
+// that is only ever assigned (2026-09-17).
 const CALLER = [
     'Option Explicit',
     '',
     'Public Sub CallsAcross()',
     '    Dim r As Long',
     '    r = Add(1)',
+    '    Debug.Print r',
     'End Sub',
     '',
 ].join('\r\n');

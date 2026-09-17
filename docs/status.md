@@ -141,15 +141,22 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 ## How it is checked
 
 `tools\verify.ps1` is the whole local gate in one command, in three tiers. Bare, it is
-20 headless steps in about a minute: vendored spec, engine currency against the analyzer checkout, the
+21 headless steps in about a minute: vendored spec, engine currency against the analyzer checkout, the
 variant-as-object guard, page and engine typecheck, build and tests, the engine language matrix
-and its host-supplied facts, knowledge routes, inline comment features, the seven refactoring
-planners with the lightbulb's verdicts over them, generated module casing,
+and its host-supplied facts, knowledge routes, inline comment features, the engine's own whole
+test list, the seven refactoring planners with the lightbulb's verdicts over them, generated
+module casing,
 the headless page probes, the xlide api's route audit, the Release build, the unit tests, the
 check that Release ships the api shut, and the native publish. `-Live` adds four steps that need
 an open editor; `-Deep` adds four more and is the pre-release tier, the one to run before a
-release rather than before a commit. All 28 take about ten minutes, the Word and Access
+release rather than before a commit. All 29 take about ten minutes, the Word and Access
 groups included.
+
+**The engine's list is run whole, not by name.** The steps around it name particular suites,
+which reads well and rots quietly: when the analyzer's dead-code rules arrived, three engine
+suites this gate named nowhere went red and every step stayed green. `npm test` in `engine` is
+the engine's own list, so a suite added there is covered here without anyone remembering to
+come back.
 
 **The live tier is not all Excel any more.** Its first group opens an Access database
 (`tools\New-AccessFixture.ps1`) and runs `access.mjs` against it, because for a year every suite

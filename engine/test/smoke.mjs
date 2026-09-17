@@ -20,12 +20,16 @@ const BAD_MODULE = [
     '',
 ].join('\r\n');
 
+// CLEAN MEANS CLEAN, and two checks below say so: no findings at all, and no quick fixes on
+// offer. `n` is read for that reason - the analyzer's 8.3.0 dead-code rules report a variable
+// that is assigned and never used (2026-09-17).
 const GOOD_MODULE = [
     'Option Explicit',
     '',
     'Sub Fine()',
     '    Dim n As Long',
     '    n = 1',
+    '    Debug.Print n',
     'End Sub',
     '',
 ].join('\r\n');

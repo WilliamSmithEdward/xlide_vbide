@@ -344,6 +344,25 @@ Step 'engine inline comment features' {
     'suppression scopes, doc comments, the suppression fix, and the guarded rule overrides'
 }
 
+Step 'engine tests, the whole list the engine keeps' {
+    # THE ENGINE'S OWN `npm test`, whatever is in it. The steps around this one name particular
+    # suites, which reads well in the summary and rots quietly: on 2026-09-17 the analyzer's new
+    # dead-code rules turned smoke, freshness and conditional-constants red - three suites this
+    # gate named nowhere - and every step here stayed green. Their fixtures had declared
+    # variables they never read, which those rules correctly report, so each suite that asserted
+    # "no findings" was failing on a true statement about its own text.
+    #
+    # Running the engine's own list means a suite ADDED there is covered here without anyone
+    # remembering to come back. It re-runs a handful the named steps above already ran; that
+    # costs about twenty seconds and buys the twelve they never mentioned.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        npm test 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "the engine's own test list failed" }
+    } finally { Pop-Location }
+    'npm test: every suite the engine ships, named by the engine rather than by this gate'
+}
+
 Step 'engine refactorings' {
     # EVERY PLANNER, AND WHAT THE LIGHTBULB ASKS OF THEM. The seven refactorings each have a
     # headless suite over the real pipe, and until 2026-09-10 nothing ran them: not this gate,

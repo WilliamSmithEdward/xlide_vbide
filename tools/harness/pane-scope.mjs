@@ -48,12 +48,18 @@ const ALSO_SOURCE = [
   "",
 ].join("\r\n");
 
+// THE CLEAN MODULE HAS TO BE CLEAN, which is why `held` is read. This suite scopes the pane to
+// it and waits for the empty state that names it; the analyzer began reporting dead code in
+// 8.3.0, and a variable that is only assigned is `variable-never-read`, so the module named
+// CLEAN carried a finding of its own, the pane was never empty, and the suite died on a
+// fifteen-second timeout after seven checks (2026-09-17).
 const CLEAN_SOURCE = [
   "Option Explicit",
   "",
   "Public Sub NothingWrong()",
   "    Dim held As Long",
   "    held = 1",
+  "    Debug.Print held",
   "End Sub",
   "",
 ].join("\r\n");

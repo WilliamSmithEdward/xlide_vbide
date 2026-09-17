@@ -89,6 +89,9 @@ check('and turning the flag off keeps the other arm live',
 
 // A name declared only in the arm that IS compiled must resolve; the same code under the other
 // setting must not. That is the half a rules-only integration would get wrong.
+// `held` is READ as well as assigned: the check below wants NO findings under the live arm, and
+// the analyzer's 8.3.0 dead-code rules report a module-level variable that is only written
+// (2026-09-17). What is being asked here is whether the name resolves, not whether it is used.
 const DECLARED = [
     'Option Explicit',
     '',
@@ -98,6 +101,7 @@ const DECLARED = [
     '',
     'Public Sub Go()',
     '    held = 1',
+    '    Debug.Print held',
     'End Sub',
 ];
 
