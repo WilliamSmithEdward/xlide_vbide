@@ -71,9 +71,12 @@ try {
 
   /* ---- an override moves the pane -------------------------------------------------------------- */
 
-  // No Option Explicit, deliberately: the one finding is the style rule the owner named.
+  // No Option Explicit, deliberately: the one finding is the style rule the owner named. ONE,
+  // which is why `n` is read - the analyzer's 8.3.0 dead-code rules report a variable that is
+  // only assigned, and a second finding here means the pane never empties when the rule under
+  // test is turned off, which is what two checks below are about (2026-09-17).
   await api.writeModule(NAME, [
-    "Public Sub Go()", "    Dim n As Long", "    n = 1", "End Sub",
+    "Public Sub Go()", "    Dim n As Long", "    n = 1", "    Debug.Print n", "End Sub",
   ].join(CRLF), project.projectId);
   const before = await problemsFor(NAME,
     (rows) => rows.some((one) => one.code === "option-explicit-missing"));
@@ -158,7 +161,7 @@ try {
   // `Public Sub Recalculate()` cut to 15 is `Public Sub Reca`, a bare header, which is what the
   // header completion answers with `()`.
   await api.writeModule(NAME, [
-    "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
+    "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "    Debug.Print n", "End Sub",
   ].join(CRLF), project.projectId);
   const needing = await problemsFor(NAME,
     (rows) => rows.some((one) => one.code === "option-explicit-missing"));
@@ -179,7 +182,8 @@ try {
   // header (xlide_vscode#75, fixed in the analyzer's 8.2.1 and carried here by the engine this
   // repository packages). A module whose first line is already blank keeps the one it has.
   const expected = [
-    "Option Explicit", "", "Public Sub Recalculate()", "    Dim n As Long", "    n = 1", "End Sub",
+    "Option Explicit", "", "Public Sub Recalculate()", "    Dim n As Long", "    n = 1",
+    "    Debug.Print n", "End Sub",
   ].join(CRLF);
   const written = await hostTextWhen(NAME, (one) => /Option Explicit/i.test(one));
   check("and the host holds exactly Option Explicit above the code it was inserted over",
