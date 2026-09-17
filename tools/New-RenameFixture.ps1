@@ -168,10 +168,17 @@ Option Explicit
 
 ' LEAVE THIS ONE OPEN. A rename has to update the tab you are looking at as well as the
 ' modules you are not, and the two go through different paths to get there.
+'
+' w IS READ, and the TypeName line is the whole reason it exists. The declaration is here to
+' give a Widget rename a second site to follow; the variable itself was never used, which the
+' analyzer's 8.3.0 dead-code rules correctly report. format-positions makes this project go
+' entirely clean and waits for every finding to retire - a standing finding in the fixture
+' means that state is unreachable and the check times out (2026-09-17).
 
 Public Sub Watch()
     Helpers.Recalculate "watching"
     Dim w As Widget
+    Debug.Print TypeName(w)
 End Sub
 '@ }
 
