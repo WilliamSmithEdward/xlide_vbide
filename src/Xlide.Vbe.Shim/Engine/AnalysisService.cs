@@ -21,7 +21,14 @@ internal sealed record Finding(
     int StartColumn,
     int EndLine,
     int EndColumn,
-    string? Project = null);
+    string? Project = null,
+
+    /// <summary>
+    /// `unnecessary` for code the module does not need, which the surface fades rather than
+    /// underlines. The analyzer decides it per rule and the engine attaches it per finding, so
+    /// nothing between here and the page has to know which rules those are.
+    /// </summary>
+    string? Tag = null);
 
 /// <summary>
 /// Keeps the engine supplied with the editor's current sources and hands back findings.
@@ -1568,7 +1575,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                 startColumn,
                 endLine,
                 endColumn,
-                projectId);
+                projectId,
+                diagnostic.Tag);
         }
     }
 

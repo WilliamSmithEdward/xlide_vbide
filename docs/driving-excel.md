@@ -361,7 +361,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` | through the session's own reader and writer; `live` reads what the surface holds, unwritten. A write the editor refuses throws rather than answering ok |
 | `perf` | `perf({reset})` / `engineCosts()` | placement and marshal durations, and the ANALYZER's cost per method |
 | `placement` | `placement()` | forces a placement pass |
-| `problems` | `problems(module)` | the analyzer's findings |
+| `problems` | `problems(module)` | the analyzer's findings; each carries `tag`, `unnecessary` on code the module does not need, which the editor fades rather than underlines |
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
 | `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port; whether the frame is on screen; the Object Browser palette open, visible, and wearing an icon (`paletteIcon`) |
 | `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters, the COM WRAPPER counts - and the marshal lane's own eyes: `laneHolder` names the route whose work is ON the host thread right now (null when free) and `laneHeldMs` how long it has held; `marshalQueueDepth`/`marshalLastDrainMs`/`marshalLastEnqueueMs` are the layer under it - what is WAITING and whether the drain is running at all. Both served without the host thread, which is the point (#12: seed 2009959200 reads holder null AND depth 0 AND both ages climbing together through a four-minute jam - the marshal machinery is idle, so the freeze is upstream of it). A lane hold past five seconds also writes itself into the log |

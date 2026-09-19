@@ -52,6 +52,14 @@ export interface HostMarker extends HostRange {
   severity: HostSeverity;
   message: string;
   code?: string;
+
+  /**
+   * `unnecessary` where the range is code the module does not need - the analyzer's dead-code
+   * rules. Monaco fades a marker carrying that tag instead of relying on its squiggle alone,
+   * which is the difference between forty findings reading as forty mistakes and forty lines
+   * reading as doing nothing.
+   */
+  tag?: string;
 }
 
 export type HostMessage =
@@ -2830,6 +2838,12 @@ export class EditorBridge {
         endLineNumber: endLine,
         endColumn,
         ...(marker.code === undefined ? {} : { code: marker.code }),
+        // THE TAG IS THE WHOLE OF IT. Monaco hangs `squiggly-inline-unnecessary` on the range
+        // and fades it from its own `editorUnnecessaryCode.opacity` colour, whose dark default
+        // is #000a - the 0.667 a rendered line measures. This page adds no CSS for it: a rule
+        // of ours lost to monaco's injected one anyway, and the lever, if the strength is ever
+        // wrong, is that theme colour in theme.ts rather than a stylesheet fighting it.
+        ...(marker.tag === "unnecessary" ? { tags: [monaco.MarkerTag.Unnecessary] } : {}),
       };
     });
     monaco.editor.setModelMarkers(model, MARKER_OWNER, converted);

@@ -1445,7 +1445,15 @@ public sealed record DebugFindingRow(
     [property: JsonPropertyName("column")] int Column,
     [property: JsonPropertyName("severity")] string Severity,
     [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("message")] string Message);
+    [property: JsonPropertyName("message")] string Message,
+
+    /// <summary>
+    /// `unnecessary` where the range is code the module does not need, null otherwise. The
+    /// surface fades such a range rather than underlining it, so a caller that draws findings
+    /// can draw them the way the editor does - which is the api mirroring the UI rather than
+    /// describing a different product.
+    /// </summary>
+    [property: JsonPropertyName("tag")] string? Tag = null);
 
 public sealed record DebugProblemsReply(
     [property: JsonPropertyName("findings")] DebugFindingRow[] Findings);

@@ -220,6 +220,31 @@ try {
   }
   check("and the EDITOR draws it as information, not as an error",
     drawn?.severity === "info", drawn ? `drawn as ${drawn.severity}` : "no squiggle on the line");
+
+  // AND IT IS FADED, which is the difference between forty findings reading as forty mistakes
+  // and forty lines reading as doing nothing. The analyzer tags its dead-code rules
+  // `unnecessary`, the engine attaches that per finding, the shim carries it on the marker and
+  // monaco fades the range from its own editorUnnecessaryCode.opacity. Asked of the RENDERED
+  // line, because every one of those four links has to hold for the developer to see anything.
+  const faded = await api.ask(`JSON.stringify((() => {
+    const ranges = [...document.querySelectorAll('.monaco-editor .squiggly-inline-unnecessary')];
+    const first = ranges[0] ?? null;
+    return {
+      names: ranges.map((one) => (one.textContent ?? '').trim()),
+      opacity: first ? getComputedStyle(first).opacity : null,
+    };
+  })())`);
+  const fade = typeof faded === "string" ? JSON.parse(faded) : faded;
+  check("and the range is faded, not merely marked",
+    (fade?.names ?? []).some((one) => /neverUsed/i.test(one)) && Number(fade?.opacity) < 1,
+    `${JSON.stringify(fade?.names ?? [])} at opacity ${fade?.opacity}`);
+
+  // The api says the same thing the surface draws, so an agent listing findings can tell dead
+  // code from a mistake without a table of rule names of its own.
+  const tagged = (await api.problems(NAME)).findings ?? [];
+  check("and the problems route carries the tag the surface drew",
+    tagged.some((one) => one.code === "unused-variable" && one.tag === "unnecessary"),
+    JSON.stringify(tagged.map((one) => `${one.code}:${one.tag ?? "-"}`)));
 } finally {
   await api.analysis({ rule: "option-explicit-missing", severity: "default" }).catch(() => {});
   await api.command("reset").catch(() => {});

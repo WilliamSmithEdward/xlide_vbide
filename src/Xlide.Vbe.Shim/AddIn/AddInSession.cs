@@ -11530,7 +11530,8 @@ internal sealed partial class AddInSession : IDisposable
                     f.EndColumn,
                     f.Severity,
                     f.Message,
-                    f.Code))
+                    f.Code,
+                    f.Tag))
                 .ToArray();
 
             surface.ShowDiagnostics(module, project, markers);

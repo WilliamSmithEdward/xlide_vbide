@@ -210,7 +210,13 @@ public sealed record EditorMarker(
     [property: JsonPropertyName("endColumn")] int EndColumn,
     [property: JsonPropertyName("severity")] string Severity,
     [property: JsonPropertyName("message")] string Message,
-    [property: JsonPropertyName("code")] string? Code);
+    [property: JsonPropertyName("code")] string? Code,
+
+    /// <summary>
+    /// `unnecessary` where the range is code the module does not need. The page fades it rather
+    /// than underlining it; everything else leaves this null.
+    /// </summary>
+    [property: JsonPropertyName("tag")] string? Tag = null);
 
 /// <summary>Replaces every squiggle shown on one open module's model.</summary>
 public sealed record SetDiagnosticsMessage(

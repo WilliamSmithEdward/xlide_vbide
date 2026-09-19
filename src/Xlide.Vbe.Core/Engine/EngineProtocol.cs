@@ -38,7 +38,14 @@ public sealed record EngineDiagnostic(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("severity")] string Severity,
     [property: JsonPropertyName("span")] EngineSpan Span,
-    [property: JsonPropertyName("at")] EnginePosition? At = null);
+    [property: JsonPropertyName("at")] EnginePosition? At = null,
+
+    /// <summary>
+    /// How the finding is to be PRESENTED, where the severity does not say it: `unnecessary` is
+    /// code the module does not need, which an editor fades rather than underlines. Null for
+    /// everything else, and for any engine older than the field.
+    /// </summary>
+    [property: JsonPropertyName("tag")] string? Tag = null);
 
 public sealed record EngineSpan(
     [property: JsonPropertyName("start")] int Start,

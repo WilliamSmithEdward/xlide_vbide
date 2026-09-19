@@ -151,6 +151,18 @@ export interface DiagnosticPayload {
      * Converting here is the only place that cannot be wrong, because this is where the text is.
      */
     at: DiagnosticPosition;
+
+    /**
+     * How the finding should be PRESENTED, where that is not the severity's business.
+     *
+     * `unnecessary` is code the module does not need - the four dead-code rules - and an editor
+     * fades it rather than underlining it, which is the whole difference between "here are forty
+     * three things you got wrong" and "these forty three lines are doing nothing". The analyzer
+     * carries it per rule in its own metadata; it is attached per FINDING here so a caller needs
+     * nothing but the finding to draw it correctly, and cannot draw it wrongly by asking for the
+     * catalog too late.
+     */
+    tag?: 'unnecessary';
 }
 
 /** A span in one-based lines and columns, which is what an editor draws with. */

@@ -109,6 +109,26 @@ import {
 /** How many recent versions of one module's text are held by instance. See stableSource. */
 const STABLE_SOURCES_HELD = 3;
 
+/**
+ * Rule code to the presentation tag its metadata carries, built once.
+ *
+ * The analyzer marks its dead-code rules `unnecessary` so an editor can fade the range instead
+ * of underlining it. Only the analyzer knows which rules those are, and it says so per rule; a
+ * finding says only its code. Answering the question here, where both are in hand, keeps every
+ * caller from having to fetch the catalog and join the two - and from getting it wrong quietly,
+ * which is what a hardcoded list of four rule names in a UI would eventually do.
+ */
+const PRESENTATION_TAGS: ReadonlyMap<string, 'unnecessary'> = new Map(
+    [...Object.values(DIAGNOSTIC_RULES), ...Object.values(STRUCTURAL_DIAGNOSTIC_RULES)]
+        .flatMap((rule) => {
+            const tag = (rule as { tag?: string }).tag;
+            return tag === 'unnecessary' ? [[rule.code, tag] as const] : [];
+        }));
+
+function presentationTagFor(code: string | undefined): 'unnecessary' | undefined {
+    return code === undefined ? undefined : PRESENTATION_TAGS.get(code);
+}
+
 function liveKey(projectId: string, moduleName: string): string {
     return `${projectId}\0${moduleName.toLowerCase()}`;
 }
@@ -1419,6 +1439,8 @@ export class Dispatcher {
                 const start = toLineColumn(starts, diagnostic.span.start);
                 const end = toLineColumn(starts, diagnostic.span.end);
 
+                const tag = presentationTagFor(diagnostic.code);
+
                 return {
                     code: diagnostic.code,
                     message: diagnostic.message,
@@ -1430,6 +1452,7 @@ export class Dispatcher {
                         endLine: end.line,
                         endColumn: end.column,
                     },
+                    ...(tag === undefined ? {} : { tag }),
                 };
             }),
             mode,

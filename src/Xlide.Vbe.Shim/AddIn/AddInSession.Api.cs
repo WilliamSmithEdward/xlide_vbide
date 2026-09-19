@@ -1940,7 +1940,8 @@ internal sealed partial class AddInSession
                         || string.Equals(finding.Module, onlyModule, StringComparison.OrdinalIgnoreCase))
                     .Select(finding => new DebugFindingRow(
                         finding.Module, finding.StartLine, finding.StartColumn,
-                        finding.Severity, finding.Code ?? string.Empty, finding.Message))
+                        finding.Severity, finding.Code ?? string.Empty, finding.Message,
+                        finding.Tag))
                     .ToArray();
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
