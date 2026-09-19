@@ -188,6 +188,38 @@ try {
   const written = await hostTextWhen(NAME, (one) => /Option Explicit/i.test(one));
   check("and the host holds exactly Option Explicit above the code it was inserted over",
     written.trimEnd() === expected, JSON.stringify(written.slice(0, 160)));
+
+  /* ---- an information rule is DRAWN as information ------------------------------------------- */
+
+  // The pane and the editor read the same finding by different paths, and for a long time they
+  // disagreed about one word. The analyzer calls its third severity `information`; the page's
+  // marker map knew only `info` and fell back to ERROR, so every information finding was a red
+  // squiggle on code that is perfectly valid - `event-handler-module-scope` since it arrived, and
+  // then all four dead-code rules from 8.3.0, which put an error on every unused variable in a
+  // project (2026-09-19). The pane was right only by luck: its grouping has a default arm.
+  //
+  // So this asks the EDITOR, through the same getModelMarkers call that draws the squiggle.
+  await api.writeModule(NAME, [
+    "Option Explicit", "", "Public Sub Dead()", "    Dim neverUsed As Long", "End Sub",
+  ].join(CRLF), project.projectId);
+
+  const informational = await problemsFor(NAME,
+    (rows) => rows.some((one) => one.code === "unused-variable"));
+  check("an unused local is reported, and the host calls it information",
+    informational.rows.some((one) => one.code === "unused-variable" && one.severity === "information"),
+    codes(informational.rows));
+
+  await api.pane("open", { module: NAME, project: project.projectId });
+  let drawn = null;
+  const drawnBy = Date.now() + 15000;
+  while (Date.now() < drawnBy) {
+    const at = await api.revealing({ line: 4, column: 12 });
+    drawn = (at?.squiggles ?? []).find((one) => one.code === "unused-variable") ?? null;
+    if (drawn) { break; }
+    await wait(300);
+  }
+  check("and the EDITOR draws it as information, not as an error",
+    drawn?.severity === "info", drawn ? `drawn as ${drawn.severity}` : "no squiggle on the line");
 } finally {
   await api.analysis({ rule: "option-explicit-missing", severity: "default" }).catch(() => {});
   await api.command("reset").catch(() => {});

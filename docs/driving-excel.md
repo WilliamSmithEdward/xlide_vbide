@@ -660,6 +660,14 @@ await api.act("undo");                          // so does plain undo, which is 
 await api.at("Recalculate");                    // colour as painted, and the markers on it
 // -> { word, rendered, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, ...}] }
 //
+// A SQUIGGLE'S SEVERITY IS THE PAGE'S WORD, NOT THE HOST'S. The `problems` route answers with the
+// analyzer's own vocabulary, whose third severity is `information`; a squiggle answers monaco's,
+// where it is `info`. The page translates on the way in, so a driver comparing the two reads
+// `information` from the route and `info` off the line, for the same finding. They disagreed
+// silently until 2026-09-19: the page's marker map knew only `info` and drew everything else as
+// an ERROR, which put red squiggles under every unused variable and every
+// `event-handler-module-scope` (lessons.md 88).
+//
 // `word` matches case-insensitively, because VBA does: the host RECASES identifiers on write, so
 // `total = 1` comes back `Total = 1` and a case-sensitive lookup misses a word that is on screen.
 // It matches a WHOLE word, on monaco's own separators. It was a substring search until

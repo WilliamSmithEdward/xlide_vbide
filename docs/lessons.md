@@ -2661,3 +2661,34 @@ NAMES rather than what it FINDS - the same shape as 85 and 86, one layer out.
 And a file set aside by hand is litter with a deadline: it was created during
 a publish that could not overwrite a locked file, it was never cleaned up, and
 the next thing to read that folder believed it.
+
+## 88. One word, two readers, two different guesses
+
+The analyzer calls its third severity `information`. This page says `info` -
+its marker map, the Problems pane's sort rank, and the pane's three toggles.
+Nobody translated, so each reader guessed, and they guessed differently.
+
+The pane's grouping ends in a `default` arm that returns "messages", so it was
+right by luck. Its sort rank is a lookup with no default, so an information
+row ranked `undefined`. And the marker map, the one that actually draws, read
+`SEVERITY[severity] ?? Error` - so every information finding was painted as a
+RED ERROR SQUIGGLE on perfectly valid code.
+
+That has been shipping. `event-handler-module-scope` is an information rule
+and 0.16.2 draws it as an error today. The analyzer's 8.3.0 dead-code rules
+would have multiplied it: an error under every unused variable, every
+assigned-never-read, every Private procedure nothing calls. It was found while
+checking whether a release note could claim the editor "fades" dead code -
+the claim was false, and the truth was worse than not fading.
+
+Translated once now, where findings enter the page, so every reader past that
+point sees one vocabulary. An unknown severity is drawn as information and
+said once in the console, because the failure here was not the missing word:
+it was guessing THE MOST ALARMING READING for a word nobody knew. A default
+that shouts is worse than one that whispers, when what it is describing is
+code the user just wrote and there is nothing wrong with.
+
+The pane and the editor read the same finding by different paths. Any check
+that asks only one of them proves nothing about the other, which is why the
+live suite now asks the EDITOR, through the same getModelMarkers call that
+draws the line.

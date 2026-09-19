@@ -43,6 +43,9 @@ export interface HostTextChange extends HostRange {
   text: string;
 }
 
+// The PAGE's vocabulary. The analyzer's own word for the third one is `information`, and that is
+// what arrives on the wire - pageSeverity() translates it where findings enter, so everything
+// past that point may rely on these four.
 export type HostSeverity = "error" | "warning" | "info" | "hint";
 
 export interface HostMarker extends HostRange {
@@ -646,6 +649,42 @@ const SEVERITY: Record<HostSeverity, monaco.MarkerSeverity> = {
   info: monaco.MarkerSeverity.Info,
   hint: monaco.MarkerSeverity.Hint,
 };
+
+/** Severity words this page has already said it does not know, so each is reported once. */
+const unknownSeverities = new Set<string>();
+
+/**
+ * A host severity in this page's own vocabulary, translated ONCE where findings enter the page.
+ *
+ * The analyzer calls its third severity `information`; this page says `info` - the marker map
+ * above, the Problems pane's rank and its three toggles. The word was never translated, so each
+ * consumer guessed, and they guessed differently: the pane's grouping fell through to Messages,
+ * which happened to be right; its sort rank came back undefined; and the marker map fell back to
+ * ERROR. Every `information` finding was drawn in the editor as a red error squiggle - since
+ * `event-handler-module-scope` arrived, and then the four dead-code rules in 8.3.0, which would
+ * have put an error on every unused variable in a project (2026-09-19).
+ *
+ * And a word nobody here knows is NOT an error. Guessing the most alarming reading is what made
+ * a vocabulary mismatch look like broken code on valid lines, so an unknown severity is drawn as
+ * information and said once in the console, the way an unhandled host message is.
+ */
+export function pageSeverity(severity: string): HostSeverity {
+  switch (severity) {
+    case "error":
+    case "warning":
+    case "info":
+    case "hint":
+      return severity;
+    case "information":
+      return "info";
+    default:
+      if (!unknownSeverities.has(severity)) {
+        unknownSeverities.add(severity);
+        console.warn("[xlide] unknown finding severity, drawn as information", severity);
+      }
+      return "info";
+  }
+}
 
 
 /** How many answers the colouring and outline caches hold: a tab strip a developer moves in. */
@@ -2075,13 +2114,15 @@ export class EditorBridge {
         return;
       }
       case "setFindings":
-        this.shell?.setFindings(message.findings);
+        this.shell?.setFindings(message.findings.map((finding) =>
+          ({ ...finding, severity: pageSeverity(finding.severity) })));
         return;
       case "setProjects":
         this.shell?.setProjects(message.projects, message.host);
         return;
       case "setDiagnostics":
-        this.setDiagnostics(message.moduleName, message.project ?? null, message.markers);
+        this.setDiagnostics(message.moduleName, message.project ?? null, message.markers.map((marker) =>
+          ({ ...marker, severity: pageSeverity(marker.severity) })));
         // Semantics ride the same analysis the markers do, and monaco re-queries tokens only
         // on EDITS - so colouring computed before the project seeded stood stale until the
         // developer happened to type (caught 2026-08-19: NameBox.SetFocus plain in a fresh
@@ -2780,7 +2821,9 @@ export class EditorBridge {
         lastNonWhitespaceColumn: (line) => model.getLineLastNonWhitespaceColumn(line),
       }, marker);
       return {
-        severity: SEVERITY[marker.severity] ?? monaco.MarkerSeverity.Error,
+        // Translated on the way in (pageSeverity), so this lookup always lands. Info if it ever
+        // does not: an unknown severity drawn as an ERROR is the defect this replaced.
+        severity: SEVERITY[marker.severity] ?? monaco.MarkerSeverity.Info,
         message: marker.message,
         startLineNumber: marker.startLine,
         startColumn: marker.startColumn,
