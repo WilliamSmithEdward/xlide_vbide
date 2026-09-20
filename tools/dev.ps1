@@ -193,8 +193,18 @@ if (-not $NoBuild) {
         # analyzer counts as engine source: it lives in the neighbouring checkout and is bundled
         # INTO this executable, so a pull over there changes what the add-in runs without touching
         # a file in this repository. The gate watches both; so does this.
+        #
+        # AND THE SOURCES IT WAS BUILT FROM, which is the pin when one is in use. Comparing a
+        # pinned build against the working tree next door asks the wrong question: that tree is
+        # edited all day and always looks newer, while the build cannot contain those edits at
+        # all. This was the fourth place resolving the analyzer path and the only one the pin
+        # missed, so a republish refused on a file the owner had just saved (2026-09-19).
         $engineSources = @(Join-Path $repoRoot 'engine\src')
-        $analyzerSources = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+        $analyzerSources = if ($env:XLIDE_ANALYZER_ROOT) {
+            $env:XLIDE_ANALYZER_ROOT
+        } else {
+            Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+        }
         if (Test-Path $analyzerSources) { $engineSources += $analyzerSources }
 
         $newestEngineSource = Get-ChildItem $engineSources -Recurse -Include *.ts |
