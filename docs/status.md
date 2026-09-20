@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-13, at v0.16.2.
+Updated 2026-09-19, at v0.17.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -169,7 +169,7 @@ after them find only Excel.
 
 Counts move, so they are given as of this line rather than as standing facts: 675 unit tests,
 68 api routes of which 66 are driven by one of the 73 suites the gate runs, 2 left out on
-purpose.
+purpose, and 133 analyzer rules in the bundled engine.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
 prove the running build is the one just made, in about a second and with no restart.
