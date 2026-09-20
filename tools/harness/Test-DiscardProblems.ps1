@@ -23,8 +23,16 @@ $ErrorActionPreference = 'Continue'
 $checks = [ordered] @{}
 function Check([string] $name, [scriptblock] $test) {
     try {
-        $result = & $test
-        $checks[$name] = if ($result) { 'PASS' } else { 'FAIL' }
+        # THE VERDICT IS THE LAST THING THE BLOCK SAID, not everything it said. `& $test`
+        # collects the whole output stream, so a block that explains itself before returning
+        # hands back @('...', $false) - and `if ($result)` on a non-empty array is TRUE, which
+        # makes a check report PASS exactly when it has something to complain about. Found in
+        # Test-DebugApi.ps1 on 2026-09-19, where it had been hiding a route walk that flagged
+        # fifteen routes every run; these three carry the same helper.
+        $said = @(& $test)
+        $verdict = if ($said.Count -eq 0) { $false } else { $said[-1] }
+        $checks[$name] = if ($verdict) { 'PASS' } else { 'FAIL' }
+        if ($said.Count -gt 1) { $said[0..($said.Count - 2)] | ForEach-Object { Write-Output "  $_" } }
     } catch {
         $checks[$name] = "FAIL ($($_.Exception.Message))"
     }

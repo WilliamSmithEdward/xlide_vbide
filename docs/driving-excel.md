@@ -2638,6 +2638,14 @@ This is worth caring about twice over: needing a security setting changed before
 is a real adoption barrier, and xlide does not have one - and a harness that leaves the setting off
 is a harness that cannot be blamed for what a macro does while it runs.
 
+**Writing a check in the PowerShell probes.** `Test-DebugApi.ps1` and its three siblings share a
+`Check name { ... }` helper, and its contract is that **the block's LAST value is the verdict**;
+anything else the block writes is printed under that check as its detail. Write freely to explain
+a failure - where the caret actually was, which routes drifted - and end on the boolean. It was
+`$result = & $test` until 2026-09-19, which collects the whole output stream, so a block that
+explained itself returned a non-empty array and reported PASS for having something to complain
+about (lessons.md 89).
+
 **Verified 2026-08-07, with the box unticked and `AccessVBOM = 0`:**
 
 | | |

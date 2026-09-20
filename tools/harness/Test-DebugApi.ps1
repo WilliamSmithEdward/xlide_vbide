@@ -11,10 +11,33 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $checks = [ordered] @{}
+
+# Whatever a check wrote before its verdict, kept so it can be printed under that check.
+$notes = @{}
 function Check([string] $name, [scriptblock] $test) {
     try {
-        $result = & $test
-        $checks[$name] = if ($result) { 'PASS' } else { 'FAIL' }
+        # THE VERDICT IS THE LAST THING THE BLOCK SAID, not everything it said.
+        #
+        # `& $test` collects the block's whole output stream, so a block that explains itself
+        # before returning hands back @('the caret is on ...', $false) - and `if ($result)` on a
+        # non-empty array is TRUE. A check that speaks up only when something is wrong then
+        # reports PASS exactly when it has something to complain about.
+        #
+        # 'caret lands inside the procedure to be run' had been built that way since 2026-08-09,
+        # and adding a diagnostic to the breakpoint check turned a genuine failure green in front
+        # of me (2026-09-19). Taking the last value is what every one of these blocks already
+        # means by its final line.
+        $said = @(& $test)
+        $verdict = if ($said.Count -eq 0) { $false } else { $said[-1] }
+        $checks[$name] = if ($verdict) { 'PASS' } else { 'FAIL' }
+
+        # AND WHAT IT SAID ON THE WAY IS PRINTED, under the check it belongs to. Those lines
+        # were being collected here and dropped, so the caret check's explanation of where the
+        # caret actually was - written for exactly the morning someone needs it - had never once
+        # reached anybody's screen.
+        if ($said.Count -gt 1) {
+            $notes[$name] = @($said[0..($said.Count - 2)] | ForEach-Object { "$_" })
+        }
     } catch {
         $checks[$name] = "FAIL ($($_.Exception.Message))"
     }
@@ -280,6 +303,34 @@ Check 'a run reaches the breakpoint and state says break' {
         $s = Invoke-RestMethod "$api/state" -TimeoutSec 5
     } while ($s.debugMode -ne 'break' -and (Get-Date) -lt $deadline)
     $script:reachedBreak = $s.debugMode -eq 'break'
+
+    # A TIMEOUT HAS TO SAY WHAT IT SAW. This waited 25 seconds and then answered a bare FAIL,
+    # which is the same answer for a host in design mode (where a standing breakpoint is
+    # discarded silently and an idle editor looks identical), a modal standing in front of the
+    # run, a project that will not compile, and a machine that was merely slow. It failed once
+    # in a release gate and passed by hand straight afterwards, and there was nothing in the
+    # output to tell those apart (2026-09-19). Everything below is already on the door.
+    if (-not $script:reachedBreak) {
+        # Windows PowerShell 5.1 runs this file (the gate calls powershell.exe), so no ternary
+        # and no null-coalescing here.
+        $standing = $null
+        try { $standing = (Invoke-RestMethod "$api/dialogs" -TimeoutSec 5).dialogs } catch { }
+        $where = $null
+        try { $where = Invoke-RestMethod "$api/native" -TimeoutSec 5 } catch { }
+        $compiled = $null
+        try { $compiled = Invoke-RestMethod "$api/command?name=compile" -Method Post -TimeoutSec 20 } catch { }
+
+        $caret = 'unknown'
+        if ($null -ne $where) { $caret = "$($where.activeModule):$($where.caretLine)" }
+        $modals = ($standing | ForEach-Object { $_.title }) -join ', '
+        if ([string]::IsNullOrWhiteSpace($modals)) { $modals = 'none' }
+        $compileSaid = 'not asked'
+        if ($null -ne $compiled) { $compileSaid = "ran=$($compiled.ran) $($compiled.detail)" }
+
+        Write-Output ("     never broke: debugMode '{0}' after 25s, caret {1}, dialogs {2}, compile: {3}" -f `
+            $s.debugMode, $caret, $modals, $compileSaid)
+    }
+
     $script:reachedBreak
 }
 
@@ -647,13 +698,35 @@ Check 'every breadcrumb the agent hands out resolves' {
     $bad.Count -eq 0
 }
 
-Check 'every route the table calls safe answers as itself, not as unknown' {
+Check 'every route that needs no arguments answers as itself, not as unknown' {
     # The drift guard: a row whose route the switch no longer serves answers the default arm's
-    # "no route" refusal, and this walk catches it. Only bareGetIsSafe rows are called bare.
+    # "no route" refusal, and this walk catches it.
+    #
+    # ONLY THE ROWS THAT CAN BE CALLED BARE, which is not the same set as bareGetIsSafe. That
+    # column says a bare GET READS WITHOUT ACTING; it promises no answer, and fifteen rows that
+    # need arguments refuse one - `mark` wants text, `module` wants name. The door answers a
+    # missing argument and an unknown route with the SAME sentence, deliberately, so calling
+    # those bare and reading "no route" says nothing at all about drift. This walked them anyway
+    # and named all fifteen, which nobody ever saw: the block wrote its list and then returned
+    # $false, and Check read the whole output stream as the verdict, so a non-empty complaint
+    # was TRUE (2026-09-19; the helper takes the last value now).
+    #
+    # A row whose args column is `-`, or whose arguments are every one optional, is one where
+    # that refusal really would mean the switch has stopped serving the route.
     $r = Invoke-RestMethod "$api/agent/routes" -TimeoutSec 8
     if ($r.count -lt 50) { return $false }
     $bad = @()
-    foreach ($row in ($r.routes | Where-Object { $_.bareGetIsSafe })) {
+    $callable = @($r.routes | Where-Object {
+        if (-not $_.bareGetIsSafe) { return $false }
+        $spelled = "$($_.args)".Trim()
+        if ($spelled -eq '' -or $spelled -eq '-') { return $true }
+        $required = @($spelled -split '\s+' | Where-Object {
+            $_ -and $_ -ne '-' -and -not $_.EndsWith('?') -and -not $_.StartsWith('body:')
+        })
+        $required.Count -eq 0
+    })
+    if ($callable.Count -lt 10) { Write-Output "    only $($callable.Count) route(s) can be called bare; the args column has changed shape" }
+    foreach ($row in $callable) {
         try {
             $answer = Invoke-WebRequest "$api/$($row.name)" -UseBasicParsing -TimeoutSec 20
             if ($answer.Content -match 'no route ') { $bad += $row.name }
@@ -746,7 +819,10 @@ Check 'an assignment to the door is refused, not executed' {
 }
 
 Write-Output ''
-foreach ($name in $checks.Keys) { "  {0,-52} {1}" -f $name, $checks[$name] }
+foreach ($name in $checks.Keys) {
+    "  {0,-52} {1}" -f $name, $checks[$name]
+    if ($notes.ContainsKey($name)) { $notes[$name] | ForEach-Object { "  $_" } }
+}
 if ($script:modalDetail) { Write-Output "  modal guard: $script:modalDetail" }
 $failed = @($checks.Values | Where-Object { $_ -ne 'PASS' })
 Write-Output ''

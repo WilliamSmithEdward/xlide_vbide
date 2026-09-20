@@ -2692,3 +2692,41 @@ The pane and the editor read the same finding by different paths. Any check
 that asks only one of them proves nothing about the other, which is why the
 live suite now asks the EDITOR, through the same getModelMarkers call that
 draws the line.
+
+## 89. The check reported PASS because it had something to complain about
+
+The gate's own probe had a check that could not fail, and it had been hiding
+a complaint it made on every single run.
+
+`Check` ran its block as `$result = & $test`. That collects the block's whole
+OUTPUT STREAM, not its last value. So a block that explains itself before
+returning - writes a line, then returns `$false` - hands back
+`@('drifted: ...', $false)`, and `if ($result)` on a non-empty array is TRUE.
+A check that speaks up only when something is wrong therefore reported PASS
+exactly when it had something to say, and stayed silent besides: the lines it
+wrote were collected here and dropped, never printed.
+
+Two checks were built that way. The caret check's explanation of where the
+caret actually was, written for precisely the morning someone needs it, had
+never once reached a screen. And the route walk had been reporting fifteen
+drifted routes on every run since it was written, seen by nobody.
+
+Found by adding a diagnostic to a third check and watching a genuine failure
+turn green in front of me. The verdict is the last value now, and whatever the
+block said on the way is printed under it.
+
+**The fifteen routes were not drift.** `bareGetIsSafe` says a bare GET READS
+WITHOUT ACTING; it does not promise an answer, and those rows require
+arguments - `mark` wants text, `module` wants name. Worse, the check could not
+have told the difference if it tried: the door answers a missing argument and
+an unknown route with the same sentence, deliberately, and both fall through
+the same default arm, so "no route" from a guarded route says nothing at all.
+The walk now calls only rows whose arguments are absent or every one optional,
+which is the set where that refusal really would mean the switch stopped
+serving a route: 33 of them, and pointing them all at a name that does not
+exist makes the guard name all 33.
+
+The shape: a check whose failure path writes something is a check whose
+verdict has to be read carefully, in any language where a function returns
+everything it emitted. And a flag means what its own documentation says, not
+what a check wishes it meant.
