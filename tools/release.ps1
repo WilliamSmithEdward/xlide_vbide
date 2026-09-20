@@ -78,9 +78,17 @@ if ($stale.Count -gt 0) {
         'engine. Close Excel, run `npm run package --prefix engine`, and start again.')
 }
 
-$analyzerCheckout = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+$analyzerCheckout = if ($env:XLIDE_ANALYZER_ROOT) {
+    $env:XLIDE_ANALYZER_ROOT
+} else {
+    Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+}
 if (Test-Path $analyzerCheckout) {
-    Write-Host '  packaged after every engine source, analyzer included'
+    if ($env:XLIDE_ANALYZER_ROOT) {
+        Write-Host "  packaged after every engine source, analyzer pinned at $analyzerCheckout"
+    } else {
+        Write-Host '  packaged after every engine source, analyzer included'
+    }
 } else {
     Write-Warning ('the analyzer checkout was not found, so the engine was only checked against ' +
         'engine\src. The analyzer is bundled INTO the executable, so this is a weaker answer than ' +

@@ -2730,3 +2730,42 @@ The shape: a check whose failure path writes something is a check whose
 verdict has to be read carefully, in any language where a function returns
 everything it emitted. And a flag means what its own documentation says, not
 what a check wishes it meant.
+
+## 90. The gate passed an engine with somebody's half-written work inside it
+
+The engine bundles the analyzer from the neighbouring `xlide_vscode` checkout,
+which is a working tree its author works in all day. That coupling has bitten
+three releases. The first two were refusals: the currency guard compares file
+times, an edit in progress makes the packaged engine look stale, and 0.13.0
+and 0.14.0 each stopped until the closure was proved to exclude the edits.
+
+v0.17.0 was worse, because nothing refused anything. The deep gate packaged
+the engine at 17:00 and reported 29 of 29. Two files the owner had saved at
+16:58 - `zip.ts` and `pptContainer.ts`, both in our bundle - were inside that
+build. The gate's verdict was true of bits that were never meant to exist:
+committed 9.0.0 plus two minutes of somebody's afternoon.
+
+Nothing detected it. It surfaced only because the release was being built from
+a PIN by then, and the pinned bundle hashed differently from the one the gate
+had run. Without that comparison the installer would have shipped, and "the
+gate passed" would have been a statement about a different artifact.
+
+`tools\Pin-Analyzer.ps1` makes the pin: it copies the source repository's
+object store, checks the commit out, and refuses to hand back a root that is
+not pristine. It copies rather than clones because `git clone` reads the
+source's `.git` as a path of its own and rejects it as dubious ownership
+whenever the two checkouts were made by different accounts - and the remedy
+git suggests is a GLOBAL config entry, a shared setting changed to do one
+build. A copied store belongs to the building user and needs no trust, and it
+carries committed objects only, so work in progress is neither included nor
+disturbed.
+
+`XLIDE_ANALYZER_ROOT` is then read by `engine\build.mjs`, `Test-EngineCurrent.ps1`,
+`verify.ps1` and `release.ps1` alike, so a pinned build is compared against the
+sources it was actually built from. Comparing it against the tree next door
+asks the wrong question: that tree is edited all day, so it always looks newer
+than a build that cannot contain those edits at all.
+
+The rule this leaves: an artifact that ships has to be the artifact that
+passed, and a timestamp is not evidence that it is. The gate was re-run
+against the pinned engine before anything was attached.

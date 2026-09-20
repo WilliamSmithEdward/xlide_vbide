@@ -40,7 +40,17 @@ if (-not (Test-Path $exe)) {
 $builtAt = (Get-Item $exe).LastWriteTimeUtc
 
 $watched = @(Join-Path $engineRoot 'src')
-$analyzer = Join-Path (Split-Path -Parent $RepoRoot) 'xlide_vscode\src'
+
+# THE SOURCES THE ENGINE WAS ACTUALLY BUILT FROM, which is the pin when one was used. Comparing a
+# pinned build against the working tree next door asks the wrong question and answers it wrongly:
+# the tree is edited all day, so it always looks newer, and the release it blocks is one whose
+# engine cannot contain those edits at all. XLIDE_ANALYZER_ROOT is set by whoever ran the build
+# (see tools\Pin-Analyzer.ps1) and is read the same way by engine\build.mjs.
+$analyzer = if ($env:XLIDE_ANALYZER_ROOT) {
+    $env:XLIDE_ANALYZER_ROOT
+} else {
+    Join-Path (Split-Path -Parent $RepoRoot) 'xlide_vscode\src'
+}
 if (Test-Path $analyzer) { $watched += $analyzer }
 
 # Emitted so a caller can say which coverage it got. An absent analyzer checkout is not a failure

@@ -115,8 +115,20 @@ Step 'engine executable is current' {
 
     $newer = @(& (Join-Path $PSScriptRoot 'Test-EngineCurrent.ps1') -RepoRoot $repoRoot)
 
-    $analyzerPath = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
-    $covers = if (Test-Path $analyzerPath) { 'analyzer included' } else { 'the analyzer checkout was not found' }
+    # The pin when one was used, the checkout next door otherwise; Test-EngineCurrent.ps1 reads
+    # the same variable, so the answer here names whatever it actually compared against.
+    $analyzerPath = if ($env:XLIDE_ANALYZER_ROOT) {
+        $env:XLIDE_ANALYZER_ROOT
+    } else {
+        Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+    }
+    $covers = if (-not (Test-Path $analyzerPath)) {
+        'the analyzer checkout was not found'
+    } elseif ($env:XLIDE_ANALYZER_ROOT) {
+        'analyzer pinned'
+    } else {
+        'analyzer included'
+    }
 
     if ($newer.Count -eq 0) {
         return "packaged after every engine source, $covers"

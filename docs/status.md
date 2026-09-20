@@ -31,8 +31,17 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 - **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe`, 31.6 MB,
   per user, no administrator rights, nothing required beforehand. It refuses to build without a
   language engine or a built page. `tools\release.ps1` attaches it to a tag, refusing to
-  ship an engine older than the analyzer checkout it was built from, and hashing the uploaded
+  ship an engine older than the analyzer sources it was built from, and hashing the uploaded
   asset against the local one.
+- **A release builds the engine from a PINNED analyzer.** The engine bundles the editor
+  extension's analyzer from the neighbouring checkout, which is a working tree somebody is
+  usually working in - and three releases were blocked or contaminated by that. `v0.17.0` was the
+  third: the gate packaged an engine at 17:00 and two of the owner's in-progress files, saved at
+  16:58, were inside it, so a green gate was a verdict about bits nobody meant to ship.
+  `tools\Pin-Analyzer.ps1 -Ref <commit>` copies that repository's object store, checks out the
+  commit, and verifies the result is pristine; `XLIDE_ANALYZER_ROOT` then points the engine build
+  and every currency check at the pin instead of at the working tree. Unset, everything builds
+  against the checkout next door as before, which is what day-to-day work wants.
 - **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
   put back when the add-in unloads.
 - **The explorer has two layouts.** Tree is the flat list by kind; Folders groups modules by the

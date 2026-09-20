@@ -11,7 +11,16 @@ import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const analyzerRoot = resolve(here, '..', '..', 'xlide_vscode', 'src');
+// THE SIBLING CHECKOUT BY DEFAULT, A PIN WHEN ONE IS ASKED FOR. That checkout is a working tree
+// somebody is usually working in, and a release cannot be built from a tree that is mid-edit:
+// the currency guard compares file times, so any edit in progress makes the packaged engine look
+// stale, and repackaging to satisfy it would ship whatever was half-written. `tools\Pin-Analyzer.ps1`
+// clones that repository at one commit and prints the root; XLIDE_ANALYZER_ROOT points here at it.
+// Day to day nobody sets it and this builds against the checkout next door, which is the whole
+// point of the coupling.
+const analyzerRoot = process.env.XLIDE_ANALYZER_ROOT
+    ? resolve(process.env.XLIDE_ANALYZER_ROOT)
+    : resolve(here, '..', '..', 'xlide_vscode', 'src');
 const outDir = join(here, 'dist');
 const bundlePath = join(outDir, 'engine.cjs');
 const exePath = join(outDir, 'xlide-engine.exe');
