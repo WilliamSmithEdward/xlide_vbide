@@ -99,15 +99,23 @@ by its id - and waits for it to go. Every other Excel stays, whoever started it:
 another automation's hidden instances, which a stop by name was ending mid-statement (#24). When
 one stays, the fixture starts in a process of its own, and the launcher says which it left.
 
-**Which Excel is ours is read from the command line first, and only then over COM.** An Excel
-launched on a workbook under `artifacts\fixtures`, `artifacts\chaos` or
-`tools\harness\fixtures` is this harness's whether or not its object model will answer, and
-there are seconds in every launch when it will not - three files opening at once, a modal up, a
-teardown half done. That window used to be read as "a stranger's", the instance was left
-standing, and the next group opened one of the same workbooks beside it, at which point Excel
-asked the developer whether to open it read-only. A `Win32_Process` command line settles it with
-no COM, no window and no running object table; the COM census still runs for an Excel whose
-command line says nothing, which is the one a developer opened a fixture in by hand.
+**Which host is ours is read from the command line first, and only then over COM.** A host
+launched on a file under `artifacts\fixtures`, `artifacts\chaos` or `tools\harness\fixtures` is
+this harness's whether or not its object model will answer, and there are seconds in every
+launch when it will not - three files opening at once, a modal up, a teardown half done. That
+window used to be read as "a stranger's", the instance was left standing, and the next group
+opened one of the same files beside it, at which point the host asked the developer whether to
+open it read-only. A `Win32_Process` command line settles it with no COM, no window and no
+running object table; the COM census still runs for a host whose command line says nothing,
+which is the one a developer opened a fixture in by hand.
+
+All three launchers do this. Excel was fixed in September when a release gate put "File in Use"
+on the owner's screen; `Start-Word.ps1` and `Start-Access.ps1` carried the same census until
+2026-09-19, and both were reproduced before being changed: read at the moment of launch, Word's
+document walk and Access's database read each answer nothing, so each left its own host standing
+and opened a second on the same file - Word with "open a read only copy" in front of the
+developer and a launcher that could then not reach the Word it had just started, Access with two
+hosts on one `.accdb`, both with the add-in loaded.
 
 The attach that follows waits for a window **with an `Application` on it**, not merely for a
 window. An `EXCEL7` exists before the workbook behind it does, and the object model handed back
@@ -159,7 +167,9 @@ node tools\harness\access.mjs
 ```
 
 Access keeps one database per process, so there is no joining several on a command line, and its
-`-Fresh` closes the Access this harness started rather than an Excel. The database is built by
+`-Fresh` closes the Access this harness started rather than an Excel - attributed from the
+command line first and over COM only for a process whose command line names nothing of ours,
+because an Access that is still opening answers neither. The database is built by
 `tools\New-AccessFixture.ps1`, which has to save each module by name through `DoCmd`: Access,
 alone among the hosts, does not write a module created through the object model into the file
 when the file is saved, so a session closed without that leaves the modules behind.
@@ -2627,7 +2637,7 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
 | The xlide api | **no** | The door runs inside the add-in's own process and calls the same objects |
 | `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` - Excel running its own ribbon button - not through `$excel.VBE` |
-| `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG` (shared with the fixture generator through `WordAttach.psm1`), same ribbon command, scratch.docm by default; `-Fresh` closes only this harness's Words and `-Separate` (`/w`) gives the fixture a process of its own beside anyone else's Word (2026-09-10) |
+| `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG` (shared with the fixture generator through `WordAttach.psm1`), same ribbon command, scratch.docm by default; `-Fresh` closes only this harness's Words - by command line first, COM second, as Start-Excel does (2026-09-19) - and `-Separate` (`/w`) gives the fixture a process of its own beside anyone else's Word (2026-09-10) |
 | Building a fixture | **no** | `api.component()` adds, renames and removes from inside |
 | Reading a module back | **no** | `api.readModule()` reads the real object model, from inside |
 | Running a procedure | **no** | `Application.Run` is not gated (measured) |

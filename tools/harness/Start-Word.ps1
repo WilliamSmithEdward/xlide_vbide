@@ -119,9 +119,40 @@ if ($Fresh) {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
+    # AND THE COMMAND LINE IS READ FIRST, the way Start-Excel.ps1 reads it, because it is the
+    # fact the COM census below only has a proxy for. A Word started on a document under this
+    # repository's fixture folders is this harness's whether or not its object model will
+    # answer, and there are seconds in every launch when it will not.
+    #
+    # Measured here on 2026-09-19: read at the moment of launch, the document walk answers
+    # nothing, the census wrote that down as "a stranger's", left its own Word standing, and the
+    # next launch opened the same document beside it - which Word answers with "open a read only
+    # copy", a modal, on the developer's screen. The launcher then could not reach the Word it
+    # had just started. Excel had all of this in August (lessons.md 85); these two carried it
+    # still.
+    $myFolders = @(
+        (Join-Path $repoRoot 'artifacts\fixtures'),
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
+    )
+    $launchedWith = @{}
+    foreach ($row in @(Get-CimInstance Win32_Process -Filter "Name='WINWORD.EXE'" -ErrorAction SilentlyContinue)) {
+        $launchedWith[[int] $row.ProcessId] = "$($row.CommandLine)"
+    }
+
     $ours = @()
     $theirs = @()
     foreach ($running in @(Get-Process WINWORD -ErrorAction SilentlyContinue)) {
+        $commandLine = if ($launchedWith.ContainsKey($running.Id)) { $launchedWith[$running.Id] } else { '' }
+        $fromOurFolders = @($myFolders | Where-Object {
+            $commandLine.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+        if ($fromOurFolders.Count -gt 0) {
+            # Settled without taking a single wrapper on a host that may be busy.
+            $ours += $running.Id
+            continue
+        }
+
         # Every wrapper the read takes is given back inside the module, while the process can
         # still answer the release; a wrapper finalised after a kill makes DCOM start a fresh
         # hidden host to answer it (2026-09-08).

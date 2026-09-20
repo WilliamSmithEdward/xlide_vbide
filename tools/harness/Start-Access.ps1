@@ -71,9 +71,38 @@ if ($Fresh) {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
+    # AND THE COMMAND LINE IS READ FIRST, the way Start-Excel.ps1 reads it: it is the fact the
+    # COM census below only has a proxy for. An Access started on a database under this
+    # repository's fixture folders is this harness's whether or not its object model will
+    # answer, and there are seconds in every launch when it will not.
+    #
+    # Measured here on 2026-09-19: read at the moment of launch this said "no database this
+    # harness can read", the census left its own Access standing, and a second Access opened the
+    # same .accdb beside it - two hosts on one database, each with the add-in loaded. Excel had
+    # this in August (lessons.md 85); Word and Access carried it still.
+    $myFolders = @(
+        (Join-Path $repoRoot 'artifacts\fixtures'),
+        (Join-Path $repoRoot 'artifacts\chaos'),
+        (Join-Path $PSScriptRoot 'fixtures')
+    )
+    $launchedWith = @{}
+    foreach ($row in @(Get-CimInstance Win32_Process -Filter "Name='MSACCESS.EXE'" -ErrorAction SilentlyContinue)) {
+        $launchedWith[[int] $row.ProcessId] = "$($row.CommandLine)"
+    }
+
     $ours = @()
     $theirs = @()
     foreach ($running in @(Get-Process MSACCESS -ErrorAction SilentlyContinue)) {
+        $commandLine = if ($launchedWith.ContainsKey($running.Id)) { $launchedWith[$running.Id] } else { '' }
+        $fromOurFolders = @($myFolders | Where-Object {
+            $commandLine.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+        if ($fromOurFolders.Count -gt 0) {
+            # Settled without taking a single wrapper on a host that may be busy.
+            $ours += $running.Id
+            continue
+        }
+
         $held = $null
         try {
             $where = Get-AccessDatabasePath -ProcessId $running.Id
