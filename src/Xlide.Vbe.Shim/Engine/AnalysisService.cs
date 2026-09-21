@@ -1592,6 +1592,16 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// A project's references as one comparable string. Order is kept rather than sorted: the
+    /// VBE holds references in an order the developer can change, and the analyzer resolves a
+    /// name against them in that order, so a reorder is a real change to compare.
+    /// </summary>
+    private static string ReferenceSeedOf(ProjectSnapshot snapshot) =>
+        snapshot.ReferenceGuids is null
+            ? string.Empty
+            : string.Join('\u0000', snapshot.ReferenceGuids);
+
+    /// <summary>
     /// Whether a project's modules are exactly what it was last seeded with: same names, same
     /// text, same designer control lists, none added, none gone.
     ///
@@ -1607,14 +1617,6 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// touching one: a control removed from a form kept resolving - completion, diagnostics and
     /// paint all serving the ghost - until some unrelated module write happened to reseed.
     /// </summary>
-    /// <summary>
-    /// A project's references as one comparable string. Order is kept rather than sorted: the
-    /// VBE holds references in an order the developer can change, and the analyzer resolves a
-    /// name against them in that order, so a reorder is a real change to compare.
-    /// </summary>
-    private static string ReferenceSeedOf(ProjectSnapshot snapshot) =>
-        snapshot.ReferenceGuids is null ? string.Empty : string.Join(' ', snapshot.ReferenceGuids);
-
     private static bool SameSeed(Dictionary<string, string> seeded, EngineModule[] now)
     {
         if (seeded.Count != now.Length)
