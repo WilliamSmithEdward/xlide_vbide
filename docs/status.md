@@ -67,6 +67,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   compiler cannot use them either, and the `project` route lists every reference with its
   `broken` flag so the two cases can be told apart.
 
+  **And the error carries the fix that ends it.** `Add a reference to the Word object library`
+  sits on the finding, ahead of the suppression, and adding it is a COM call into the VBE's own
+  References collection rather than a text edit - so it travels as a command the host performs,
+  down the same channel the attribute fixes use. No version goes with it: the host binds the one
+  it has installed. The `reference` route applies the fix a named finding offers, so nothing
+  about type libraries is written down on this side and a caller cannot ask for a reference the
+  product would not have offered.
+
   It is one list for every feature, which took finding: the same references reach completion,
   hover, signature help, canonical casing and semantic colouring through one request builder, so
   `wd.` offers Word's 183 members rather than the error going quiet while the completions stay
@@ -198,7 +206,7 @@ project after every save (finding 81). Both close the session they opened, so th
 after them find only Excel.
 
 Counts move, so they are given as of this line rather than as standing facts: 664 unit tests,
-68 api routes of which 66 are driven by one of the 74 suites the gate runs, 2 left out on
+69 api routes of which 67 are driven by one of the 75 suites the gate runs, 2 left out on
 purpose, and 134 analyzer rules in the bundled engine.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and

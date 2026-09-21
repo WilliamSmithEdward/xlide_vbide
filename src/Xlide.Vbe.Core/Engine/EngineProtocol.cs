@@ -147,7 +147,17 @@ public sealed record EngineCodeAction(
     [property: JsonPropertyName("isPreferred")] bool? IsPreferred,
     [property: JsonPropertyName("code")] string? Code,
     [property: JsonPropertyName("span")] EngineSpan Span,
-    [property: JsonPropertyName("edits")] EngineTextEdit[] Edits);
+    [property: JsonPropertyName("edits")] EngineTextEdit[] Edits,
+
+    /// <summary>
+    /// A fix the HOST carries out rather than one the surface applies, with `edits` empty.
+    /// Adding a type library reference writes a record into the project, which no edit to a
+    /// module can do, so the engine names the action and the add-in performs it.
+    /// </summary>
+    [property: JsonPropertyName("command")] string? Command = null,
+
+    /// <summary>The command's arguments, in the order the add-in's handler reads them.</summary>
+    [property: JsonPropertyName("arguments")] string[]? Arguments = null);
 
 /// <summary>The quick fixes offered over a span.</summary>
 public sealed record EngineCodeActions(

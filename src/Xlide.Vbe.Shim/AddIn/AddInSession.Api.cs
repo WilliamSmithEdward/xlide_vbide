@@ -4291,6 +4291,91 @@ internal sealed partial class AddInSession
                     : System.Text.Json.JsonSerializer.Serialize(described, DebugJsonContext.Default.DebugAttributesReply);
             }
 
+            case "reference" when request.Query.TryGetValue("action", out var referenceAction)
+                && string.Equals(referenceAction, "add", StringComparison.OrdinalIgnoreCase):
+            {
+                /*
+                 * ADDS A LIBRARY BY CHOOSING THE FIX THAT ADDS IT, which is the gesture and not
+                 * a second door beside it.
+                 *
+                 * A caller names the finding - the module and the line `missing-library-reference`
+                 * sits on - and this runs the quick fix offered there, with the engine's own
+                 * arguments. So the library, its name and its identity all come from where the
+                 * fix gets them, nothing about type libraries is written down on this side, and
+                 * a caller cannot ask for a reference the product would not have offered.
+                 *
+                 * To see the result, ask `project` and read `references`.
+                 */
+                if (!request.Query.TryGetValue("module", out var referenceModule) || referenceModule.Length == 0)
+                {
+                    return HostError("reference?action=add needs module=<name> and line=<n>: "
+                        + "it applies the fix the finding on that line offers");
+                }
+
+                request.Query.TryGetValue("project", out var referenceProject);
+                if (ResolveNamedProject(referenceProject, out var referenceUnknown) is null && referenceUnknown is not null)
+                {
+                    return HostError(referenceUnknown);
+                }
+
+                if (!(request.Query.TryGetValue("line", out var referenceLineText)
+                    && int.TryParse(referenceLineText, out var referenceLine) && referenceLine >= 1))
+                {
+                    return HostError("reference?action=add needs line=<n>, one-based, naming the line the finding is on");
+                }
+
+                var referenceColumn = request.Query.TryGetValue("column", out var referenceColumnText)
+                    && int.TryParse(referenceColumnText, out var parsedColumn) ? parsedColumn : 1;
+
+                if (_analysis is not { } referenceAnalysis)
+                {
+                    return HostError("the engine is not up, so no fix can be asked for");
+                }
+
+                var referenceOwner = ProjectIdFromDisplay(referenceProject) ?? _shownProject;
+                string? referenceSource = _editorSurface?.TextOf(referenceModule, referenceProject);
+                if (referenceSource is null)
+                {
+                    using var component = FindComponent(referenceModule, referenceOwner, out _);
+                    referenceSource = component is null ? null : ProjectReader.ReadSource(component);
+                }
+
+                if (referenceSource is null)
+                {
+                    return HostError($"there is no module named {referenceModule}"
+                        + (referenceProject is null ? "" : $" in {referenceProject}"));
+                }
+
+                // The whole line, so a caller naming the line rather than the exact column still
+                // meets the finding - the same latitude the lightbulb gives a caret in a word.
+                var referenceStarts = Xlide.Vbe.Core.Engine.TextPositions.LineStarts(referenceSource);
+                var referenceStart = Xlide.Vbe.Core.Engine.TextPositions.ToOffset(referenceStarts, referenceLine, referenceColumn);
+                var referenceEnd = request.Query.ContainsKey("column")
+                    ? referenceStart
+                    : Xlide.Vbe.Core.Engine.TextPositions.ToOffset(referenceStarts, referenceLine + 1, 1) - 1;
+
+                var offered = referenceAnalysis
+                    .CodeActionsAsync(referenceModule, referenceStart, Math.Max(referenceStart, referenceEnd), CancellationToken.None)
+                    .GetAwaiter().GetResult();
+
+                var fix = offered.FirstOrDefault(one =>
+                    string.Equals(one.Command, "addLibraryReference", StringComparison.Ordinal));
+                if (fix?.Arguments is not { Length: >= 3 } fixArguments)
+                {
+                    return HostError($"no reference fix is offered on {referenceModule} line {referenceLine}. "
+                        + $"Offered there: {(offered.Length == 0 ? "nothing" : string.Join("; ", offered.Select(one => one.Title)))}");
+                }
+
+                var referenceRefused = AddLibraryReference(
+                    fixArguments[0], fixArguments[1], fixArguments[2], referenceProject, out var referenceAdded);
+
+                return referenceRefused is not null
+                    ? HostError(referenceRefused)
+                    : System.Text.Json.JsonSerializer.Serialize(
+                        new DebugReferenceAddedReply(true, fixArguments[1], fixArguments[2], referenceAdded),
+                        DebugJsonContext.Default.DebugReferenceAddedReply);
+            }
+
             case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:
             {
                 // A module's shape, from the analyzer, so a caller can assert on structure rather

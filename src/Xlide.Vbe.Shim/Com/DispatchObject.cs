@@ -600,6 +600,28 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Calls a method that takes a string and then two numbers, which is how a type library
+    /// reference is added by identity: `References.AddFromGuid(guid, major, minor)`.
+    /// </summary>
+    public void Invoke(string name, string first, int second, int third)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        // The string variant owns what it was built from and frees it when cleared; the numbers
+        // own nothing.
+        using var text = ComVariant.Create(first);
+        var major = ComVariant.Create(second);
+        var minor = ComVariant.Create(third);
+        using var result = InvokeCore(dispId, InvokeKind.Method, [text, major, minor]);
+    }
+
+    /// <summary>
     /// Reads an indexed member, which is how automation collections expose their items. Editor
     /// collections are one-based.
     /// </summary>

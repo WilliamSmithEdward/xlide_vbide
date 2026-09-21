@@ -462,6 +462,21 @@ export interface CodeActionPayload {
     /** The finding's own span, for the same reason. */
     span: { start: number; end: number };
     edits: TextEditPayload[];
+
+    /**
+     * A fix the HOST carries out, instead of edits the surface applies.
+     *
+     * Some fixes are not text. Adding a type library reference writes a record into the project,
+     * which no edit to a module can do, so the action names what the host should do and the
+     * surface posts it back rather than editing anything. `edits` is empty for such an action.
+     *
+     * The add-in already had this channel for applying a module's annotations to its attributes;
+     * the engine could not use it because its own action shape stopped at edits.
+     */
+    command?: string;
+
+    /** The command's arguments, in the order the host's handler reads them. */
+    arguments?: readonly string[];
 }
 
 export interface CodeActionResult {

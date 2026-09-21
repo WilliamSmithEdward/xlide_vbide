@@ -7501,7 +7501,20 @@ internal sealed partial class AddInSession : IDisposable
                     action.Code,
                     action.Span.Start,
                     action.Span.End,
-                    [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))])),
+                    [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))],
+                    // Carried through, not dropped: a fix the engine names for the HOST to
+                    // perform - adding a library reference - has no edits at all, and without
+                    // these two it arrived as an entry that did nothing when chosen.
+                    action.Command,
+                    // WITH THE PROJECT THIS REQUEST WAS ABOUT ON THE END. The engine names a
+                    // project by the id it was seeded under; the host addresses one by the name
+                    // it shows, and translating between the two is this side's job. Without it
+                    // the fix would land on whichever project happened to be active, which with
+                    // two workbooks open is a reference added to the wrong one - the class of
+                    // defect the project identity exists to prevent (2026-08-07).
+                    action.Command is null
+                        ? action.Arguments
+                        : WithProject(action.Arguments, DisplayFromProjectId(projectId)))),
                     .. AttributeCodeActions(module, projectId, source, start, end),
                     .. PredeclareCodeActions(module, projectId, source, start, end)];
             },

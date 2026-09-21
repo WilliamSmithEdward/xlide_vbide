@@ -1039,6 +1039,18 @@ public sealed record DebugProjectReply(
     /// </summary>
     [property: JsonPropertyName("references")] DebugReferenceRow[]? References = null);
 
+/// <summary>
+/// What adding a library reference came to: which library, and whether it went on.
+///
+/// `added: false` with `ok: true` is the project having had it already, which is an answer
+/// rather than a failure - the same shape the quick fix reports it with.
+/// </summary>
+public sealed record DebugReferenceAddedReply(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("library")] string Library,
+    [property: JsonPropertyName("guid")] string LibraryId,
+    [property: JsonPropertyName("added")] bool Added);
+
 /// <summary>One type library a project references, as the reference declares itself.</summary>
 public sealed record DebugReferenceRow(
     [property: JsonPropertyName("name")] string Name,
@@ -1789,6 +1801,7 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugProjectsReply))]
 [JsonSerializable(typeof(DebugProjectRow))]
 [JsonSerializable(typeof(DebugProjectReply))]
+[JsonSerializable(typeof(DebugReferenceAddedReply))]
 [JsonSerializable(typeof(DebugSettingsReply))]
 [JsonSerializable(typeof(DebugEngineSourceReply))]
 [JsonSerializable(typeof(DebugNativeReply))]

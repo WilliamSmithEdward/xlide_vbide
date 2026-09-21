@@ -904,6 +904,23 @@ function clientFor(entry) {
       call(`attributes${query({ module, project, action: "remove", kind, target, occurrence })}`, { method: "POST", timeout: 30000 }),
 
     /**
+     * Gives the project the type library a `missing-library-reference` finding names, by running
+     * the quick fix offered ON that finding.
+     *
+     * The library is NOT named here, deliberately: the finding names it, the engine attaches its
+     * identity to the fix, and this applies the fix. So a caller cannot ask for a reference the
+     * product would not have offered, and nothing about type libraries is written down on this
+     * side of the door. `line` is the finding's line, one-based; a `column` narrows to a point
+     * where the whole line is searched otherwise.
+     *
+     * Answers `{ ok, library, guid, added }` - `added: false` is the project having had it
+     * already - and refuses in words when no such fix is offered there. Read the result with
+     * `project(...)`, whose `references` is the same walk the analyzer is seeded from.
+     */
+    addReference: (module, line, { project, column } = {}) =>
+      call(`reference${query({ action: "add", module, line, column, project })}`, { method: "POST", timeout: 60000 }),
+
+    /**
      * Writes a labelled line into the shim log and answers the offset it landed at.
      *
      * Reading a log for what one step did means finding where that step began, and "scroll up

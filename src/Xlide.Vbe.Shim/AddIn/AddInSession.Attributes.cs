@@ -446,6 +446,18 @@ internal sealed partial class AddInSession
                     ?? $"{Arg(0)} is a predeclared class now: '@PredeclaredId added and applied. Save the workbook to keep it.");
                 break;
             }
+            // Not an attribute action, and it is here because this is the one dispatcher the
+            // page's host-performed fixes arrive at; the work itself is in
+            // AddInSession.References.cs. The engine names this one (missing-library-reference),
+            // where the three above are the add-in's own findings.
+            case "addLibraryReference":
+            {
+                var refused = AddLibraryReference(
+                    Arg(0) ?? string.Empty, Arg(1) ?? Arg(0) ?? string.Empty, Arg(2) ?? string.Empty,
+                    Arg(3), out var added);
+                _editorSurface?.Notify(refused ?? AddedReferenceNotice(Arg(1) ?? Arg(0) ?? "The library", added));
+                break;
+            }
             default:
                 Log.Warn($"hostAction: '{command}' is not an action this host performs");
                 _editorSurface?.Notify($"'{command}' is not something this editor can do.");

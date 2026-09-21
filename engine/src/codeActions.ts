@@ -7,6 +7,11 @@
 // asked for back. The request names a span; every finding overlapping it offers what it can fix.
 
 import { normalizeDiagnosticCode, resolveDiagnosticCodeActions } from '../../../xlide_vscode/src/analyzer';
+// The libraries a project can be given a reference to, with the GUID each one is identified by.
+// Upstream's table, imported rather than copied, so a library added there needs no change here -
+// and measured before it was taken: it costs this bundle 0.9 KB and four input files, because
+// esbuild shakes out the container-format code that module also holds.
+import { HOST_LIBRARIES } from '../../../xlide_vscode/src/vba/vbaProjectReferences';
 import type { VbaModuleAnalysisDiagnostic } from '../../../xlide_vscode/src/vbaModuleAnalysis';
 import type { CodeActionPayload } from './protocol';
 
@@ -64,6 +69,42 @@ export function codeActionsFor(
 
             seen.add(identity);
             actions.push(action);
+        }
+
+        // AND THE ONE FIX THAT IS NOT A TEXT EDIT.
+        //
+        // `missing-library-reference` says a module names a library the project does not
+        // reference. Suppressing it is the only thing the analyzer's own resolver can offer,
+        // because the fix writes a record into the PROJECT and the resolver deals in edits to a
+        // module - so the editor extension adds this one at its own layer too, as a command.
+        //
+        // The library is read from the finding's data rather than out of its message: the rule
+        // attaches the token it meant, which is the difference between reading a fact and
+        // parsing English.
+        const missing = diagnostic.data?.addLibraryReference;
+        const library = missing ? HOST_LIBRARIES[missing.library.toLowerCase()] : undefined;
+        if (missing && library) {
+            const action: CodeActionPayload = {
+                title: `Add a reference to the ${library.name} object library`,
+                // Ahead of the suppression, which is the other thing offered here. Hiding a
+                // compile error is a last resort and adding the reference is the fix.
+                isPreferred: true,
+                code,
+                span: { start: diagnostic.span.start, end: diagnostic.span.end },
+                edits: [],
+                command: 'addLibraryReference',
+                // The GUID is the library's identity and the host binds the version it has
+                // installed, so no version travels: `AddFromGuid(guid, 0, 0)` bound Word 8.7
+                // from MSWORD.OLB on a machine with Office 16 (measured 2026-09-21). A pinned
+                // major.minor would be this machine's Office version written into the product.
+                arguments: [missing.library.toLowerCase(), library.name, library.guid],
+            };
+
+            const identity = JSON.stringify([action.title, action.command, action.arguments]);
+            if (!seen.has(identity)) {
+                seen.add(identity);
+                actions.push(action);
+            }
         }
     }
 

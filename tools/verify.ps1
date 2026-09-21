@@ -903,6 +903,14 @@ if ($Live) {
                                      'designer-features.mjs', 'test-runner.mjs',
                                      'pane-scope.mjs',
                                      'inline-comments-live.mjs', 'analysis-rules-live.mjs',
+                                     # references brings its own module and needs nothing of the
+                                     # fixture. Its one question the engine's own suite cannot
+                                     # ask is whether the reference goes ON: adding one is a COM
+                                     # call into the VBE's References collection rather than a
+                                     # text edit, and because no module's text changes when it
+                                     # lands, every cheap gate between the click and the squiggle
+                                     # sees identical inputs. It takes the reference off again.
+                                     'references.mjs',
                                      # extract-method adds a carrier module too, and it is here
                                      # rather than beside rename-features because it needs
                                      # nothing of any fixture: it writes the code it extracts

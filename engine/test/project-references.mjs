@@ -132,6 +132,38 @@ check("and offers no fix for it once the project references Word",
   withFixes.every((one) => one.code !== "missing-library-reference"),
   withFixes.map((one) => one.title).join(" | ") || "(no actions)");
 
+/* ---- the fix that adds the library ------------------------------------------------------------ */
+
+// THE FIX FOR A MISSING REFERENCE IS THE REFERENCE, and it is not a text edit: it writes a record
+// into the project. So it travels as a command the host performs, with no edits at all, and the
+// analyzer's own resolver - which deals in edits to a module - can only ever offer the
+// suppression beside it. Upstream reaches the same conclusion from the other side.
+const addFix = withoutFixes.find((one) => one.command === "addLibraryReference");
+check("the fix that ADDS the library is offered, not just the one that hides the error",
+  addFix?.title === "Add a reference to the Word object library",
+  addFix?.title ?? withoutFixes.map((one) => one.title).join(" | "));
+
+check("it leads, because suppressing a compile error is the last resort and this is the fix",
+  addFix?.isPreferred === true && withoutFixes.some((one) => /^Suppress/.test(one.title)),
+  `isPreferred=${addFix?.isPreferred}, beside ${withoutFixes.length} action(s)`);
+
+check("it carries no edits, which is what makes it the host's to perform",
+  Array.isArray(addFix?.edits) && addFix.edits.length === 0,
+  JSON.stringify(addFix?.edits));
+
+// The token, the name a sentence uses, and the identity to add. No VERSION: the host binds the
+// one it has installed, and a major.minor here would be this machine's Office in the product.
+check("and names the library by token, by name and by identity",
+  addFix?.arguments?.length === 3
+    && addFix.arguments[0] === "word"
+    && addFix.arguments[1] === "Word"
+    && addFix.arguments[2].toUpperCase() === WORD,
+  JSON.stringify(addFix?.arguments));
+
+check("a project that already references Word is not offered it again",
+  withFixes.every((one) => one.command !== "addLibraryReference"),
+  withFixes.map((one) => `${one.title}${one.command ? ` [${one.command}]` : ""}`).join(" | ") || "(no actions)");
+
 /* ---- a reference added to a project already open ---------------------------------------------- */
 
 // THE GESTURE THE FEATURE IS FOR: the developer reads `missing-library-reference`, opens the
