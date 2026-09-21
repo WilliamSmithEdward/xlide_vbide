@@ -2769,3 +2769,72 @@ than a build that cannot contain those edits at all.
 The rule this leaves: an artifact that ships has to be the artifact that
 passed, and a timestamp is not evidence that it is. The gate was re-run
 against the pinned engine before anything was attached.
+
+**Correction, 2026-09-21: the pin did not do what this entry claims, and
+v0.17.0 did not ship pinned bits.** `XLIDE_ANALYZER_ROOT` was read in exactly
+two places - an existence check in `build.mjs`, and the currency guards - and
+in neither did it change what esbuild READ. The imports in `engine/src` are
+literal relative paths to `../../../xlide_vscode/src/...`, there is no alias
+and no tsconfig `paths`, so every build went on reading the checkout next
+door. Measured: with the variable set, 200 bundle inputs came from the sibling
+and 0 from the pin.
+
+So the guard was pointed at a directory whose timestamps never move while the
+build kept reading the working tree. That is worse than having no pin at all,
+because the alarm was switched off and the reassurance was published: v0.17.0's
+installer carries the analyzer as its author's working tree stood at 17:19 that
+evening, mid-refactor, not the 9.0.0 release. The differing bundle hash that
+made this entry so confident had a duller cause than it looked - the sibling
+tree had simply acquired more edits between the two builds.
+
+`build.mjs` now redirects those imports with an esbuild `onResolve` plugin, and
+a pin missing a file the engine imports is an error rather than a silent
+fallback to the checkout. Verified both ways: with the variable set, 200 inputs
+from the pin and 0 from the sibling; unset, 200 from the sibling, exactly as
+before.
+
+The lesson under the lesson: a guard and the thing it guards have to read the
+same source of truth. Pointing the guard somewhere quieter is not a fix, and
+"the check passed" proved nothing here because the check and the build were
+looking at different trees. Verify a redirect by asking what was READ - the
+metafile knew all along.
+
+So the build now asks that question itself. `metafile: true`, and a pinned
+build that read one file from the checkout next door fails with the file
+named; a clean one prints `analyzer: 200 file(s), all from the pin at ...`.
+It costs nothing and it is at the point of truth, which is where the evidence
+was sitting unexamined for a whole release.
+
+## 91. The new check passed with the thing it checked torn out
+
+The plumbing that tells the analyzer which type libraries a project references
+runs down two paths: the diagnostics request that draws the squiggle, and the
+code-action request that offers the fix. Both had to carry the same list - a
+fix computed under different knowledge than the squiggle is how those two last
+disagreed - so the suite written for it checked both.
+
+Eight checks, all green. Then the code-action line was deliberately replaced
+with `undefined` and rebuilt. Still eight green.
+
+The cause is one line at the top of the fix path: if the source it is asked
+about equals the source of the last analysis, it answers from the memo and
+never analyses at all. The suite asked for diagnostics and then asked for
+fixes on the same text, which is the one sequence in which the request it was
+testing is never built. It was measuring a cache.
+
+The suite now appends one comment to the text before asking for fixes, which
+is what a real keystroke does and what the fresh pass exists for. Broken the
+same way again, the code-action check goes red on its own while the
+diagnostics checks stay green - so each check is attached to its own path.
+
+A second break, on the diagnostics path, was also a no-op, and for a different
+reason: `referencedHosts: undefined && params.projectId === undefined ? ... :
+this.referencedHosts.get(...)` parses as `(undefined && ...) ? ... : ...`, so
+the "break" sent it down the branch that passes the list. Two minutes of
+believing a check had just proved something it had not.
+
+The rule is the one already written down - break a check on purpose and watch
+it go red before trusting it - with two things added. Watch the RIGHT check go
+red, because a suite that goes red somewhere is not a suite whose checks each
+bite. And read the break: a deliberate sabotage is code too, and an edit that
+does nothing is indistinguishable from a check that does nothing.

@@ -2437,6 +2437,19 @@ internal sealed partial class AddInSession : IDisposable
             ForgetBreakpoints();
         }
 
+        // THE REFERENCES DIALOG CHANGES WHAT COMPILES, so the findings have to move with it.
+        //
+        // It is modal and returns here only once it has closed, so this is the moment after the
+        // developer pressed OK. Ticking Word turns `Dim wd As Word.Application` from an error
+        // into correct code and unticking it does the reverse - and that fact is in no module's
+        // text, so a pass provoked by anything else would compare the same sources and leave the
+        // project alone. Adding the reference is the fix the error itself recommends, and it has
+        // to take effect when it is made rather than the next time something is typed.
+        if (command == VbeCommands.Command.References)
+        {
+            _analysis?.Reanalyse();
+        }
+
         // A save just cleaned the workbook - but the flag flips a beat AFTER the command
         // returns, so one immediate republish read the old value and the dot lingered. The
         // next few polls re-derive it; the change-key keeps the repeats free.

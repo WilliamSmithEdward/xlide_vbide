@@ -100,6 +100,22 @@ export interface ProjectOpenParams {
      * same as a project whose flags are all undefined, though it analyses the same way.
      */
     conditionalConstants?: string;
+
+    /**
+     * The type library GUIDs this project references, as the references themselves declare them.
+     *
+     * A project that references another application's library can name its types: an Excel
+     * workbook referencing Word compiles `Dim wd As Word.Application`, and those members are
+     * checked against Word's model rather than reported as unknown. From the analyzer's 10.0.0
+     * the absence of this is not neutral - it reports `missing-library-reference`, a compile
+     * error, on exactly that code.
+     *
+     * GUIDs, because the GUID is a library's identity and its name is only what it calls itself.
+     * They are mapped to hosts by the analyzer's own table, so this engine holds no list of its
+     * own to fall behind, and a library the analyzer has no model for maps to nothing and is
+     * silently ignored - which is the honest answer for stdole or a third-party DLL.
+     */
+    referenceGuids?: readonly string[];
 }
 
 /** textDocument/diagnostics: analyse one module. */

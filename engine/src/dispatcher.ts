@@ -10,6 +10,7 @@ import { hostApp, setHostApp } from './hostApp.js';
 import { analyzerKnowledge, objectModelKnowledge } from './knowledge.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
+import { referencedHostTokens } from '../../../xlide_vscode/src/analyzer/host/hostLibraries';
 import {
     DIAGNOSTIC_RULES,
     STRUCTURAL_DIAGNOSTIC_RULES,
@@ -127,6 +128,31 @@ const PRESENTATION_TAGS: ReadonlyMap<string, 'unnecessary'> = new Map(
 
 function presentationTagFor(code: string | undefined): 'unnecessary' | undefined {
     return code === undefined ? undefined : PRESENTATION_TAGS.get(code);
+}
+
+/**
+ * The applications a project's references bring in, as host tokens, minus its own host.
+ *
+ * The add-in sends the GUIDs its references declare, because a GUID is a library's identity and
+ * its name is only what it calls itself. Which GUID is Word is the ANALYZER's fact: its table is
+ * used here rather than copied, so a library modelled upstream tomorrow needs no change in this
+ * repository, and one it has no model for - stdole, a third-party DLL - maps to nothing and is
+ * silently ignored, which is the honest answer for it.
+ */
+function referencedHostsFor(
+    host: string | undefined,
+    guids: readonly string[] | undefined,
+): readonly string[] {
+    if (guids === undefined || guids.length === 0) {
+        return [];
+    }
+
+    // referencedHostTokens takes what a dir stream declares: a name and a libid. A bare GUID is
+    // a libid as far as the mapping is concerned - it reads the braced GUID out of whatever it
+    // is given - and the name is unused by it.
+    return referencedHostTokens(
+        host as Parameters<typeof referencedHostTokens>[0],
+        guids.map((guid) => ({ name: '', libid: guid })));
 }
 
 function liveKey(projectId: string, moduleName: string): string {
@@ -258,6 +284,13 @@ export class RpcError extends Error {
 export class Dispatcher {
     private readonly analysis = new AnalysisWorkerState();
     private readonly generations = new Map<string, number>();
+
+    /**
+     * The applications each project references, as host tokens, from the GUIDs the add-in read
+     * off the live project. Kept per project because the worker takes them per ANALYSIS, not
+     * per seed, and every request for a project has to carry the same answer.
+     */
+    private readonly referencedHosts = new Map<string, readonly string[]>();
 
     /**
      * The modules each project was last seeded with, kept for completion contexts. The analysis
@@ -563,6 +596,14 @@ export class Dispatcher {
             ...(params.conditionalConstants ? { conditionalConstants: params.conditionalConstants } : {}),
         });
 
+        // THE REFERENCED APPLICATIONS ARE KEPT, NOT SEEDED: the worker takes them per analysis,
+        // not per project, so they are held here and attached to every request for this project
+        // below. Mapped through the analyzer's own table - the GUIDs this repository sends are
+        // identities, and which one is Word is upstream's fact to know.
+        this.referencedHosts.set(
+            params.projectId,
+            referencedHostsFor(hostApp(), params.referenceGuids));
+
         this.generations.set(params.projectId, params.generation);
         this.seededModules.set(params.projectId, modules.map((module) => ({ ...module })));
 
@@ -605,6 +646,7 @@ export class Dispatcher {
 
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
+        this.referencedHosts.delete(params.projectId);
 
         // THE ANALYZER'S OWN PER-DOCUMENT STATE, which nothing else here releases.
         //
@@ -1061,6 +1103,12 @@ export class Dispatcher {
             // The analyzer resolves the token to a host model itself (issue #24); for excel
             // the resolution is a no-op, so this is only ever additive.
             host: hostApp(),
+            // The applications this project references, so a name it can legitimately write -
+            // `Word.Application` in a workbook that references Word - resolves instead of being
+            // reported as a library it does not reference. Same list on both analyze paths: a
+            // fix offered under different knowledge than the squiggle was drawn under is how
+            // the two disagree (the 2026-08-19 hunt, one host set and not the other).
+            referencedHosts: this.referencedHosts.get(params.projectId),
             implicitMembers: seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
             // Inherited rather than sent: a fix must be offered under the same rules that drew
             // the squiggle, and the last analysis of this module is what drew it.
@@ -1287,6 +1335,16 @@ export class Dispatcher {
             params.moduleType ?? null,
             params.documentType ?? null,
             params.severityOverrides ?? null,
+            // THE PROJECT'S REFERENCED APPLICATIONS, for the same reason the overrides are here:
+            // they decide findings and they are not in the text. Tick Word in the References
+            // dialog and `Dim wd As Word.Application` stops being an error - but the module is
+            // byte-identical, its cross-module facts are identical, and without this the answer
+            // served is the one computed before the reference existed. Measured against a live
+            // Excel session on 2026-09-21: the project re-seeded with the new library and the
+            // error stayed on screen, because nothing past the seed had noticed.
+            params.projectId === undefined
+                ? null
+                : this.referencedHosts.get(params.projectId) ?? null,
         ]);
 
         const caret = params.activeIncompleteExpressionOffset ?? null;
@@ -1359,6 +1417,11 @@ export class Dispatcher {
             // only one of the two was the 2026-08-19 hunt's find - in Word, completion knew
             // ActiveSheet was nobody while diagnostics stayed silent about it.
             host: hostApp(),
+            // And the libraries the project references, without which every early-bound name
+            // from another application reads as a missing reference (see the code-action path).
+            referencedHosts: params.projectId === undefined
+                ? undefined
+                : this.referencedHosts.get(params.projectId),
             // The request's own members win at the worker (live designer truth when the host
             // sends them); the seeded copy answers otherwise, so a form is analysable without
             // a per-request supply. The .frm header fallback below both is dead for Excel

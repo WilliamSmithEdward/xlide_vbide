@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-19, at v0.17.0.
+Updated 2026-09-21, at v0.18.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -41,7 +41,11 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   `tools\Pin-Analyzer.ps1 -Ref <commit>` copies that repository's object store, checks out the
   commit, and verifies the result is pristine; `XLIDE_ANALYZER_ROOT` then points the engine build
   and every currency check at the pin instead of at the working tree. Unset, everything builds
-  against the checkout next door as before, which is what day-to-day work wants.
+  against the checkout next door as before, which is what day-to-day work wants. The build
+  redirects its analyzer imports through an esbuild resolver, which is what makes the pin real:
+  for one release it only silenced the guards while esbuild went on reading the working tree, and
+  v0.17.0 shipped that tree rather than the pinned commit (lessons.md 90). Check a pinned build by
+  what it READ - the metafile's inputs - not by whether the guard went quiet.
 - **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
   put back when the add-in unloads.
 - **The explorer has two layouts.** Tree is the flat list by kind; Folders groups modules by the
@@ -52,6 +56,16 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 - **Break mode prints a local by name.** `? counter` answers from the Locals window; an
   expression still declines, because evaluating one adds a procedure and resets the debugger
   (#21).
+- **A project's type library references are read and sent.** A workbook that references Word
+  compiles `Dim wd As Word.Application`, and from the analyzer's 10.0.0 one that does not gets
+  `missing-library-reference` - an error - on exactly that line. The engine knew only the host,
+  so it reported that error on correct code in every project that automates another
+  application. The add-in now reads the live project's References and sends their GUIDs on the
+  seed; the GUID is the library's identity and the analyzer's own table says which one is Word,
+  so nothing here holds a list to fall behind, and a library upstream has no model for is
+  ignored rather than guessed at. Broken references are left out, because the compiler cannot
+  use them either, and the `project` route lists every reference with its `broken` flag so the
+  two cases can be told apart.
 - **Annotations control the hidden attributes.** `'@PredeclaredId`, `'@ModuleDescription`,
   `'@Exposed`, `'@Description`, `'@DefaultMember`, `'@Enumerator`, `'@ExcelHotkey` and
   `'@VariableDescription` (the Rubberduck convention) are read from the code, compared with what
@@ -176,9 +190,9 @@ way - which is how the test runner came to have never once run a test in Access
 project after every save (finding 81). Both close the session they opened, so the Excel groups
 after them find only Excel.
 
-Counts move, so they are given as of this line rather than as standing facts: 675 unit tests,
-68 api routes of which 66 are driven by one of the 73 suites the gate runs, 2 left out on
-purpose, and 133 analyzer rules in the bundled engine.
+Counts move, so they are given as of this line rather than as standing facts: 664 unit tests,
+68 api routes of which 66 are driven by one of the 74 suites the gate runs, 2 left out on
+purpose, and 134 analyzer rules in the bundled engine.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
 prove the running build is the one just made, in about a second and with no restart.

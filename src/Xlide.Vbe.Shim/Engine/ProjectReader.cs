@@ -16,12 +16,35 @@ namespace Xlide.Vbe.Shim.Engine;
 /// package names none. Without them every `#If MY_FLAG` is undecidable and both arms are analyzed
 /// (xlide_vscode#63).
 /// </param>
+/// <param name="ReferenceGuids">
+/// The type library GUIDs this project references, as the references declare them. A project
+/// that references another application's library can name its types - an Excel workbook that
+/// references Word compiles `Dim wd As Word.Application` - and the analyzer checks those members
+/// against that application's model. Without the list it knows only the host and reports a
+/// compile error on code that compiles (#21's release, 2026-09-21).
+/// </param>
 internal sealed record ProjectSnapshot(
     string ProjectId,
     string DisplayName,
     int Generation,
     EngineModule[] Modules,
-    string? ConditionalConstants = null);
+    string? ConditionalConstants = null,
+    string[]? ReferenceGuids = null);
+
+/// <summary>
+/// One of a project's type library references, as the reference declares itself.
+/// </summary>
+/// <param name="Name">What the library calls itself: Word, stdole, a component's own name.</param>
+/// <param name="LibraryId">
+/// Its identity, which is what the analyzer's table is keyed on. The VBE calls the property it
+/// is read from GUID, and so does the api; the name here only avoids colliding with the type.
+/// </param>
+/// <param name="Broken">
+/// Whether the VBE cannot resolve it. A broken reference is left out of what the engine is told,
+/// because the compiler cannot use it either, but it is reported here: a project whose Word
+/// reference is broken and one that never had it look identical from the findings alone.
+/// </param>
+internal readonly record struct ProjectReference(string Name, string LibraryId, bool Broken);
 
 /// <summary>
 /// Reads module sources out of the editor.
@@ -477,13 +500,95 @@ internal static class ProjectReader
             var constants = SavedModules.For(SavedPathOf(project))?.ConditionalConstants;
 
             var (id, displayName) = Identity(project);
-            return new ProjectSnapshot(id, displayName, generation, [.. modules], constants);
+            return new ProjectSnapshot(
+                id, displayName, generation, [.. modules], constants, ReferenceGuidsOf(project));
         }
         catch (Exception ex)
         {
             Log.Error("project: could not be read", ex);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Every type library the project references, broken ones included.
+    ///
+    /// Read from the live project, which is where this product's truth lives; the extension
+    /// reads the same facts out of the saved file's dir stream. The GUID is the identity a
+    /// reference declares, and the analyzer's own table maps it to the application whose model
+    /// answers - so nothing here knows which GUID is Word, and nothing here goes stale when
+    /// another library is modelled upstream.
+    ///
+    /// A reference that cannot be read at all is skipped rather than failing the read: a project
+    /// with one unreadable reference still analyses, and losing its OTHER references would turn
+    /// valid code red, which is the very failure this exists to prevent.
+    ///
+    /// The api's `project` route answers from here too, so what a caller is shown is what the
+    /// seed was built from rather than a second walk that can disagree with it.
+    /// </summary>
+    internal static ProjectReference[] ReferencesOf(DispatchObject project)
+    {
+        try
+        {
+            using var references = project.GetObject("References");
+            var count = references?.GetInt32("Count") ?? 0;
+            if (count == 0)
+            {
+                return [];
+            }
+
+            var found = new List<ProjectReference>(count);
+            for (var index = 1; index <= count; index++)
+            {
+                try
+                {
+                    using var reference = references!.GetItem(index);
+                    if (reference is null)
+                    {
+                        continue;
+                    }
+
+                    // A BROKEN REFERENCE HAS NO READABLE GUID, so it is asked about first and
+                    // its name is all that comes back. Reading GUID off one raises, which is
+                    // what the per-entry catch below would otherwise swallow into nothing.
+                    var broken = reference.GetBool("IsBroken");
+                    found.Add(new ProjectReference(
+                        reference.GetString("Name") ?? string.Empty,
+                        broken ? string.Empty : reference.GetString("GUID") ?? string.Empty,
+                        broken));
+                }
+                catch (Exception ex)
+                {
+                    Log.Verbose($"project: a reference could not be read ({ex.GetType().Name})");
+                }
+            }
+
+            return [.. found];
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"project: the references could not be enumerated ({ex.GetType().Name})");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// The GUIDs to tell the engine about: the resolvable references, which are the ones the
+    /// compiler itself can use. Null when there are none, so the seed carries no empty field.
+    /// </summary>
+    private static string[]? ReferenceGuidsOf(DispatchObject project)
+    {
+        var guids = ReferencesOf(project)
+            .Where(one => !one.Broken && one.LibraryId.Length > 0)
+            .Select(one => one.LibraryId)
+            .ToArray();
+
+        if (guids.Length > 0)
+        {
+            Log.Verbose($"project: {guids.Length} reference(s): {string.Join(", ", guids)}");
+        }
+
+        return guids.Length == 0 ? null : guids;
     }
 
     /// <summary>

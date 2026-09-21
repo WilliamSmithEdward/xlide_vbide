@@ -35,8 +35,49 @@ if (!existsSync(join(analyzerRoot, 'analysisWorkerLogic.ts'))) {
 
 mkdirSync(outDir, { recursive: true });
 
-await esbuild.build({
+/**
+ * Sends every `../../../xlide_vscode/src/...` import to the pinned analyzer instead.
+ *
+ * THIS IS WHAT MAKES THE PIN REAL. Setting XLIDE_ANALYZER_ROOT used to do two things only: pass
+ * the existence check above, and point the currency guards at a folder whose timestamps never
+ * move. The imports in engine/src are literal relative paths, so esbuild went on reading the
+ * checkout next door - and the guard, now comparing against a static directory, had nothing to
+ * say about it. A pin that silences the alarm while the build reads the tree is worse than no
+ * pin: v0.17.0 was cut believing it shipped pinned bits and did not (2026-09-21).
+ *
+ * Only relative imports that land inside an `xlide_vscode/src` are redirected. Once inside the
+ * pin, the analyzer's own relative imports resolve within it, so they never reach here.
+ */
+function pinnedAnalyzer(root) {
+    const marker = /\/xlide_vscode\/src\//;
+    return {
+        name: 'pinned-analyzer',
+        setup(build) {
+            build.onResolve({ filter: /^\.{1,2}\// }, (args) => {
+                const full = resolve(args.resolveDir, args.path).split('\\').join('/');
+                const found = marker.exec(full);
+                if (!found) {
+                    return null;
+                }
+
+                const tail = full.slice(found.index + found[0].length);
+                for (const candidate of [join(root, tail), join(root, `${tail}.ts`), join(root, tail, 'index.ts')]) {
+                    if (existsSync(candidate) && statSync(candidate).isFile()) {
+                        return { path: candidate };
+                    }
+                }
+
+                // Named, not swallowed: a pin missing a file the engine imports is a broken pin,
+                // and falling back to the checkout would hide exactly what the pin exists for.
+                return { errors: [{ text: `the pinned analyzer at ${root} has no ${tail}` }] };
+            });
+        },
+    };
+}
+
+const built = await esbuild.build({
     entryPoints: [join(here, 'src', 'main.ts')],
+    ...(process.env.XLIDE_ANALYZER_ROOT ? { plugins: [pinnedAnalyzer(analyzerRoot)] } : {}),
     bundle: true,
     // A single executable embeds a script, and the embedded script is evaluated as CommonJS.
     format: 'cjs',
@@ -58,7 +99,29 @@ await esbuild.build({
         // blocked engine however many times it was repackaged (2026-08-19).
         __ENGINE_BUILT__: JSON.stringify(new Date().toISOString()),
     },
+    // Kept so the build can prove WHICH analyzer it read, below.
+    metafile: true,
 });
+
+// THE BUILD PROVES ITS OWN PROVENANCE. A redirect that silently does nothing is the failure this
+// exists for: for one release XLIDE_ANALYZER_ROOT moved the guards and not the build, and the
+// only thing that could have caught it - which files esbuild actually read - was sitting in the
+// metafile nobody asked for. Now the answer is asserted at the point of truth, every build, at
+// no cost. A pinned build that read one file from the working tree is not a pinned build.
+if (process.env.XLIDE_ANALYZER_ROOT) {
+    const sibling = Object.keys(built.metafile.inputs)
+        .filter((one) => /xlide_vscode[\\/]src[\\/]/.test(one));
+    if (sibling.length > 0) {
+        console.error(
+            `The analyzer was pinned at ${analyzerRoot}, but ${sibling.length} file(s) were read `
+            + `from the checkout next door instead, starting with ${sibling[0]}.`);
+        process.exit(1);
+    }
+
+    const pinned = Object.keys(built.metafile.inputs)
+        .filter((one) => resolve(one).toLowerCase().startsWith(analyzerRoot.toLowerCase()));
+    console.log(`analyzer: ${pinned.length} file(s), all from the pin at ${analyzerRoot}`);
+}
 
 const bundleSize = statSync(bundlePath).size;
 console.log(`bundle ${bundlePath} (${(bundleSize / 1024 / 1024).toFixed(2)} MB)`);

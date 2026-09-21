@@ -1027,7 +1027,32 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("project")] string Project,
     [property: JsonPropertyName("projectId")] string? ProjectId,
     [property: JsonPropertyName("mode")] int Mode,
-    [property: JsonPropertyName("components")] DebugComponentRow[] Components);
+    [property: JsonPropertyName("components")] DebugComponentRow[] Components,
+    /// <summary>
+    /// The type libraries the project references, in the order it holds them.
+    ///
+    /// Here for the same reason <c>predeclaredId</c> is: it is WHY a finding did or did not
+    /// appear. A project that references Word may write `Dim wd As Word.Application`, and one
+    /// that does not gets `missing-library-reference` on the same line - a difference that lives
+    /// nowhere in the text, so without this a caller looking at the finding has nothing to look
+    /// at. Read from the same walk the engine's seed is built from, so the two cannot disagree.
+    /// </summary>
+    [property: JsonPropertyName("references")] DebugReferenceRow[]? References = null);
+
+/// <summary>One type library a project references, as the reference declares itself.</summary>
+public sealed record DebugReferenceRow(
+    [property: JsonPropertyName("name")] string Name,
+    /// <summary>
+    /// Its identity, empty for a broken one, which cannot be asked. Named `guid` on the wire
+    /// because that is what the VBE calls the property this is read from.
+    /// </summary>
+    [property: JsonPropertyName("guid")] string LibraryId,
+    /// <summary>
+    /// Whether the VBE cannot resolve it. A broken reference is not sent to the engine, because
+    /// the compiler cannot use it either - and a project whose Word reference is broken looks
+    /// exactly like one that never had it if only the findings are read.
+    /// </summary>
+    [property: JsonPropertyName("broken")] bool Broken);
 
 /// <summary>
 /// What an Immediate window line came to.

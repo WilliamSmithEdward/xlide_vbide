@@ -5200,7 +5200,12 @@ internal sealed partial class AddInSession
                         project.GetString("Name") ?? string.Empty,
                         DisplayFromProjectId(identity.Id),
                         project.GetInt32("Mode"),
-                        [.. rows]),
+                        [.. rows],
+                        // The seed's own reader, not a second walk: what a caller is shown here
+                        // is what the analyzer was told, which is the only version of this fact
+                        // worth having when the question is why a finding is on screen.
+                        [.. ProjectReader.ReferencesOf(project)
+                            .Select(one => new DebugReferenceRow(one.Name, one.LibraryId, one.Broken))]),
                     DebugJsonContext.Default.DebugProjectReply);
             }
 

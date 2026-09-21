@@ -185,6 +185,7 @@ internal sealed class EngineClient : IAsyncDisposable
         int generation,
         EngineModule[] modules,
         string? conditionalConstants,
+        string[]? referenceGuids,
         CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
@@ -205,6 +206,22 @@ internal sealed class EngineClient : IAsyncDisposable
         if (conditionalConstants is { Length: > 0 })
         {
             payload["conditionalConstants"] = conditionalConstants;
+        }
+
+        // THE TYPE LIBRARIES THIS PROJECT REFERENCES, as the GUIDs the references declare.
+        //
+        // A project that references another application's library can name its types: an Excel
+        // workbook with a reference to Word compiles `Dim wd As Word.Application`, and its
+        // members are checked against Word's model. Without this the analyzer knows only the
+        // host, so from 10.0.0 it reports `missing-library-reference` - a compile error - on
+        // code that compiles perfectly (measured 2026-09-21 before this was sent).
+        //
+        // GUIDs rather than names, because the GUID is the library's identity and the name is
+        // just what it calls itself; the engine maps them through the analyzer's own table, so
+        // this repository holds no list of its own to fall behind.
+        if (referenceGuids is { Length: > 0 })
+        {
+            payload["referenceGuids"] = referenceGuids;
         }
 
         var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);

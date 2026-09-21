@@ -104,7 +104,16 @@ internal sealed class AnalysisService : IAsyncDisposable
         IReadOnlyList<Finding> Findings,
         IReadOnlyList<string> Types,
         IReadOnlyList<string> Procedures,
-        int PolicyEdition);
+        int PolicyEdition,
+        /// <summary>
+        /// The references the seed carried, flattened. Part of the sameness gate for the same
+        /// reason the policy edition is: `Dim wd As Word.Application` is correct in a project
+        /// that references Word and an error in one that does not, so findings computed under an
+        /// older reference set are findings about a project that no longer exists, however
+        /// unchanged the text is. Adding the reference is the fix for that error, and until this
+        /// was in the gate the error stayed on screen until something else was typed.
+        /// </summary>
+        string References);
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SeededProject> _seeded =
         new(StringComparer.OrdinalIgnoreCase);
@@ -1296,6 +1305,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 // rule overrides are findings about a policy nobody holds any more, however
                 // unchanged the text is.
                 if (held is not null && held.PolicyEdition == _policyEdition
+                    && string.Equals(held.References, ReferenceSeedOf(snapshot), StringComparison.Ordinal)
                     && SameSeed(held.Seeds, snapshot.Modules))
                 {
                     // The homes map is not rebuilt either: it is derived from the module set, and
@@ -1321,7 +1331,7 @@ internal sealed class AnalysisService : IAsyncDisposable
 
                 var opened = await engine.OpenProjectAsync(
                     snapshot.ProjectId, snapshot.Generation, snapshot.Modules,
-                    snapshot.ConditionalConstants, _stopping.Token)
+                    snapshot.ConditionalConstants, snapshot.ReferenceGuids, _stopping.Token)
                     .ConfigureAwait(false);
 
                 if (opened is not null)
@@ -1436,7 +1446,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                         findings,
                         opened.Types ?? [],
                         opened.Procedures ?? [],
-                        _policyEdition);
+                        _policyEdition,
+                        ReferenceSeedOf(snapshot));
                 }
                 else
                 {
@@ -1596,6 +1607,14 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// touching one: a control removed from a form kept resolving - completion, diagnostics and
     /// paint all serving the ghost - until some unrelated module write happened to reseed.
     /// </summary>
+    /// <summary>
+    /// A project's references as one comparable string. Order is kept rather than sorted: the
+    /// VBE holds references in an order the developer can change, and the analyzer resolves a
+    /// name against them in that order, so a reorder is a real change to compare.
+    /// </summary>
+    private static string ReferenceSeedOf(ProjectSnapshot snapshot) =>
+        snapshot.ReferenceGuids is null ? string.Empty : string.Join(' ', snapshot.ReferenceGuids);
+
     private static bool SameSeed(Dictionary<string, string> seeded, EngineModule[] now)
     {
         if (seeded.Count != now.Length)
