@@ -174,6 +174,72 @@ check("and unticking it brings the error back, same text again",
   missingLibrary(afterUntick.diagnostics ?? []).length === 1,
   missingLibrary(afterUntick.diagnostics ?? []).map((one) => one.code).join(",") || "(none)");
 
+/* ---- and every other feature sees the same library --------------------------------------------- */
+
+// DIAGNOSTICS ARE NOT THE FEATURE, they are one consumer of it. The analyzer resolves a
+// referenced application's types for completion, hover and canonical casing too, and each of
+// those builds its own module context from the host alone unless the references are threaded
+// into it. The split that leaves - the error goes away when Word is referenced and `wd.` still
+// offers nothing - is the one this project has already had once over the host itself.
+const WITH_WORD = "refs-features";
+const featureSource = [
+  "Option Explicit",
+  "",
+  "Public Sub Automate()",
+  "    Dim wd As Word.Application",
+  "    Set wd = New Word.Application",
+  "    wd.Visible = True",
+  "    wd.",
+  "End Sub",
+].join(CRLF);
+const afterDot = featureSource.lastIndexOf("    wd.") + "    wd.".length;
+const onVisible = featureSource.indexOf("wd.Visible") + "wd.".length;
+
+await call("project/open", {
+  projectId: WITH_WORD, generation: 1,
+  modules: [{ moduleName: "Feat", source: featureSource, type: "standard" }],
+  referenceGuids: [WORD],
+});
+
+const { items } = await call("textDocument/completion", {
+  projectId: WITH_WORD, moduleName: "Feat", source: featureSource,
+  offset: afterDot, moduleType: "standard",
+});
+const labels = items.map((one) => one.label.toLowerCase());
+check("completion after `wd.` offers Word's members",
+  labels.includes("documents") && labels.includes("visible"),
+  `${items.length} item(s): ${items.slice(0, 6).map((one) => one.label).join(", ")}`);
+
+const { hover } = await call("textDocument/hover", {
+  projectId: WITH_WORD, moduleName: "Feat", source: featureSource,
+  offset: onVisible, moduleType: "standard",
+});
+check("hover describes a member of the referenced application",
+  typeof hover?.signature === "string" && hover.signature.includes("Visible"),
+  JSON.stringify(hover?.signature ?? null));
+
+// The same request in a project that references nothing: the split this exists to prevent would
+// show here as identical answers on both sides.
+await call("project/open", {
+  projectId: "refs-features-none", generation: 1,
+  modules: [{ moduleName: "Feat", source: featureSource, type: "standard" }],
+});
+const bare = await call("textDocument/completion", {
+  projectId: "refs-features-none", moduleName: "Feat", source: featureSource,
+  offset: afterDot, moduleType: "standard",
+});
+check("and offers none of them when the project references nothing",
+  !bare.items.map((one) => one.label.toLowerCase()).includes("documents"),
+  `${bare.items.length} item(s)`);
+
+const bareHover = await call("textDocument/hover", {
+  projectId: "refs-features-none", moduleName: "Feat", source: featureSource,
+  offset: onVisible, moduleType: "standard",
+});
+check("nor describes one",
+  bareHover.hover === null || bareHover.hover === undefined,
+  JSON.stringify(bareHover.hover ?? null).slice(0, 80));
+
 /* ---- and they are forgotten with the project ------------------------------------------------- */
 
 await call("project/close", { projectId: referenced.projectId });

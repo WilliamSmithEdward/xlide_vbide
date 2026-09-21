@@ -644,6 +644,23 @@ export class Dispatcher {
         return { modules: modules.length, types: facts.types, procedures: facts.procedures };
     }
 
+    /**
+     * One live request, with the project's own facts attached.
+     *
+     * Every feature that assembles a module context - completion, hover, signature help,
+     * canonical casing, extract variable, semantic tokens - needs the applications this project
+     * references, because a workbook that references Word can name Word's types and a resolver
+     * given Excel's model alone answers nothing for `wd.`. Built in ONE place so the next
+     * project-wide fact is attached once rather than six times, which is exactly how diagnostics
+     * came to know about the host while completion did not (the 2026-08-19 hunt).
+     */
+    private liveRequest<T extends { projectId: string }>(
+        params: T,
+        source: string,
+    ): T & { source: string; referencedHosts: readonly string[] | undefined } {
+        return { ...params, source, referencedHosts: this.referencedHosts.get(params.projectId) };
+    }
+
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
         this.referencedHosts.delete(params.projectId);
@@ -701,7 +718,7 @@ export class Dispatcher {
             return { items: [] };
         }
 
-        return { items: completionsFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }) };
+        return { items: completionsFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source)) };
     }
 
     private hover(params: HoverParams): HoverResult {
@@ -712,7 +729,7 @@ export class Dispatcher {
             return { hover: null };
         }
 
-        return { hover: hoverFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }) };
+        return { hover: hoverFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source)) };
     }
 
     private signatureHelp(params: SignatureHelpParams): SignatureHelpResult {
@@ -723,7 +740,7 @@ export class Dispatcher {
             return { signature: null };
         }
 
-        return { signature: signatureHelpFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }) };
+        return { signature: signatureHelpFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source)) };
     }
 
     private smartEnter(params: SmartEnterParams): SmartEnterResult {
@@ -745,7 +762,7 @@ export class Dispatcher {
             return { edits: [] };
         }
 
-        return { edits: canonicalCaseFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }) };
+        return { edits: canonicalCaseFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source)) };
     }
 
     private loopSync(params: LoopSyncParams): LoopSyncResult {
@@ -833,7 +850,7 @@ export class Dispatcher {
             return { refused: 'This module is not one the engine holds.' };
         }
 
-        return extractVariableFor(this.seededModules.get(params.projectId) ?? [], { ...params, source });
+        return extractVariableFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source));
     }
 
     private encapsulateField(params: EncapsulateFieldParams): EncapsulateFieldResult {
@@ -1015,7 +1032,7 @@ export class Dispatcher {
         }
 
         const result: SemanticTokensResult = {
-            tokens: semanticTokensFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }),
+            tokens: semanticTokensFor(this.seededModules.get(params.projectId) ?? [], this.liveRequest(params, source)),
         };
 
         this.semanticMemo.set(key, { source, result });

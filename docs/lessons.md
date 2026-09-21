@@ -2838,3 +2838,43 @@ it go red before trusting it - with two things added. Watch the RIGHT check go
 red, because a suite that goes red somewhere is not a suite whose checks each
 bite. And read the break: a deliberate sabotage is code too, and an edit that
 does nothing is indistinguishable from a check that does nothing.
+
+## 92. A fact outside the text, and three caches that only knew about text
+
+Telling the analyzer which type libraries a project references is one field on
+the seed. Making the editor behave as if it knew took four changes, and three
+of them were caches asked a question they had never been asked before.
+
+The pass leaves a project alone when its module text has not moved. That gate
+had been right since the day it was written, because everything that could
+change a finding was in the text or in the rule policy, and the policy was
+already in it. A reference is in neither. Ticking Word in the References
+dialog left the error on screen; the only thing that cleared it was typing
+somewhere else, which re-seeded the project for an unrelated reason.
+
+Behind that, the engine's own per-document memo compared the source, the
+cross-module facts and the request shape. The references were in none of the
+three, so even once the project DID re-seed, the answer served was the one
+computed before the library existed. Two gates, one behind the other, each
+correct about the inputs it knew about.
+
+And the module context that completion, hover, signature help and canonical
+casing share resolved its object model from the host token alone. So the error
+went away when Word was referenced and `wd.` still offered nothing - the exact
+split this product had over the host itself in August, where completion knew
+`ActiveSheet` was nobody in Word while diagnostics stayed silent.
+
+None of the three was found by reading. The first turned up by driving a live
+Excel session: add the reference through the Immediate window, write the SAME
+text back, watch the error stand. The second turned up when that was fixed and
+the error still stood. The third turned up from the upstream changelog, which
+said what the analyzer now resolves - and the question "which of our features
+asks it that" had a written answer, one call site per feature.
+
+The rule: when a new input can change an answer, every cache between the input
+and the answer has to learn about it, and the caches do not announce
+themselves. Find them by asking what is keyed on what, then prove each one by
+changing the input with everything else held identical. Holding it identical is
+the whole experiment - the first version of this test appended a comment to
+the module, which changed the text, which re-seeded, which is exactly the path
+that already worked.

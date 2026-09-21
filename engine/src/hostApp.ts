@@ -19,6 +19,7 @@
 import {
     EMPTY_HOST_MODEL,
     hostObjectModelForToken,
+    hostObjectModelForTokens,
 } from '../../../xlide_vscode/src/analyzer/host/hostRegistry';
 import { getExcelObjectModel, type HostObjectModel } from '../../../xlide_vscode/src/analyzer';
 
@@ -44,6 +45,28 @@ export function hostApp(): string {
  */
 export function currentHostModelOverride(): HostObjectModel | undefined {
     return hostObjectModelForToken(current);
+}
+
+/**
+ * The same, widened by the applications a PROJECT references.
+ *
+ * The host is a fact about the process and belongs above; which libraries a project references
+ * is a fact about that project, so it arrives per call. A workbook that references Word can name
+ * Word's types, and a resolver given only Excel's model answers nothing for `wd.` - which is the
+ * split diagnostics and completion were in until 2026-09-21: the error went away when the
+ * reference was added and the completions never arrived.
+ *
+ * Resolution is in DECLARATION ORDER with the host first, which is the order VBA resolves an
+ * ambiguous name in: `Application` in a workbook that references Word is Excel's.
+ */
+export function hostModelOverrideWith(
+    referencedHosts: readonly string[] | undefined,
+): HostObjectModel | undefined {
+    if (referencedHosts === undefined || referencedHosts.length === 0) {
+        return currentHostModelOverride();
+    }
+
+    return hostObjectModelForTokens([current, ...referencedHosts]);
 }
 
 /** The current host's model, Excel's included: for callers that read it rather than thread it. */

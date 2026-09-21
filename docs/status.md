@@ -56,16 +56,23 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 - **Break mode prints a local by name.** `? counter` answers from the Locals window; an
   expression still declines, because evaluating one adds a procedure and resets the debugger
   (#21).
-- **A project's type library references are read and sent.** A workbook that references Word
-  compiles `Dim wd As Word.Application`, and from the analyzer's 10.0.0 one that does not gets
-  `missing-library-reference` - an error - on exactly that line. The engine knew only the host,
-  so it reported that error on correct code in every project that automates another
-  application. The add-in now reads the live project's References and sends their GUIDs on the
-  seed; the GUID is the library's identity and the analyzer's own table says which one is Word,
-  so nothing here holds a list to fall behind, and a library upstream has no model for is
-  ignored rather than guessed at. Broken references are left out, because the compiler cannot
-  use them either, and the `project` route lists every reference with its `broken` flag so the
-  two cases can be told apart.
+- **Cross-application code is understood, because the project's references are.** A workbook
+  that references Word compiles `Dim wd As Word.Application`; the analyzer resolves Word's types
+  when it is told about the reference, and reports `missing-library-reference` - an error - when
+  it is not. The engine knew only the host, so that error was drawn over correct code in every
+  project that automates another application. The add-in reads the live project's References and
+  sends their GUIDs on the seed; the GUID is the library's identity and the analyzer's own table
+  says which one is Word, so nothing here holds a list to fall behind, and a library upstream has
+  no model for is ignored rather than guessed at. Broken references are left out, because the
+  compiler cannot use them either, and the `project` route lists every reference with its
+  `broken` flag so the two cases can be told apart.
+
+  It is one list for every feature, which took finding: the same references reach completion,
+  hover, signature help, canonical casing and semantic colouring through one request builder, so
+  `wd.` offers Word's 183 members rather than the error going quiet while the completions stay
+  empty. And they are LIVE - tick a library in the References dialog and the findings move
+  without the module being touched, which needed the reference set inside two separate sameness
+  gates that had only ever compared text ([lessons.md](lessons.md) finding 92).
 - **Annotations control the hidden attributes.** `'@PredeclaredId`, `'@ModuleDescription`,
   `'@Exposed`, `'@Description`, `'@DefaultMember`, `'@Enumerator`, `'@ExcelHotkey` and
   `'@VariableDescription` (the Rubberduck convention) are read from the code, compared with what

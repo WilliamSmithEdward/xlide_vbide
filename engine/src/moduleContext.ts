@@ -19,7 +19,7 @@ import {
     type VbaProjectModuleInput,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { analyzerInputFor } from './analyzerInput.js';
-import { currentHostModelOverride, hostApp } from './hostApp.js';
+import { hostApp, hostModelOverrideWith } from './hostApp.js';
 import type { HostObjectModel } from '../../../xlide_vscode/src/analyzer';
 import type { ModulePayload } from './protocol';
 
@@ -43,6 +43,15 @@ export interface LiveModuleRequest {
     source: string;
     moduleType?: string;
     documentType?: string;
+    /**
+     * The applications this project's type library references bring in, as host tokens.
+     *
+     * Per request rather than process state, unlike the host itself: the engine serves several
+     * projects and each one references what it references. It rides the seed, so it can only
+     * change when the seeded module array is replaced - which is what the context cache below
+     * is keyed on, so a cached context can never be a stale answer about these.
+     */
+    referencedHosts?: readonly string[];
 }
 
 export interface AssembledContext {
@@ -187,7 +196,7 @@ function buildContext(
         codeNameList: entries.filter((entry) => entry.type === 'document').map((entry) => entry.name),
         meType: meTypeFor(current),
         meProjectType: meProjectTypeFor(current),
-        hostModel: currentHostModelOverride(),
+        hostModel: hostModelOverrideWith(request.referencedHosts),
         // From the SEEDED module, like every cross-module fact here: the designer facts ride
         // the seed, and a control set that changes without a reseed lags the same way the rest
         // of the project's facts do.
