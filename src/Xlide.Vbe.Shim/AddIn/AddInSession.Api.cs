@@ -1768,7 +1768,10 @@ internal sealed partial class AddInSession
 
                 var raisedBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
 
-                var evaluated = new ManualResetEventSlim(false);
+                // An evaluation can outlive this HTTP wait, for example at a nested breakpoint.
+                // A late completion must not signal a disposed ManualResetEventSlim.
+                var evaluated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var preserveDebugSession = false;
                 var outcome = string.Empty;
                 var failed = false;
 
@@ -1776,13 +1779,14 @@ internal sealed partial class AddInSession
                 {
                     try
                     {
+                        Volatile.Write(ref preserveDebugSession, ProjectModeNow() != DesignMode);
                         var result = EvaluateImmediate(text);
                         outcome = result.Text;
                         failed = result.Failed;
                     }
                     finally
                     {
-                        evaluated.Set();
+                        evaluated.TrySetResult();
                     }
                 });
 
@@ -1794,9 +1798,12 @@ internal sealed partial class AddInSession
                 // the break.
                 var nothingLeftToWaitFor = false;
 
-                while (Environment.TickCount64 < deadline && !evaluated.IsSet && !nothingLeftToWaitFor)
+                while (Environment.TickCount64 < deadline && !evaluated.Task.IsCompleted && !nothingLeftToWaitFor)
                 {
-                    evaluated.Wait(120);
+                    evaluated.Task.Wait(120);
+
+                    // Paused evaluation owns its notices and must never arm scratch recovery.
+                    if (Volatile.Read(ref preserveDebugSession)) { continue; }
 
                     foreach (var raised in DialogWatch.Dialogs())
                     {
@@ -1830,14 +1837,14 @@ internal sealed partial class AddInSession
                         //
                         // Read off the completion event rather than off the `ran` computed later:
                         // later is exactly what loses the race to the poll.
-                        if (!evaluated.IsSet)
+                        if (!evaluated.Task.IsCompleted)
                         {
                             _immediateLeftItStopped = true;
 
                             /*
                              * AND STOP WAITING FOR A COMPLETION THAT CANNOT COME.
                              *
-                             * The loop's condition is `!evaluated.IsSet`, and a compile error is
+                             * The loop's condition is `!evaluated.Task.IsCompleted`, and a compile error is
                              * raised INSTEAD of running the line - so the evaluation never
                              * completes, the event is never set, and this waited out the whole
                              * fifteen-second budget before giving up. Two more seconds followed
@@ -1854,15 +1861,14 @@ internal sealed partial class AddInSession
                              * what lets the evaluation finish, and a result is better than a
                              * complaint when both are available.
                              */
-                            evaluated.Wait(500);
+                            evaluated.Task.Wait(500);
                             nothingLeftToWaitFor = true;
                             break;
                         }
                     }
                 }
 
-                var ran = evaluated.Wait(2000);
-                evaluated.Dispose();
+                var ran = evaluated.Task.Wait(2000);
 
                 // What the editor complained about outranks what the evaluator managed to return.
                 // A cleared compile box leaves the run answering an empty string, which reads as a

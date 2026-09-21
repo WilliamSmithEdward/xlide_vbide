@@ -36,6 +36,7 @@ internal sealed class ImmediateReader : IDisposable
     private string? _lastRaw;
 
     private bool _failed;
+    private bool _evaluating;
 
     private ImmediateReader(nint window) => _window = window;
 
@@ -151,13 +152,12 @@ internal sealed class ImmediateReader : IDisposable
     /// tail is trimmed away and lines are all that is compared. An empty reading is ignored
     /// outright: the window is hidden and nobody can clear it, but a project reset makes it read
     /// as empty for a moment, and adopting that moment as the baseline is what a replay grows
-    /// from. And a trimmed reading that still does not continue the old one means the editor
-    /// discarded old lines; which part survived is unknowable, so it is adopted without being
-    /// shown again.
+    /// from. When old lines roll out, the surviving suffix identifies the newly printed output.
+    /// A rewrite with no overlap is adopted without replaying it.
     /// </summary>
     public void Poll()
     {
-        if (_failed || _text is null)
+        if (_failed || _text is null || _evaluating)
         {
             return;
         }
@@ -178,16 +178,10 @@ internal sealed class ImmediateReader : IDisposable
             return;
         }
 
-        if (!current.StartsWith(_seen, StringComparison.Ordinal))
-        {
-            _seen = current;
-            return;
-        }
-
-        var addition = current[_seen.Length..];
+        var addition = Xlide.Vbe.Core.Editor.ImmediateTranscript.Added(_seen, current);
         _seen = current;
 
-        if (addition.Length > 0)
+        if (addition is { Length: > 0 })
         {
             Appended?.Invoke(addition);
         }
@@ -196,10 +190,8 @@ internal sealed class ImmediateReader : IDisposable
     /// <summary>
     /// The reading without the caret's own tail, which is presentation and not output.
     ///
-    /// The tail is trimmed by character class, not by a list. The document ends in a character
-    /// that is neither a newline nor a space, output is inserted BEFORE it, and a list that did
-    /// not include it meant every reading failed the prefix check and every print was swallowed.
-    /// Anything unprintable or blank at the end is the caret's furniture, not the code's output.
+    /// Only the caret line and NUL are removed. Trimming output spaces made the next poll
+    /// replay a numeric result's trailing space as a spurious Debug.Print line (#21).
     /// </summary>
     private static string? Normalise(string? text)
     {
@@ -208,13 +200,7 @@ internal sealed class ImmediateReader : IDisposable
             return null;
         }
 
-        var end = text.Length;
-        while (end > 0 && (char.IsWhiteSpace(text[end - 1]) || char.IsControl(text[end - 1])))
-        {
-            end--;
-        }
-
-        return text[..end];
+        return text.EndsWith("\r\n\0", StringComparison.Ordinal) ? text[..^3] : text.TrimEnd('\0');
     }
 
     /// <summary>The end of a reading with every non-printable made visible, for the log.</summary>
@@ -259,6 +245,95 @@ internal sealed class ImmediateReader : IDisposable
     /// </summary>
     public string? Text() => Normalise(ReadAll());
 
+    /// <summary>
+    /// Evaluates in the native paused scope. No project edits, clipboard use or global keys.
+    /// Pending output is delivered to XLIDE before replacing the native working buffer. Keeping
+    /// that buffer short avoids stale accessibility offsets when VBE rolls its history over.
+    /// </summary>
+    public ImmediateEvaluator.Result Evaluate(string line, Func<bool> stillPaused)
+    {
+        if (_evaluating)
+        {
+            return new("An Immediate evaluation is already in progress.", true);
+        }
+
+        if (_failed || _text is null || !Win32.IsWindow(_window)
+            || Win32.GetWindowThreadProcessId(_window, out var owner) == 0
+            || owner != Win32.GetCurrentProcessId())
+        {
+            return new("The native Immediate window is unavailable. The debugger was not reset.", true);
+        }
+
+        var marker = "'xlide:" + Guid.NewGuid().ToString("N");
+        var command = line.Trim() + " " + marker;
+        if (command.Length > 1023 || line.Any(char.IsControl))
+        {
+            return new("Enter one Immediate line, at most " + (1023 - marker.Length - 1)
+                + " characters, without control characters.", true);
+        }
+
+        Poll(); // Deliver pending Debug.Print output before taking ownership of the transcript.
+        _evaluating = true;
+        try
+        {
+            if (!stillPaused())
+            {
+                return new("The debugger is no longer paused; the line was not executed.", true);
+            }
+
+            if (_text.Target.GetDocumentRange(out var pointer) < 0 || pointer == 0)
+            {
+                return new("The native Immediate caret could not be located.", true);
+            }
+
+            using (var range = ComHandle<IUIAutomationTextRange>.Own(pointer))
+            {
+                if (range is null || range.Target.Select() < 0)
+                {
+                    return new("The native Immediate caret could not be positioned.", true);
+                }
+            }
+
+            // The first character replaces the selected native transcript. XLIDE's visible
+            // history is retained; Poll above already delivered everything pending in it.
+            foreach (var character in command)
+            {
+                Win32.SendMessage(_window, 0x0102, character, 1); // WM_CHAR
+            }
+
+            // Never press Enter unless the entire requested command landed on its own line.
+            // This also catches a stale caret, an incomplete native line, or provider failure.
+            var typed = Text();
+            if (typed is null || !("\n" + typed).EndsWith("\n" + command, StringComparison.Ordinal))
+            {
+                return new("The native Immediate window did not accept the complete line; it was not executed.", true);
+            }
+
+            using var errors = new NativeImmediateErrors();
+            Win32.SendMessage(_window, 0x0100, 13, 1); // WM_KEYDOWN: Enter executes; WM_CHAR does not.
+            Win32.SendMessage(_window, 0x0101, 13, unchecked((nint)0xC0000001));
+            if (errors.Message is { } error)
+            {
+                return new(error, true);
+            }
+
+            var output = Xlide.Vbe.Core.Editor.ImmediateTranscript.Output(ReadAll(), marker);
+            return output is null
+                ? new("The native evaluation completed, but its output could not be read in full. Do not retry statements with side effects automatically.", true)
+                : new(output, false, HasOutput: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("immediate: native evaluation failed", ex);
+            return new("Native Immediate evaluation failed: " + ex.Message, true);
+        }
+        finally
+        {
+            Reset(); // The caller displays the result; the poller must not echo it a second time.
+            _evaluating = false;
+        }
+    }
+
     private string? ReadAll()
     {
         var text = _text;
@@ -280,14 +355,45 @@ internal sealed class ImmediateReader : IDisposable
                 return null;
             }
 
-            if (range.Target.GetText(UiAutomationIds.WholeRange, out var value) < 0 || value == 0)
+            if (range.Target.GetText(1024 * 1024, out var value) < 0 || value == 0)
             {
                 return null;
             }
 
             try
             {
-                return Marshal.PtrToStringBSTR(value);
+                var raw = Marshal.PtrToStringBSTR(value);
+                if (raw.Length < 1024) { return raw; }
+
+                // The VBE provider caps each GetText call, even with maxLength = -1.
+                // Read smaller ranges so a long history cannot hide the newest command.
+                if (range.Target.Clone(out var copy) < 0 || copy == 0) { return null; }
+                using var chunk = ComHandle<IUIAutomationTextRange>.Own(copy);
+                if (chunk is null || chunk.Target.MoveEndpointByRange(1, range.Pointer, 0) < 0)
+                {
+                    return null;
+                }
+
+                var all = new System.Text.StringBuilder();
+                while (all.Length < 1024 * 1024)
+                {
+                    if (chunk.Target.MoveEndpointByUnit(1, 0, 512, out var moved) < 0 || moved == 0
+                        || chunk.Target.GetText(UiAutomationIds.WholeRange, out var part) < 0 || part == 0)
+                    {
+                        return null;
+                    }
+
+                    try { all.Append(Marshal.PtrToStringBSTR(part).TrimEnd('\0')); }
+                    finally { Marshal.FreeBSTR(part); }
+                    if (chunk.Target.CompareEndpoints(1, range.Pointer, 1, out var compared) < 0)
+                    {
+                        return null;
+                    }
+                    if (compared >= 0) { return all.Append('\0').ToString(); }
+                    if (chunk.Target.MoveEndpointByRange(0, chunk.Pointer, 1) < 0) { return null; }
+                }
+
+                return null;
             }
             finally
             {

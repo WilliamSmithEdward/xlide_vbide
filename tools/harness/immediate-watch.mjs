@@ -147,12 +147,10 @@ check("what the statement printed is in the window",
 check("reading the window does not report a failure", !window.failed, JSON.stringify(window.failed));
 
 // ---------------------------------------------------------------------------------------------
-console.log("\n2b. at a breakpoint, ? name answers from the Locals window (#21)\n");
+console.log("\n2b. at a breakpoint, expressions use the native paused scope (#21)\n");
 
-// Evaluating adds a procedure to the project, which would reset the debugger, so break mode
-// declines it - but "? name" is what a developer types at a breakpoint, and the Locals window
-// already holds the answer. Walk is stopped on its fourth statement, where counter is 1, label is
-// "start" and ratio is 0.5, and each is asked for the way the editor's own window would be asked.
+// Walk is stopped with counter = 1, label = "start" and ratio = 0.5. Evaluation must use
+// that live scope, without the scratch procedure used in design mode.
 const runnerText = (await api.readModule("Runner", project.projectId)).text ?? "";
 const runnerLines = runnerText.split(/\r?\n/);
 const stopLine = runnerLines.findIndex((l) => l.includes("counter = counter + 1")) + 1;
@@ -181,18 +179,18 @@ if (reached) {
   check("Print asks the same way", !ratio.failed && (ratio.text ?? "").trim() === "0.5", JSON.stringify(ratio));
 
   const missing = await api.immediate("? nowhere");
-  check("a name the Locals window does not hold is declined, and says so",
-    missing.failed && /not a local/.test(missing.text ?? ""), JSON.stringify(missing));
+  check("an unknown name has native Immediate semantics (an Empty Variant)",
+    !missing.failed && missing.text === "", JSON.stringify(missing));
 
   const expression = await api.immediate("? counter + 1");
-  check("an expression is still declined, with what does work named",
-    expression.failed && /\? name/.test(expression.text ?? ""), JSON.stringify(expression));
+  check("an expression evaluates in the paused procedure",
+    !expression.failed && expression.text.trim() === "2", JSON.stringify(expression));
 
   check("and the debugger is still stopped after all of it", await inBreak());
 }
 
 await api.command("reset").catch(() => {});
-await wait(800);
+await waitFor("design mode", async () => !(await inBreak()), { budgetMs: 10000 });
 await api.breakpoint("Runner", stopLine, { project: project.projectId, state: "off" }).catch(() => {});
 check("the session is back in design mode with the breakpoint cleared",
   !(await inBreak()) && !((await api.breakpoints()).breakpoints ?? []).some((r) => r.module.toLowerCase() === "runner"));

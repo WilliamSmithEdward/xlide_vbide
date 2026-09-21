@@ -416,8 +416,10 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Run an editor command by name | `command("compile")`, `command("run")` … |
 | Set, clear or toggle a breakpoint | `breakpoint(module, line, { state })` |
 | Evaluate in the Immediate window, and read the answer | `immediate(text)` |
+| Evaluate AT A BREAKPOINT, in the stopped scope | `immediate(text)` - same route, different engine underneath (#21) |
 | Read the Immediate window as it stands | `immediate()` |
 | The Immediate window and Watch panel, end to end | `node tools\harness\immediate-watch.mjs` |
+| Break-mode evaluation, end to end | `node tools\harness\native-immediate.mjs` |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |

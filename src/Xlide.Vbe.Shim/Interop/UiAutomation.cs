@@ -110,6 +110,12 @@ internal partial interface IUIAutomationTextRange
 
     // 10
     [PreserveSig] int GetText(int maxLength, out nint text);
+
+    // 11..14. Selection places the Immediate caret without global keyboard state.
+    [PreserveSig] int Move(int unit, int count, out int moved);
+    [PreserveSig] int MoveEndpointByUnit(int endpoint, int unit, int count, out int moved);
+    [PreserveSig] int MoveEndpointByRange(int endpoint, nint range, int targetEndpoint);
+    [PreserveSig] int Select();
 }
 
 /// <summary>IUIAutomationElementArray. What FindAll answers with.</summary>

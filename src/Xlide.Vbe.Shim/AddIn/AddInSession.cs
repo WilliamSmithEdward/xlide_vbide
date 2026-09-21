@@ -67,6 +67,7 @@ internal sealed partial class AddInSession : IDisposable
     private AnalysisService? _analysis;
     private ImmediateEvaluator? _immediate;
     private ImmediateReader? _immediateReader;
+    private bool _immediateEvaluationBusy;
     private bool _windowsHidden;
     private EditorSurface? _editorSurface;
     private HostChrome? _hostChrome;
@@ -6886,6 +6887,39 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private ImmediateEvaluator.Result EvaluateImmediate(string line)
     {
+        if (_immediateEvaluationBusy)
+        {
+            var busy = new ImmediateEvaluator.Result("An Immediate evaluation is already in progress.", true);
+            _editorSurface?.ShowImmediateResult(busy.Text, busy.Failed);
+            return busy;
+        }
+
+        _immediateEvaluationBusy = true;
+        try
+        {
+            ImmediateEvaluator.Result result;
+            try { result = EvaluateImmediateCore(line); }
+            catch (Exception ex)
+            {
+                Log.Error("immediate: evaluation failed", ex);
+                result = new("Immediate evaluation failed: " + ex.Message, true);
+            }
+            if (result.Failed || result.Text.Length > 0 || result.HasOutput)
+            {
+                _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
+            }
+
+            _editorSurface?.Focus();
+            return result;
+        }
+        finally
+        {
+            _immediateEvaluationBusy = false;
+        }
+    }
+
+    private ImmediateEvaluator.Result EvaluateImmediateCore(string line)
+    {
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
 
         // An attachment that failed at start-up is retried the moment output is about to
@@ -6919,6 +6953,43 @@ internal sealed partial class AddInSession : IDisposable
          * touched.
          */
 
+        // Read the live mode. Cached debugger state can miss a break; inserting a scratch
+        // procedure in that interval would reset the user's session.
+        int mode;
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            mode = project?.GetInt32("Mode") ?? -1;
+        }
+        catch (Exception ex)
+        {
+            return new("The debugger state could not be read: " + ex.Message, true);
+        }
+
+        if (mode == BreakMode)
+        {
+            // Native Immediate selection also changes the VBE command target. Restore the code
+            // pane before returning keyboard focus to our prompt, or the next Run opens Macros.
+            using var pane = _editor.GetObject("ActiveCodePane");
+            try
+            {
+                return _immediateReader?.Evaluate(line, () => ProjectModeNow() == BreakMode)
+                    ?? new("The native Immediate window is unavailable. The debugger was not reset.", true);
+            }
+            finally
+            {
+                try { pane?.Invoke("Show"); }
+                catch (Exception ex) { Log.Info("immediate: could not restore the code pane: " + ex.Message); }
+            }
+        }
+
+        if (mode != DesignMode)
+        {
+            return new("Pause execution before evaluating an Immediate expression.", true);
+        }
+
+        // A paused evaluation must use the compiled scope as it stands, without writing any
+        // pending source edits into the suspended project.
         _editorSurface?.FlushEdits();
 
         var evaluator = _immediate;
@@ -6929,31 +7000,6 @@ internal sealed partial class AddInSession : IDisposable
             // Its scratch module is removed under the same pane-tracker hold as every other
             // remove this product makes (CodePaneTracker.Hold).
             evaluator.HoldPanes = HoldCodePanes;
-
-            // "? name" in break mode is answered from the Locals ghost (#21): the row the panel
-            // shows for that name, read the way the panel reads it. A fresh read is asked for so
-            // a value that moved on the last step is the one printed, and the latest landed
-            // reading answers - the reader is a tick or two behind at most, and the panel on
-            // screen is the same reading.
-            evaluator.LocalLookup = name =>
-            {
-                _ghostReaders?.RequestRead();
-                var snapshot = _ghostReaders?.Locals;
-                if (snapshot is null)
-                {
-                    return null;
-                }
-
-                foreach (var row in snapshot.Rows)
-                {
-                    if (string.Equals(row.Expression, name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return (row.Value, row.Type);
-                    }
-                }
-
-                return null;
-            };
 
             // PUT THE PROJECT BACK when an evaluation leaves it stopped. A line that will not
             // compile raises the editor's own "Compile error" box, and behind it the project is
@@ -7033,19 +7079,8 @@ internal sealed partial class AddInSession : IDisposable
         Log.Info($"immediate: {(result.Failed ? "failed" : "ok")}"
                  + (result.Text.Length > 0 ? $" '{(result.Text.Length > 80 ? result.Text[..80] : result.Text)}'" : string.Empty));
 
-        // A successful statement says nothing, which is the native window's own manner. What the
-        // code printed arrives through the Debug.Print reader; the ceremony stays silent.
-        if (result.Failed || result.Text.Length > 0)
-        {
-            _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
-        }
-
         // Evaluating adds and removes a module, which the analyzer would otherwise report on.
         _analysis?.Reanalyse();
-
-        // Running the line took the host through pane churn that ends with a native pane active
-        // and the keyboard on it. The developer is mid-conversation with the prompt.
-        _editorSurface?.Focus();
 
         return result;
     }

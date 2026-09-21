@@ -399,7 +399,10 @@ export class Shell {
         this.propertiesList,
       ]),
       seat("problems", "Problems", [this.problemsFilters, this.problemsBody]),
-      seat("immediate", "Immediate", [this.immediateBody], () => this.immediateInput.focus()),
+      seat("immediate", "Immediate", [this.immediateBody], () => {
+        this.immediateInput.focus();
+        this.immediateLog.scrollTop = this.immediateLog.scrollHeight;
+      }),
       seat("locals", "Locals", [this.localsBody]),
       seat("watch", "Watch", [this.watchBody]),
       seat("tests", "Tests", [root.querySelector("#tests") as HTMLElement], () => handlers.testsShown()),

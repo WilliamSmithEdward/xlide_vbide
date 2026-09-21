@@ -894,7 +894,7 @@ if ($Live) {
             # instance is answering" and the gate read it as their failure (2026-08-28, found
             # the first time the full pass ran after they landed).
             @{ Fixture = 'DebugFixture.xlsm'
-               Suites  = @('import-guard.mjs', 'immediate-watch.mjs',
+               Suites  = @('import-guard.mjs', 'immediate-watch.mjs', 'native-immediate.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',

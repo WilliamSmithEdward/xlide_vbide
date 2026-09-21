@@ -298,9 +298,17 @@ internal static unsafe class DialogWatch
     }
 
     public static bool Dismiss(string? caption, string button)
+        => DismissMatching(caption, button, null);
+
+    /// <summary>Answer only the observed window, never another dialog with the same caption.</summary>
+    public static bool DismissWindow(string window, string button)
+        => DismissMatching(null, button, window);
+
+    private static bool DismissMatching(string? caption, string button, string? window)
     {
         foreach (var dialog in TopLevelDialogs())
         {
+            if (window is not null && window != $"0x{dialog:X}") { continue; }
             var title = Win32.ReadWindowText(dialog);
             if (caption is { Length: > 0 }
                 && !title.Contains(caption, StringComparison.OrdinalIgnoreCase))

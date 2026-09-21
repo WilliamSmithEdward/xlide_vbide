@@ -439,7 +439,9 @@ does not expire.
   messages say what changed, why, and what the defect looked like.
 - Report status literally; a check that passes by not looking hard enough is worse than none.
 - The user rejects backwards-compatibility hacks - full refactors are fine.
-- No synthetic input (SendKeys) in production, ever.
+- No synthetic input (SendKeys) in production. Exception authorized by the user on 2026-09-21
+  for issue #21: text and Enter may be sent directly to this session's hidden native Immediate
+  window to evaluate in a paused scope. No global SendKeys or clipboard changes.
 - The whole UI should end up ours: consistently dark, VS-style ergonomics, the VBE alive
   underneath as the engine. The module is the source of truth; typing follows xlide_vscode.
 - Every native window should eventually be replaced by the surface (user, 2026-08-01): Locals,
