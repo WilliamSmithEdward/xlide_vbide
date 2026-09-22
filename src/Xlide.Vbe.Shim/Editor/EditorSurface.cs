@@ -1627,10 +1627,18 @@ internal sealed class EditorSurface : IDisposable
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(projects);
 
+        _modulesRevision++;
         Send("setModules", JsonSerializer.Serialize(
-            new SetModulesMessage("setModules", modules, projects, active, activeProject, dirty, faces, activeFace),
+            new SetModulesMessage("setModules", modules, projects, active, activeProject, dirty, faces, activeFace, _modulesRevision),
             EditorMessageContext.Default.SetModulesMessage));
     }
+
+    /// <summary>
+    /// How many tab lists have been sent. Host thread only, like every send. The page answers a
+    /// list with an activation of its own in two cases, and says which list it was answering; an
+    /// answer to a list that has since been replaced is not honoured.
+    /// </summary>
+    private long _modulesRevision;
 
     /// <summary>Replaces the project explorer's contents.</summary>
     public void ShowProjects(SurfaceProject[] projects)
@@ -2170,6 +2178,37 @@ internal sealed class EditorSurface : IDisposable
                         var requestedFace = document.RootElement.TryGetProperty("face", out var facing)
                             ? facing.GetString()
                             : null;
+
+                        /*
+                         * AN ANSWER TO A TAB LIST THAT HAS BEEN REPLACED IS NOT A REQUEST.
+                         *
+                         * Two of the page's activations are not the developer's: when a list
+                         * closes the tab it was showing it falls back to the one it showed
+                         * before, and when a list names nothing active it says what it is
+                         * showing instead. Both are answers to one particular list, and both
+                         * reached here after the host had moved on: a pane closed, the list
+                         * went out naming nothing, the host then added a class and showed it,
+                         * and the page's answer to the earlier list arrived 80ms later and was
+                         * obeyed. The surface went back to the module before in every round of
+                         * the probe that found it, and the leak sweep met it as "waiting for
+                         * the page to show LeakField" whenever nothing navigated after it
+                         * (2026-09-22). How late the answer lands depends on how busy the page
+                         * is, so a quiet session can hide it and a large project cannot.
+                         *
+                         * The page says which list it was answering. An older one is left alone:
+                         * the page has the newer list too, and makes its choice again from that,
+                         * which names an active module or asks again for the one it shows. The
+                         * developer's own clicks carry no answer and are always taken.
+                         */
+                        if (document.RootElement.TryGetProperty("answering", out var answering)
+                            && answering.TryGetInt64(out var answered)
+                            && answered < _modulesRevision)
+                        {
+                            Log.Info($"surface: activate {name} was the page's answer to tab list {answered}, "
+                                + $"and list {_modulesRevision} has gone out since; left alone");
+                            break;
+                        }
+
                         Log.Info($"surface: activate {name} requested"
                             + (requestedProject is null ? string.Empty : $" in {requestedProject}")
                             + (requestedFace is null ? string.Empty : $" ({requestedFace})"));

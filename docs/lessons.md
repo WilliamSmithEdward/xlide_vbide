@@ -2931,3 +2931,33 @@ change it must catch, measure the order the host keeps before relying on it,
 and compare with what was last SHOWN, not with the last tick. When a change
 turns a check red in a state the gate never reaches, run the old build in that
 same state before blaming the change or excusing it.
+
+## 94. An answer sent as a request
+
+The leak sweep's race from lesson 93 came down to one line in the page. When
+the host's tab list names nothing active, the page tells the host what it is
+showing, and that is right: it is how hover came back after a close in August.
+But the message it sent was the same `activateModule` a click sends, so the
+host could not tell an answer to an old list from the developer's wish.
+Closing a pane sends such a list for a beat before the host's own choice
+follows. The page's answer arrived after the host had added a class and shown
+it, and the host obeyed. The message tap showed it in every round, including
+the rounds that passed: those passed only because the sweep navigated after
+the answer landed.
+
+Each list carries a revision now. The page's own activations say which list
+they answer, and the host leaves an answer to a replaced list alone. Clicks
+carry nothing and are always taken. A fallback that is left alone asks again
+on the next list, answering that one.
+
+The check was harder than the fix. The same probe lost three rounds in three
+in one session and held four in four in the next, on the same commit. The page
+answered 80ms late in the first session and 20ms late in the second. A check
+that depends on how busy the page happens to be is not a check, so the suite
+holds the page's thread for 600ms before the closes. That is what a large
+project's repaint does in real use, and with it the old build loses every
+round.
+
+The rule: a message that answers the other side's state has to say which state
+it answers, or it will be obeyed after that state is gone. And when a race
+decides a check, make the loser late on purpose rather than hoping it is.

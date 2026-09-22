@@ -34,8 +34,12 @@ import { installSplitterDrag } from "./livedrag.js";
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
   createEditor(container: HTMLElement): monaco.editor.IStandaloneCodeEditor;
-  /** The developer picked a tab or focused a group; the host is asked to activate. */
-  activate(id: DocumentId): void;
+  /**
+   * The developer picked a tab or focused a group; the host is asked to activate. `fallback` is
+   * the other kind: the page's own choice in answer to the tab list it is adopting, which the
+   * host may find out of date by the time it arrives and leave alone.
+   */
+  activate(id: DocumentId, fallback?: boolean): void;
   /** The developer closed a tab, however they did it; action carries a confirm answer. */
   close(id: DocumentId, action?: string): void;
   /** The active (document, editor) pair changed on this side; the frame follows. */
@@ -701,15 +705,20 @@ export class Workspace {
     // it (the developer, 2026-08-07: closing a tab went to a blank view). When that happens the
     // host is asked for the best candidate and the group shows it when the text arrives, which is
     // the same fallback moving a tab out of a group already used.
+    //
+    // ASKED AGAIN ON EVERY LIST THAT FINDS THE GROUP STILL WAITING. The ask is an answer to this
+    // list, and the host leaves alone an answer to a list it has since replaced, so a group that
+    // asked once and never again could wait forever. Asking again answers the newer list; the
+    // host takes the first answer that is current, and the text it sends clears the wait.
     for (const group of this.groups) {
       if (group.active || group.tabs.length === 0 || group.promote()) {
         continue;
       }
 
-      const next = group.mostRecentlyShown() ?? group.tabs[0]?.id;
-      if (next && !group.pending) {
+      const next = group.pending ?? group.mostRecentlyShown() ?? group.tabs[0]?.id;
+      if (next) {
         group.pending = next;
-        this.handlers.activate(next);
+        this.handlers.activate(next, true);
       }
     }
 
@@ -732,10 +741,17 @@ export class Workspace {
      *
      * One statement, and it converges: the host activates what it is told, republishes with that
      * active, and this branch does not run again.
+     *
+     * AN ANSWER, AND MARKED AS ONE. The list naming nothing is usually a beat of the host's own
+     * close, and the host's own choice follows it within milliseconds. Sent as the developer's
+     * request, this reached the host after it had moved on - after it had added a class and
+     * shown it - and took the surface back to the module before (2026-09-22). Marked, it is
+     * taken only while no newer list has gone out; if one has, this page has it too and decides
+     * again from that.
      */
     const shown = this.activeGroup.active ?? this.groups.find((group) => group.active)?.active;
     if (!active && shown && open.length > 0) {
-      this.handlers.activate(shown);
+      this.handlers.activate(shown, true);
     }
 
     for (const group of this.groups) {

@@ -925,6 +925,13 @@ if ($Live) {
                                      # question the engine cannot ask is whether the class the VBE
                                      # compiles ends up holding the stubs.
                                      'implement-interface.mjs',
+                                     # fallback-activation builds a pair and a class of its own,
+                                     # like the one above, and asks what the page shows after the
+                                     # host has closed two tabs and added a class - with the page
+                                     # held back, so its answers to the closing lists arrive late.
+                                     # Obeyed, they took the surface back to the module before;
+                                     # the leak sweep met it by chance (2026-09-22).
+                                     'fallback-activation.mjs',
                                      # encapsulate-field brings a SECOND module that uses the
                                      # field, which is the one thing neither its engine suite nor
                                      # a single-module check can ask: the property keeps the

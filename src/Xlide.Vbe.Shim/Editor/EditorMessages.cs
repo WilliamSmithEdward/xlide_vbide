@@ -248,6 +248,9 @@ public sealed record SetCaretMessage(
 /// a code pane mirrored from the host's own pane list, "design" is a form's designer tab,
 /// which is THIS product's state rather than a mirror - the native designer window stays
 /// down on purpose (the Toolbox trap), so these tabs exist only here and in the page.
+///
+/// Revision numbers the lists in the order they were sent, so a page activation made in
+/// answer to one of them can say which (see EditorSurface's activateModule).
 /// </summary>
 public sealed record SetModulesMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -257,7 +260,8 @@ public sealed record SetModulesMessage(
     [property: JsonPropertyName("activeProject")] string? ActiveProject,
     [property: JsonPropertyName("dirty")] bool[]? Dirty = null,
     [property: JsonPropertyName("faces")] string?[]? Faces = null,
-    [property: JsonPropertyName("activeFace")] string? ActiveFace = null);
+    [property: JsonPropertyName("activeFace")] string? ActiveFace = null,
+    [property: JsonPropertyName("revision")] long Revision = 0);
 
 /// <summary>The developer's settings, for the page's dialog and its typing behaviour.</summary>
 public sealed record SetSettingsMessage(

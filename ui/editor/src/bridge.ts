@@ -69,7 +69,7 @@ export type HostMessage =
   | { type: "notice"; text: string; sticky?: boolean }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
-  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[]; faces?: (string | null)[]; activeFace?: string | null }
+  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[]; faces?: (string | null)[]; activeFace?: string | null; revision?: number }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[]; host?: string }
   | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
@@ -565,7 +565,13 @@ export type ClientMessage =
   | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; source?: "format" }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
-  | { type: "activateModule"; moduleName: string; project?: string; face?: string }
+  /**
+   * `answering` marks an activation the page chose itself in answer to one tab list - the
+   * fallback after the list closed the tab on screen, or what it shows when the list named
+   * nothing - with that list's revision. The host leaves alone an answer to a list it has since
+   * replaced. The developer's own activations carry none.
+   */
+  | { type: "activateModule"; moduleName: string; project?: string; face?: string; answering?: number }
   | { type: "navigate"; module: string; line: number; column: number; project?: string }
   | { type: "command"; name: string; project?: string }
   | { type: "evaluate"; text: string }
@@ -827,6 +833,9 @@ export class EditorBridge {
   /** The document the host says is active - the one its native active pane shows. */
   private hostActive: DocumentId | null = null;
 
+  /** The revision of the last tab list the host sent, which a fallback activation answers. */
+  private modulesRevision: number | null = null;
+
   // One pending-request table per host round trip; the three rename methods share one, the
   // way they always shared a counter. Budgets and fallbacks live at the call sites.
   private readonly pendingCompletions = new RequestTable<HostCompletionItem[]>();
@@ -931,13 +940,16 @@ export class EditorBridge {
   }
 
   /** Asks the host to show a module. The tree names the project it means; a tab cannot yet.
-   * face "design" asks for a form's designer tab instead of its code pane. */
-  activateModule(moduleName: string, project?: string, face?: string): void {
+   * face "design" asks for a form's designer tab instead of its code pane. `fallback` marks the
+   * page's own choice in answer to the latest tab list, which the host drops once that list is
+   * out of date. */
+  activateModule(moduleName: string, project?: string, face?: string, fallback = false): void {
     this.transport.post({
       type: "activateModule",
       moduleName,
       ...(project ? { project } : {}),
       ...(face ? { face } : {}),
+      ...(fallback && this.modulesRevision !== null ? { answering: this.modulesRevision } : {}),
     });
   }
 
@@ -2113,6 +2125,9 @@ export class EditorBridge {
             ...(activeFace ? { face: activeFace } : {}),
           }
           : null;
+
+        // Before setOpen, which is where the page answers this list when it answers at all.
+        this.modulesRevision = typeof message.revision === "number" ? message.revision : null;
 
         this.workspace?.setOpen(open, message.dirty ?? [], this.hostActive);
         this.shell?.setActiveModule(message.active, message.activeProject ?? null);

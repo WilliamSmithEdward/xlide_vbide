@@ -428,6 +428,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Drive the Source Control pane: press refresh/commit/undo/export/import/fetch/pull/push/blame, or the empty states' init/abort/browse/use/identity, or the remote line's remote, or the comparison head's open/restore (restore presses the confirm too); tick a row, type the message, open a row's comparison, a commit, or a file under an opened commit, pick a branch (a remote's as `origin/name`), make one through New branch..., type the identity, type the remote URL, point it at a file, put the divider at a width | `act("scmPane", { press })` / `{ tick, on }` / `{ message }` / `{ module }` / `{ commit }` / `{ commit, module }` / `{ branch }` / `{ create }` / `{ name, email }` / `{ url }` / `{ file }` / `{ width }`; a press answers `did: false` when the control is not on screen or is disabled; read it back on `ui.scm`, whose `listWidth` is the rows' width as the divider leaves it and whose `undoable` and `undoBlocked` say whether the head's Undo is live and why not |
 | Paint blame at the end of every committed line of the active module, or take it away | `act("blame", { which: "toggle" })`, `on`, `off`; read it back on `ui.blame`: `on`, `lines`, `uncommitted`, and `painted`, the decorations actually on the model, because the reading and the paint are two claims |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
+| Check that the page's own activations cannot outrun the host | `node tools\harness\fallback-activation.mjs` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
 | Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
 | Bring the editor window back | `frame("show")` |
@@ -449,6 +450,19 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 > `state().paletteIcon`; `objbrowser-live-probe.mjs` checks it. These were the live leg of
 > `Test-ObjectBrowser.ps1`, which hid the editor through `Application.VBE` and so needed the
 > trust setting. That leg is retired, and the file keeps its seams and headless page legs.
+
+> **A tab list is answered, and an answer can arrive late.** Every `setModules` in `messages()`
+> carries a `revision`. Two of the page's activations are its own rather than the developer's:
+> the tab it falls back to when a list closes the one on screen, and what it shows when a list
+> names nothing active. Each carries `answering`, the revision of the list it answers. The host
+> takes one only while that list is current, and otherwise logs `surface: activate X was the
+> page's answer to tab list N, and list M has gone out since; left alone`. The developer's own
+> activations carry no `answering` and are always taken. The reason: closing a pane sends a list
+> naming nothing for a beat, and the page's answer to it used to reach the host after the host
+> had moved on - after it had added a class and shown it - and was obeyed, taking the surface
+> back to the module before (2026-09-22). `fallback-activation.mjs` holds it, holding the page's
+> thread for a moment so that its answers are late on purpose, and drives the rule through the
+> bridge directly.
 
 ### The surface, asked and driven
 

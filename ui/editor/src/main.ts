@@ -903,7 +903,7 @@ function boot(): void {
       wireEditor(editor);
       return editor;
     },
-    activate: (id) => bridge.activateModule(id.module, id.project ?? undefined, id.face),
+    activate: (id, fallback) => bridge.activateModule(id.module, id.project ?? undefined, id.face, fallback),
     /*
      * A DESIGNER TAB'S UNAPPLIED EDITS GET THE SAME QUESTION a module's unsaved text gets.
      *
