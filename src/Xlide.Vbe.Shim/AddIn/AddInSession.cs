@@ -10136,8 +10136,20 @@ internal sealed partial class AddInSession : IDisposable
             for (var i = 1; i <= projectCount; i++)
             {
                 using var project = projects!.GetItem(i);
-                using var components = project?.GetObject("VBComponents");
-                if (project is null || components is null)
+
+                // A LOCKED PROJECT STOPPED THE WHOLE TREE. Its components raise rather than
+                // answer, the raise left this loop, and the catch below published nothing - so
+                // opening Office's own Analysis ToolPak VBA add-in froze the explorer on whatever
+                // it last showed, for as long as the add-in stayed open (2026-09-22). It has
+                // nothing to show here, so it is passed over, as the analysis and the projects
+                // route already pass it over.
+                if (project is null || ProjectReader.IsLocked(project))
+                {
+                    continue;
+                }
+
+                using var components = project.GetObject("VBComponents");
+                if (components is null)
                 {
                     continue;
                 }

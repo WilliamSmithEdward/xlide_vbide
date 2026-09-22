@@ -413,6 +413,14 @@ internal static class ProjectReader
                 return null;
             }
 
+            // Asked first, so a locked project is passed over rather than read into a refusal
+            // that was logged as an error on every pass it stayed open for.
+            if (IsLocked(project))
+            {
+                Log.Verbose($"project: {name} is locked, so there is nothing of it to analyse");
+                return null;
+            }
+
             using var components = project.GetObject("VBComponents");
             if (components is null)
             {
@@ -590,6 +598,32 @@ internal static class ProjectReader
 
         return guids.Length == 0 ? null : guids;
     }
+
+    /// <summary>
+    /// Whether a project is locked for viewing: password protected, and not unlocked this
+    /// session. Office's own Analysis ToolPak VBA add-in is one. Its name and its file answer;
+    /// its components raise "Can't perform operation since the project is protected" (error
+    /// 50289, measured 2026-09-22).
+    ///
+    /// Asked of the project's own Protection rather than learned from the refusal, because the
+    /// refusal is an exception on every walk that meets it.
+    /// </summary>
+    internal static bool IsLocked(DispatchObject project)
+    {
+        try
+        {
+            return project.GetInt32("Protection") == LockedProtection;
+        }
+        catch (Exception)
+        {
+            // A project that will not say is not assumed locked. What follows reads it or fails
+            // on its own terms, which is what it did before this was asked.
+            return false;
+        }
+    }
+
+    /// <summary>`vbext_pp_locked`, the Protection a password-protected project answers.</summary>
+    private const int LockedProtection = 1;
 
     /// <summary>
     /// Whether the project is in design mode, which is the only mode where its forms will hand
