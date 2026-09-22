@@ -5873,9 +5873,11 @@ internal sealed partial class AddInSession : IDisposable
         // modules were never opened left it in the tree, in both panes' file lists, and its
         // tests in the Tests pane, until something unrelated happened (the owner, 2026-08-20).
         //
-        // Cheap on purpose: this tick reads one property - the project count - where the empty
-        // tier walks every project's components. It needs the frame VISIBLE, so an editor
-        // window that has gone away is not polled about a tree nobody can see.
+        // Cheap on purpose: this tick reads a few properties and one name per project (see
+        // ComponentShape) where the empty tier walks every project's components. It needs the
+        // frame VISIBLE, so an editor window that has gone away is not polled about a tree
+        // nobody can see. The comparison is with what the tree last showed, not with the last
+        // tick, so whatever changed while it was away is still a difference once it is back.
         var interval = _resyncPanePolls > 0 ? ClosingPollMilliseconds
             : _pollsRemaining > 0 ? DebugPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
@@ -5990,26 +5992,83 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// How many projects the editor holds, or -1 when it will not say. Deliberately just the
-    /// count: this runs on every tick, and anything heavier would be paid for constantly to
-    /// answer a question whose answer is almost always "the same as last time".
+    /// What the editor holds, cheaply enough to ask on every tick: per project, in the editor's
+    /// order, how many components it has and the name of the LAST one. The editor appends a new
+    /// component at the end - sheets and modules alike, measured 2026-09-22 - so an add moves
+    /// both, a removal moves the count, and a removal followed by an add moves the name. A few
+    /// property reads and one name per project, where the tree's own walk reads every
+    /// component: this runs on every tick, and its answer is almost always "the same as last
+    /// time".
+    ///
+    /// What it cannot see is a component renamed in place that is not the last one. The
+    /// analysis pass notices that, the next time the project's text moves.
+    ///
+    /// Null when the editor will not say, and while the Immediate window's scratch module is
+    /// standing: a shape with this product's own temporary module in it is not the developer's
+    /// project, and the evaluation catches the panes up itself when it is done.
+    ///
+    /// NULL WHILE CODE IS RUNNING, and the order matters: the mode is asked before the component
+    /// list is touched. A tick only reaches here during a run by being delivered from inside it
+    /// - a DoEvents, a MsgBox, or the editor's own pump inside a Remove or an Import the code is
+    /// making - and in that last case the list is mid-change. Reading it then is the VBE7 access
+    /// violation CodePaneTracker.Hold exists for. The first tick after the run catches up.
     /// </summary>
-    private int ProjectCount()
+    private string? ComponentShape()
     {
         try
         {
             using var projects = _editor.GetObject("VBProjects");
-            return projects?.GetInt32("Count") ?? -1;
+            var projectCount = projects?.GetInt32("Count") ?? 0;
+            var shape = new System.Text.StringBuilder().Append(projectCount);
+
+            for (var i = 1; i <= projectCount; i++)
+            {
+                using var project = projects!.GetItem(i);
+
+                // Nothing inside a locked project can change where the tree can see it.
+                if (project is null || ProjectReader.IsLocked(project))
+                {
+                    shape.Append("|-");
+                    continue;
+                }
+
+                if (project.GetInt32("Mode") == RunMode)
+                {
+                    return null;
+                }
+
+                using var components = project.GetObject("VBComponents");
+                var count = components?.GetInt32("Count") ?? 0;
+                string? last = null;
+                if (count > 0)
+                {
+                    using var component = components!.GetItem(count);
+                    last = component?.GetString("Name");
+                }
+
+                if (IsScratchComponent(last))
+                {
+                    return null;
+                }
+
+                shape.Append('|').Append(count).Append(':').Append(last);
+            }
+
+            return shape.ToString();
         }
         catch (Exception)
         {
             // The editor refuses while it is busy. The next tick asks again.
-            return -1;
+            return null;
         }
     }
 
-    /// <summary>The project count the tree was last built for. See PollDebugState.</summary>
-    private int _lastProjectCount = -1;
+    /// <summary>
+    /// The shape of what the tree was last built from (see <see cref="ComponentShape"/>).
+    /// Written by every publish of the tree, so the watch only ever reacts to a change the tree
+    /// has not been shown - never to one a gesture in here has already republished for.
+    /// </summary>
+    private string? _publishedShape;
 
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
@@ -6041,33 +6100,19 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
+        // Every other tier asks the same question first. These are the ticks a Run or a step
+        // arms, and a sheet added by the code that just ran is the case the watch exists for.
+        WatchOpenProjects();
+
         // While the editor has no panes, the tree is the only living thing on screen and the
-        // only route to a first module, so it follows the project as it grows.
+        // only route to a first module, so it follows the project as it grows: republished on
+        // every tick, where the watch above republishes only on a change. The watch still asks
+        // first, because the tree is not all that follows a new module, and this publish tells
+        // the analyzer nothing.
         if (_watchingEmpty)
         {
             PublishProjects();
             AdoptOpenModuleIfEmpty();
-        }
-        else
-        {
-            /*
-             * A WORKBOOK THAT APPEARS WHILE A MODULE IS OPEN USED TO NEVER APPEAR.
-             *
-             * The republish above is gated on the editor having no panes, so the tree followed
-             * the project set only until the first module was opened. After that a workbook
-             * created or opened alongside was absent from the explorer entirely: no row, no
-             * modules, no route to its code, and nothing on screen to say it existed. Adding two
-             * workbooks and finding the tree still showing one is where this was seen
-             * (2026-08-08).
-             *
-             * The pane tracker cannot cover it either. It watches code pane WINDOWS, and a
-             * workbook nobody has opened a module in has none.
-             *
-             * So the count is checked instead, which is one property read per tick against the
-             * collection the tree is built from. A change in it is the only thing that provokes
-             * the rebuild, so the ordinary case costs a single call and publishes nothing.
-             */
-            WatchOpenProjects();
         }
 
         _immediateReader?.Poll();
@@ -6148,9 +6193,9 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// The one question the idle tier exists to ask: has the set of open files changed? One
-    /// property read against the collection the tree and both panes' file lists are built
-    /// from, and a change in it is the only thing that provokes any further work.
+    /// The one question the idle tier exists to ask: has what the editor holds changed since
+    /// the tree was built? Asked of <see cref="ComponentShape"/>, and a change in it is the only
+    /// thing that provokes any further work.
     ///
     /// A WORKBOOK THAT APPEARS WHILE A MODULE IS OPEN USED TO NEVER APPEAR. The republish for
     /// an empty editor is gated on having no panes, so the tree followed the project set only
@@ -6158,16 +6203,59 @@ internal sealed partial class AddInSession : IDisposable
     /// from the explorer entirely - no row, no modules, no route to its code (2026-08-08). The
     /// pane tracker cannot cover it either: it watches code pane WINDOWS, and a workbook
     /// nobody has opened a module in has none.
+    ///
+    /// AND A SHEET ADDED BY RUNNING CODE NEVER APPEARED EITHER, because the question was only
+    /// ever the project COUNT. `ThisWorkbook.Sheets.Add` run with F5, or from a button, or on
+    /// Excel's own timer, gives the workbook a document module and moves no text, so nothing
+    /// asked: the sheet stayed out of the tree until the developer typed, and the typing's pass
+    /// happened to notice (#28, 2026-09-22). The Immediate window was the one route that
+    /// worked, because an evaluation asks for a pass when it is done.
     /// </summary>
     private void WatchOpenProjects()
     {
-        var projectCount = ProjectCount();
-        if (projectCount >= 0 && projectCount != _lastProjectCount)
+        // Our own temporary modules come and go inside the first two, and each one catches the
+        // panes up itself when it finishes; a tick can land inside one - a line or a test that
+        // lets messages through - and must not take them for the developer's. The third is this
+        // product inside a Remove or an Import of its own, where the editor pumps messages with
+        // the component list mid-change, and the gesture republishes when it is done.
+        if (_immediateEvaluationBusy || _testsRunning || _codePanes is { IsHeld: true })
         {
-            Log.Info($"explorer: the project count went {_lastProjectCount} to {projectCount}, republishing");
-            _lastProjectCount = projectCount;
-            PublishProjects();
+            return;
         }
+
+        FollowComponentChanges();
+    }
+
+    /// <summary>
+    /// Compares what the editor holds with what the tree was built from and, when they differ,
+    /// brings along everything that follows a component change: the tree, the tab strip, the
+    /// Properties panel and the analyzer, which a new sheet gives a new name to resolve. The
+    /// same reaction a component added from the surface gets. Answers whether it reacted.
+    /// </summary>
+    private bool FollowComponentChanges()
+    {
+        var shape = ComponentShape();
+        if (shape is null || shape == _publishedShape)
+        {
+            return false;
+        }
+
+        var before = _publishedShape;
+
+        // Taken before the reaction, so a publish that fails is not retried on every tick. The
+        // next change is what asks again.
+        _publishedShape = shape;
+
+        if (before is null)
+        {
+            // The first look, not a change: nothing has been published to differ from.
+            PublishProjects();
+            return false;
+        }
+
+        Log.Info($"explorer: the components went {before} to {shape}, republishing");
+        ComponentsChanged();
+        return true;
     }
 
     /// <summary>
@@ -7093,7 +7181,14 @@ internal sealed partial class AddInSession : IDisposable
                  + (result.Text.Length > 0 ? $" '{(result.Text.Length > 80 ? result.Text[..80] : result.Text)}'" : string.Empty));
 
         // Evaluating adds and removes a module, which the analyzer would otherwise report on.
-        _analysis?.Reanalyse();
+        // The line itself may have added or removed one - `ThisWorkbook.Sheets.Add` - so the
+        // watch's question is asked here, now, and a yes catches up everything that follows a
+        // component change, the pass included. Left to the next tick, it would race the pass
+        // asked for below, and a tick that won would ask for a second one.
+        if (!FollowComponentChanges())
+        {
+            _analysis?.Reanalyse();
+        }
 
         return result;
     }
@@ -10177,6 +10272,15 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             surface.ShowProjects([.. tree]);
+
+            // What the tree now shows, for the watch to compare against. Every publish writes
+            // it, whoever asked, so a change a gesture in here has already republished for is
+            // never reacted to a second time a tick later - which would be a second analysis
+            // pass for nothing. A shape the editor will not give leaves the last one standing.
+            if (ComponentShape() is { } shown)
+            {
+                _publishedShape = shown;
+            }
 
             // A NAME IS FOR A PROJECT THAT EXISTS. This map never forgot, so a project the
             // editor holds for a beat while a closed workbook is torn down kept its entry for

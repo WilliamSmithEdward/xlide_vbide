@@ -462,6 +462,14 @@ internal sealed class CodePaneTracker : IDisposable
         return new HoldToken(this);
     }
 
+    /// <summary>
+    /// Whether this product is inside a Remove or an Import of its own right now. The poll is a
+    /// window timer, and a pump that delivers this hook's events can deliver a timer too, so
+    /// anything that reads the component list from a tick asks this first, for the reason
+    /// <see cref="Hold"/> gives.
+    /// </summary>
+    public bool IsHeld => _holds > 0;
+
     private void Release()
     {
         if (_holds == 0)

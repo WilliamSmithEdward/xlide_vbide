@@ -2878,3 +2878,56 @@ changing the input with everything else held identical. Holding it identical is
 the whole experiment - the first version of this test appended a comment to
 the module, which changed the text, which re-seeded, which is exactly the path
 that already worked.
+
+## 93. The explorer watched the one number a new sheet does not change
+
+`ThisWorkbook.Sheets.Add`, run with F5, stayed out of the tree until the
+developer typed (#28). Two things were watching for components and neither
+could see it. The idle tick compared the number of open PROJECTS. The analysis
+pass compared module names, but a pass only runs when text moves, and adding a
+sheet moves no text. Typing started a pass, and the pass noticed. The Immediate
+window was the one route that already worked, because an evaluation asks for a
+pass when it is done. A macro fired from Excel's own timer failed the same way
+F5 did, and so would a button or a sheet added by hand.
+
+The tick now reads, per project, the component count and the name of the LAST
+component. The editor appends new components at the end - sheets and modules
+alike, measured on the object model's own order - so an add moves both, a
+removal moves the count, and a delete followed by an add moves the name with
+the count unchanged. That last case is a common macro shape, and a count alone
+would have missed it. Every tree publish records the shape it was built from,
+so the watch only reacts to what the tree has not been shown. Without that, the
+watch would redo each gesture's republish a tick later, with a second analysis
+pass. It costs four wrappers a tick for one project against one before.
+
+Two things turned up on the way, and both would have shipped otherwise.
+
+A LOCKED PROJECT FROZE THE WHOLE TREE. Office's own Analysis ToolPak VBA add-in
+is password protected. Its components raise "Can't perform operation since the
+project is protected", and the tree read every project inside one try, so one
+refusal published nothing for as long as the add-in stayed open. It was found
+because the Immediate route that had worked a minute earlier stopped working
+the moment the add-in was opened for the reproduction. Protection is asked
+first now, and a locked project is passed over.
+
+A TIMER IS DELIVERED BY ANY PUMP, including the editor's own pump inside a
+Remove or an Import. CodePaneTracker.Hold exists because reading the component
+list from inside that pump crashed VBE7, five runs in five. The hook it held
+was not the only way in: a new tick that reads the component list is another.
+The watch stands down while the tracker is held, while an evaluation or a test
+run owns temporary modules, and while code is running. A tick only reaches a
+running project from inside a DoEvents, a MsgBox, or the code's own Remove.
+
+And one that did not ship with it. With the watch in, the leak sweep lost a
+race three times in three on a fixture cluttered by the reproduction: the page
+asked to activate an old tab a millisecond after the host had navigated to a
+new module. The same sequence on the build without the watch lost it once in
+three. The race was already there. The new timing made it likelier, so it went
+to its own task rather than into this change or out of the record.
+
+The rule: a watch is only as good as the question it asks, and "how many
+projects" cannot see a sheet. Choose the cheapest reading that moves for every
+change it must catch, measure the order the host keeps before relying on it,
+and compare with what was last SHOWN, not with the last tick. When a change
+turns a check red in a state the gate never reaches, run the old build in that
+same state before blaming the change or excusing it.
