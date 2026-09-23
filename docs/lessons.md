@@ -3024,3 +3024,31 @@ The rule: never run anything that can stop, wait or raise a modal inside a
 WebView2 event handler. Post the work and return. And before trusting what
 happens after a box, make sure the box went up where no harness would claim
 it.
+
+## 97. The pin reached the build and not the typecheck
+
+The 0.20.0 gate ran pinned at the analyzer's 10.6.0 commit and failed on
+"the engine does not typecheck". The error was in the checkout next door, a
+half-written line in its projectService.ts, saved between two gate runs by
+somebody working there. The release could never have contained that line:
+the build redirects the engine's imports to the pin and proves it from the
+metafile (lesson 90). The typecheck did neither. It was `tsc --noEmit`, and
+tsc follows the literal `../../../xlide_vscode/src` imports wherever they
+lead. Fifteen minutes later the same checkout typechecked clean again. The
+gate had been checking a moving tree while calling itself pinned.
+
+The redirect now lives in one place, `engine\pinned-analyzer.mjs`, and every
+reader goes through it: the build, `engine\check-types.mjs`, and the module
+casing test, whose oracle bundled analyzer code straight from the checkout
+too. Each fails if one source file came from the checkout. Packages were the
+second trap. The pin is a clone without node_modules, so `vscode` did not
+resolve inside it and two callbacks came out implicitly `any`, in code that
+compiles. A package the pin imports is now resolved from the matching path in
+the checkout, which is how CI types the analyzer. Proven red and green: clean
+at the pin, a broken redirect refused in the typecheck and in the oracle, a
+deliberate engine error caught, and a folder missing files named. Unpinned
+the typecheck is still `tsc --noEmit`, as CI runs it.
+
+The rule: a pin is only real in the readers it reaches. List every step that
+reads the pinned code (the build, the currency checks, the typecheck, the
+tests) and make each one prove what it read.

@@ -45,7 +45,9 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   redirects its analyzer imports through an esbuild resolver, which is what makes the pin real:
   for one release it only silenced the guards while esbuild went on reading the working tree, and
   v0.17.0 shipped that tree rather than the pinned commit (lessons.md 90). Check a pinned build by
-  what it READ - the metafile's inputs - not by whether the guard went quiet.
+  what it READ - the metafile's inputs - not by whether the guard went quiet. The engine's
+  typecheck follows the same redirect (`engine\check-types.mjs`) and proves from its program's
+  files that it read the pin; unpinned it is plain `tsc --noEmit`, as CI runs it (lessons.md 97).
 - **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
   put back when the add-in unloads.
 - **The explorer has two layouts.** Tree is the flat list by kind; Folders groups modules by the

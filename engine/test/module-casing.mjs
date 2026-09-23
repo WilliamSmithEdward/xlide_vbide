@@ -24,23 +24,37 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reporter } from './harness.mjs';
+import { analyzerPin, pinnedAnalyzerPlugin, readFromPin } from '../pinned-analyzer.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shim = resolve(here, '..', '..', 'src', 'Xlide.Vbe.Shim', 'Editor');
 const { check, done } = reporter();
 
 // The oracle is TypeScript reaching into the analyzer checkout, so it is bundled the way
-// engine/src is. A missing checkout fails loudly here rather than passing vacuously.
+// engine/src is, pin included. A missing checkout fails loudly here rather than passing vacuously.
 const out = await mkdtemp(join(tmpdir(), 'xlide-casing-'));
 const bundle = join(out, 'oracle.mjs');
-await build({
+const pin = analyzerPin();
+const oracleBuild = await build({
     entryPoints: [join(here, 'module-casing.oracle.ts')],
+    ...(pin ? { plugins: [pinnedAnalyzerPlugin(pin)] } : {}),
     bundle: true,
     format: 'esm',
     platform: 'node',
     outfile: bundle,
     logLevel: 'error',
+    metafile: true,
 });
+
+// PINNED, IT READS THE PIN, and proves it the way the build does. Unpinned, this oracle read the
+// checkout next door even in a pinned release gate (lessons.md 97).
+if (pin) {
+    const { sibling } = readFromPin(Object.keys(oracleBuild.metafile.inputs), pin);
+    if (sibling.length > 0) {
+        throw new Error(`The analyzer was pinned at ${pin}, but the oracle read ${sibling.length} `
+            + `file(s) from the checkout next door instead, starting with ${sibling[0]}.`);
+    }
+}
 
 const oracle = await import(`file:///${bundle.replace(/\\/g, '/')}`);
 const canonical = oracle.canonicalSpellings();
