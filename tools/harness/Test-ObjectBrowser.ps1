@@ -67,8 +67,10 @@ Test-Seam 'the api door is in the server, in every build' (Join-Path $repo 'src\
     'ApiReply', '\\"api\\":')
 Test-Seam 'and a Release build keeps it shut unless told otherwise' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'keeps the door shut unless told otherwise')
+# Through the environment's options since #29, not the process-wide variable: the flag itself
+# is the seam, because the variable's name is still in the file as the thing NOT to use.
 Test-Seam 'the dev build asks for the DevTools protocol' (Join-Path $repo 'src\Xlide.Vbe.Shim\WebView\WebView2Surface.cs') @(
-    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'DevToolsPort', 'MessageTap')
+    'remote-debugging-port=\{DevToolsPort\}', 'EnvironmentOptions\(arguments\)', 'MessageTap')
 Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'case "log"', 'case "messages"', 'case "capture"', 'case "breakpoint"', 'case "immediate"')
 Test-Seam 'the api carries the locals, watches, problems, module, and stats routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(

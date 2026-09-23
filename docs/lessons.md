@@ -2961,3 +2961,30 @@ round.
 The rule: a message that answers the other side's state has to say which state
 it answers, or it will be obeyed after that state is gone. And when a race
 decides a check, make the loser late on purpose rather than hoping it is.
+
+## 95. The browser signed in wrong, and the harness was the browser too
+
+WebView2 runtimes 152 to 154 call LogonUser with an invalid password as the
+current user every time an environment is created (#29). Every xlide surface
+was one failed Windows sign-in, and ten in ten minutes lock a local account.
+The obvious fix went into the shim first: the environment's own options turn
+off AutofillAiWalletPrivatePasses, the feature behind it. Measured on the
+dev machine: the editor and the Object Browser palette each created their
+environment, the browser's real command line carried the flag, and the count
+stayed at 0.
+
+Then the count went from 0 to 1 while the checks ran, with no Office host
+starting. The Object Browser's suite drives a headless Edge, and Edge is the
+same browser. One page probe on its own moved the count from 1 to 2. The gate
+runs a dozen page probes back to back, so it would have locked the account by
+itself, whatever the shim did. With the flag on the probe's own launch, all
+ten of the gate's probes left the count where it was.
+
+The instrument had its own trap. `[ADSI]...BadPasswordAttempts` reads as a
+number in a string and is a property collection anywhere else, so the loop
+written to stop at the first rise compared a collection, threw on every probe,
+and never stopped. The reading that mattered came after the loop, and it was
+still 2. Read it with `.Value`, and try the stop condition before trusting it.
+
+The rule: when a fix is about a side effect of a component, find every place
+that starts the component, including the ones that exist only to test it.

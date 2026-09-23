@@ -37,6 +37,7 @@ internal sealed class WebView2Surface : IDisposable
     /// </summary>
     private ComHandle<ICoreWebView2_3>? _view;
 
+    private EnvironmentOptions? _environmentOptions;
     private EnvironmentCompletedHandler? _environmentHandler;
     private ControllerCompletedHandler? _controllerHandler;
     private NavigationCompletedHandler? _navigationHandler;
@@ -455,32 +456,75 @@ internal sealed class WebView2Surface : IDisposable
             return false;
         }
 
+        /*
+         * EVERY SURFACE COST A FAILED WINDOWS SIGN-IN, and ten lock the account.
+         *
+         * WebView2 runtimes 152 to 154 call LogonUser with an invalid password as the current user
+         * each time an environment is created (MicrosoftEdge/WebView2Feedback#5722): a Security
+         * event 4625, and Windows 11's default policy locks a local account after ten in ten
+         * minutes. Every surface this shim opened was one, the live harness opens Office over and
+         * over, and the owner's machine logged 176 of them and 11 lockouts in one day (#29). The
+         * feature behind it is AutofillAiWalletPrivatePasses, and turning it off is the workaround
+         * in circulation until a fixed runtime ships; this line comes out when one does.
+         *
+         * THROUGH THE ENVIRONMENT'S OWN OPTIONS, not WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, which
+         * the dev build used to set. That variable belongs to the whole Office process, so every
+         * WebView2 Office creates in it later inherits ours, and one of them passing its own
+         * --disable-features would leave Chromium keeping only the last. The options reach the
+         * environments this shim creates and no others. Both surfaces in a process - the editor
+         * and the Object Browser's palette - pass the same options for the same folder, so the two
+         * environments sharing it cannot disagree about them; both were created with these, and
+         * the count of failed sign-ins stayed at 0 through the two (measured 2026-09-22).
+         */
+        var arguments = "--disable-features=AutofillAiWalletPrivatePasses";
+
 #if DEBUG
         // Dev builds open the browser's own DevTools protocol on a per-process local port, so
         // the harness can drive the LIVE surfaces semantically - real events on real elements -
         // instead of posting mouse messages at measured pixel coordinates (which cannot make
         // a double-click at all; the Object Browser's navigate leg went unpinned for a day).
-        // The environment variable is read by the loader at browser launch; a per-process
-        // port also gives each Excel instance its own browser cluster, so two sessions never
-        // mix their targets on one socket. Never in Release: this block does not exist there.
-        Environment.SetEnvironmentVariable(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            $"--remote-debugging-port={DevToolsPort} --remote-allow-origins=*");
+        // A per-process port also gives each Excel instance its own browser cluster, so two
+        // sessions never mix their targets on one socket. Never in Release: this block does not
+        // exist there, and the gate fails a Release binary that carries either flag.
+        arguments += $" --remote-debugging-port={DevToolsPort} --remote-allow-origins=*";
         Log.Info($"webview: dev build; DevTools protocol requested on 127.0.0.1:{DevToolsPort}");
 #endif
+
+        // Somebody else's copy of the variable, set before this process loaded the shim, would be
+        // read by the loader alongside the options and may take their place - which would put the
+        // failed sign-ins back. Said, because nothing else would show it.
+        if (Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") is { Length: > 0 } inherited)
+        {
+            Log.Warn($"webview: WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS is set in this process ('{inherited}'); "
+                + "the browser may take it instead of the options, sign-in workaround included");
+        }
+
+        _environmentOptions = new EnvironmentOptions(arguments);
+        var options = CreateCallback(_environmentOptions, WebViewIid.EnvironmentOptions);
+        if (options == 0)
+        {
+            // The surface is still worth having without them. Said as an error, because what goes
+            // missing with them is the workaround for the failed sign-ins.
+            Log.Error("webview: could not expose the environment options to the browser; creating without them");
+        }
 
         _environmentHandler = new EnvironmentCompletedHandler(OnEnvironmentCreated);
         var callback = CreateCallback(_environmentHandler, WebViewIid.EnvironmentCompletedHandler);
         if (callback == 0)
         {
             Log.Error("webview: could not expose the environment callback to the browser");
+            if (options != 0)
+            {
+                Marshal.Release(options);
+            }
+
             return false;
         }
 
         try
         {
-            Log.Info($"webview: creating environment, user data folder {userDataFolder}");
-            var hr = WebView2Loader.CreateCoreWebView2EnvironmentWithOptions(null, userDataFolder, 0, callback);
+            Log.Info($"webview: creating environment, user data folder {userDataFolder}, browser arguments '{arguments}'");
+            var hr = WebView2Loader.CreateCoreWebView2EnvironmentWithOptions(null, userDataFolder, options, callback);
             if (hr < 0)
             {
                 Log.Error($"webview: CreateCoreWebView2EnvironmentWithOptions returned 0x{hr:X8}");
@@ -501,13 +545,19 @@ internal sealed class WebView2Surface : IDisposable
         }
         finally
         {
-            // The browser took its own reference for the duration of the asynchronous call.
+            // The browser took its own reference for the duration of the asynchronous call, to
+            // the options as much as the callback, if it keeps them at all.
             Marshal.Release(callback);
+            if (options != 0)
+            {
+                Marshal.Release(options);
+            }
         }
     }
 
     private void OnEnvironmentCreated(int errorCode, nint environmentPointer)
     {
+        _environmentOptions = null;
         _environmentHandler = null;
 
         if (errorCode < 0 || environmentPointer == 0)
@@ -1033,6 +1083,7 @@ internal sealed class WebView2Surface : IDisposable
         _environment?.Dispose();
         _environment = null;
 
+        _environmentOptions = null;
         _environmentHandler = null;
         _controllerHandler = null;
         _navigationHandler = null;
@@ -1052,6 +1103,76 @@ internal static class KeyEventKind
     public const int KeyUp = 1;
     public const int SystemKeyDown = 2;
     public const int SystemKeyUp = 3;
+}
+
+/// <summary>
+/// The options an environment is created with, which the loader reads through the getters.
+///
+/// Everything but the browser arguments answers what the SDK's own options class answers by
+/// default (WebView2EnvironmentOptions.h in the package the loader comes from), so passing these
+/// changes nothing else about the environment: no language, the SDK's own compatible runtime
+/// version, no single sign-on. Strings go out the way that class sends them, as a CoTaskMemAlloc
+/// copy the caller frees.
+/// </summary>
+[GeneratedComClass]
+internal sealed partial class EnvironmentOptions : ICoreWebView2EnvironmentOptions
+{
+    /// <summary>
+    /// CORE_WEBVIEW_TARGET_PRODUCT_VERSION in WebView2EnvironmentOptions.h of Microsoft.Web.WebView2
+    /// 1.0.2792.45, which is what the SDK's own class answers until told otherwise. It moves with
+    /// that package's version in the project file.
+    /// </summary>
+    private const string SdkTargetVersion = "129.0.2792.45";
+
+    private string? _arguments;
+    private string? _language;
+    private string? _targetVersion = SdkTargetVersion;
+    private int _singleSignOn;
+
+    public EnvironmentOptions(string arguments) => _arguments = arguments;
+
+    public int GetAdditionalBrowserArguments(out nint value) => Copy(_arguments, out value);
+
+    public int PutAdditionalBrowserArguments(nint value)
+    {
+        _arguments = Marshal.PtrToStringUni(value);
+        return HResult.Ok;
+    }
+
+    public int GetLanguage(out nint value) => Copy(_language, out value);
+
+    public int PutLanguage(nint value)
+    {
+        _language = Marshal.PtrToStringUni(value);
+        return HResult.Ok;
+    }
+
+    public int GetTargetCompatibleBrowserVersion(out nint value) => Copy(_targetVersion, out value);
+
+    public int PutTargetCompatibleBrowserVersion(nint value)
+    {
+        _targetVersion = Marshal.PtrToStringUni(value);
+        return HResult.Ok;
+    }
+
+    public int GetAllowSingleSignOnUsingOSPrimaryAccount(out int allow)
+    {
+        allow = _singleSignOn;
+        return HResult.Ok;
+    }
+
+    public int PutAllowSingleSignOnUsingOSPrimaryAccount(int allow)
+    {
+        _singleSignOn = allow;
+        return HResult.Ok;
+    }
+
+    /// <summary>A property the caller will free: null stays null, as the SDK's class leaves it.</summary>
+    private static int Copy(string? text, out nint value)
+    {
+        value = text is null ? 0 : Marshal.StringToCoTaskMemUni(text);
+        return HResult.Ok;
+    }
 }
 
 /// <summary>Receives the environment once the loader has created it.</summary>

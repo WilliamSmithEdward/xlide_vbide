@@ -123,6 +123,26 @@ by that one answers no property at all - the launcher died on `DisplayAlerts` an
 gate step with it. Both were one defect wearing two faces: an empty COM read believed as fact
 (2026-09-13).
 
+**Every launch used to cost a failed Windows sign-in (#29).** WebView2 runtimes 152 to 154, and
+Edge itself, call LogonUser with an invalid password as the current user each time a browser
+environment starts: a Security event 4625 each time, and Windows 11's default policy locks a local
+account after ten in ten minutes. The owner's machine logged 176 of them and 11 lockouts in one
+day, in bursts that match the harness opening Office over and over. The shim now creates its
+environments with
+`--disable-features=AutofillAiWalletPrivatePasses` in every build, and the gate fails a Release
+binary that does not carry it. `page-probe.mjs` passes the same flag to the headless Edge it
+starts, because one probe without it moved the count by one and the gate runs a dozen. Office's
+own add-in host starts a WebView2 of its own in every Excel, which is not ours to change; it did
+not move the count on the launch measured. Read the count as a NUMBER before and after anything
+that starts browsers:
+
+```powershell
+[int]([ADSI]"WinNT://./$env:USERNAME,user").BadPasswordAttempts.Value
+```
+
+Without `.Value` it is a property collection, which prints like a number and does not compare
+like one, so a loop meant to stop when the count rises never stops.
+
 Not `New-Object -ComObject Excel.Application`. A host created through automation runs in
 **embedding mode** and loads **no add-ins**, so the thing under test is never there. It has to be
 `EXCEL.EXE <workbook>` with a document on the command line, so it initialises promptly.

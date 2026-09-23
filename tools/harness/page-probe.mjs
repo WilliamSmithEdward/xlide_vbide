@@ -89,7 +89,14 @@ function launchEdge(profile) {
     // 80px in a narrow card.
     "--window-size=1280,900",
     `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--disable-gpu", "--disable-extensions", "about:blank",
+    "--disable-gpu", "--disable-extensions",
+    // EVERY HEADLESS EDGE COST A FAILED WINDOWS SIGN-IN (#29). The browser behind WebView2 152
+    // to 154 calls LogonUser with an invalid password as the current user on launch, headless or
+    // not, and ten in ten minutes lock the account: one probe moved the count from 1 to 2, and
+    // the gate runs a dozen of them back to back (measured 2026-09-22). The same feature the shim
+    // turns off for its surfaces.
+    "--disable-features=AutofillAiWalletPrivatePasses",
+    "about:blank",
   ]);
 
   // THE ENDPOINT IS READ FROM THE PROFILE AS WELL AS FROM STDERR. The browser announces its

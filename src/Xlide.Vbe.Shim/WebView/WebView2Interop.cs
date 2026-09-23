@@ -640,9 +640,45 @@ internal partial interface ICoreWebView2WebMessageReceivedEventHandler
     int Invoke(nint sender, nint args);
 }
 
+/// <summary>
+/// The options an environment is created with. Implemented by this shim and READ by the loader,
+/// through the getters, while it creates the environment - so it is declared in full, all eight
+/// members in the header's order, because an implemented vtable cannot be truncated the way a
+/// called one can.
+/// </summary>
+[GeneratedComInterface]
+[Guid("2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5")]
+internal partial interface ICoreWebView2EnvironmentOptions
+{
+    [PreserveSig]
+    int GetAdditionalBrowserArguments(out nint value);
+
+    [PreserveSig]
+    int PutAdditionalBrowserArguments(nint value);
+
+    [PreserveSig]
+    int GetLanguage(out nint value);
+
+    [PreserveSig]
+    int PutLanguage(nint value);
+
+    [PreserveSig]
+    int GetTargetCompatibleBrowserVersion(out nint value);
+
+    [PreserveSig]
+    int PutTargetCompatibleBrowserVersion(nint value);
+
+    [PreserveSig]
+    int GetAllowSingleSignOnUsingOSPrimaryAccount(out int allow);
+
+    [PreserveSig]
+    int PutAllowSingleSignOnUsingOSPrimaryAccount(int allow);
+}
+
 /// <summary>Identifiers of the interfaces this shim implements for the browser to call back on.</summary>
 internal static class WebViewIid
 {
+    public static readonly Guid EnvironmentOptions = new("2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5");
     public static readonly Guid EnvironmentCompletedHandler = new("4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d");
     public static readonly Guid ControllerCompletedHandler = new("6c4819f3-c9b7-4260-8127-c9f5bde7f68c");
     public static readonly Guid NavigationCompletedHandler = new("d33a35bf-1c49-4f98-93ab-006e0533fe1c");

@@ -533,7 +533,14 @@ Step 'Release ships the api shut, and ships no unauthenticated door' {
     foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
         if ($text.Contains($needle)) { throw "Release carries an unauthenticated door: found '$needle'" }
     }
-    'shut by default, no devtools'
+
+    # AND IT CARRIES THE SIGN-IN WORKAROUND (#29). WebView2 runtimes 152 to 154 make a failed
+    # Windows sign-in each time an environment is created unless this feature is off, and ten in
+    # ten minutes lock the account. A Release without it costs the developer one per surface.
+    if (-not $text.Contains('--disable-features=AutofillAiWalletPrivatePasses')) {
+        throw 'Release does not turn off AutofillAiWalletPrivatePasses: every surface would cost a failed Windows sign-in (#29)'
+    }
+    'shut by default, no devtools, sign-in workaround in'
 }
 
 if (-not $Quick) {
