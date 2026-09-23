@@ -83,7 +83,7 @@ public static class AttributeDrift
             if (!writable)
             {
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplicable, annotation.Line,
-                    $"{spelled} cannot be applied to {moduleName}: the editor only takes attributes through an import, and a {moduleKind} module cannot be imported.",
+                    $"{spelled} cannot be applied to {moduleName}: attributes are set by importing a module, and a {moduleKind} module cannot be imported.",
                     annotation.Kind, annotation.Target, occurrence));
                 continue;
             }
@@ -91,7 +91,7 @@ public static class AttributeDrift
             if (!isClass && annotation.Kind is AnnotationKind.PredeclaredId or AnnotationKind.Exposed)
             {
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplicable, annotation.Line,
-                    $"{spelled} means something only on a class module; {moduleName} is a standard module.",
+                    $"{spelled} only applies to class modules, and {moduleName} is a standard module.",
                     annotation.Kind, annotation.Target, occurrence));
                 continue;
             }
@@ -99,7 +99,7 @@ public static class AttributeDrift
             if (actual is null)
             {
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplied, annotation.Line,
-                    $"{spelled} is not known to be applied: the saved workbook does not carry {moduleName}'s attributes yet. It is written when you save, or now from the quick fix.",
+                    $"{spelled} may not be applied: the saved workbook does not include {moduleName} yet. Save to apply it, or use the quick fix.",
                     annotation.Kind, annotation.Target, occurrence));
                 continue;
             }
@@ -109,8 +109,9 @@ public static class AttributeDrift
             {
                 var attribute = AttributeName(annotation.Kind);
                 var where = annotation.Target is null ? moduleName : $"{moduleName}.{annotation.Target}";
+                var now = has is null ? $"no {attribute}" : $"{attribute} = {has}";
                 items.Add(new DriftItem(DriftKind.AnnotationNotApplied, annotation.Line,
-                    $"{spelled} is annotated, but {where}'s {attribute} is {has ?? "not set"}. It is written when you save, or now from the quick fix.",
+                    $"{spelled} is not applied: {where} has {now}. Save to apply it, or use the quick fix.",
                     annotation.Kind, annotation.Target, occurrence));
             }
         }
@@ -171,19 +172,19 @@ public static class AttributeDrift
         if (actual.Description is not null && !Annotated(AnnotationKind.ModuleDescription))
         {
             items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, 1,
-                $"{moduleName}'s VB_Description is \"{actual.Description}\", and no '@ModuleDescription says so.",
+                $"{moduleName} has VB_Description = \"{actual.Description}\" but no '@ModuleDescription annotation.",
                 AnnotationKind.ModuleDescription, null, 0));
         }
         if (isClass && actual.PredeclaredId == true && !Annotated(AnnotationKind.PredeclaredId))
         {
             items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, 1,
-                $"{moduleName} has VB_PredeclaredId = True, a default instance, and no '@PredeclaredId says so.",
+                $"{moduleName} has VB_PredeclaredId = True but no '@PredeclaredId annotation.",
                 AnnotationKind.PredeclaredId, null, 0));
         }
         if (isClass && actual.Exposed == true && !Annotated(AnnotationKind.Exposed))
         {
             items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, 1,
-                $"{moduleName} has VB_Exposed = True, and no '@Exposed says so.",
+                $"{moduleName} has VB_Exposed = True but no '@Exposed annotation.",
                 AnnotationKind.Exposed, null, 0));
         }
 
@@ -228,25 +229,25 @@ public static class AttributeDrift
             if (member.Description is not null && !Annotated(AnnotationKind.Description, name))
             {
                 items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, line,
-                    $"{name}'s VB_Description is \"{member.Description}\", and no '@Description says so.",
+                    $"{name} has VB_Description = \"{member.Description}\" but no '@Description annotation.",
                     AnnotationKind.Description, name, 0));
             }
             if (member.UserMemId == 0 && !Annotated(AnnotationKind.DefaultMember, name))
             {
                 items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, line,
-                    $"{name} is the default member (VB_UserMemId = 0), and no '@DefaultMember says so.",
+                    $"{name} has VB_UserMemId = 0 (the default member) but no '@DefaultMember annotation.",
                     AnnotationKind.DefaultMember, name, 0));
             }
             if (member.UserMemId == -4 && !Annotated(AnnotationKind.Enumerator, name))
             {
                 items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, line,
-                    $"{name} is the enumerator (VB_UserMemId = -4), and no '@Enumerator says so.",
+                    $"{name} has VB_UserMemId = -4 (the enumerator) but no '@Enumerator annotation.",
                     AnnotationKind.Enumerator, name, 0));
             }
             if (member.Hotkey is not null && !Annotated(AnnotationKind.ExcelHotkey, name))
             {
                 items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, line,
-                    $"{name} has the hotkey Ctrl+{(char.IsUpper(member.Hotkey[0]) ? "Shift+" : string.Empty)}{member.Hotkey.ToUpperInvariant()}, and no '@ExcelHotkey says so.",
+                    $"{name} has the hotkey Ctrl+{(char.IsUpper(member.Hotkey[0]) ? "Shift+" : string.Empty)}{member.Hotkey.ToUpperInvariant()} but no '@ExcelHotkey annotation.",
                     AnnotationKind.ExcelHotkey, name, 0));
             }
         }
@@ -256,7 +257,7 @@ public static class AttributeDrift
             if (declarations.TryGetValue(name, out var line) && !Annotated(AnnotationKind.VariableDescription, name))
             {
                 items.Add(new DriftItem(DriftKind.AttributeNotAnnotated, line,
-                    $"{name}'s VB_VarDescription is \"{text}\", and no '@VariableDescription says so.",
+                    $"{name} has VB_VarDescription = \"{text}\" but no '@VariableDescription annotation.",
                     AnnotationKind.VariableDescription, name, 0));
             }
         }

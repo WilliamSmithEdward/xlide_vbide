@@ -45,8 +45,8 @@ public class AttributeDriftTests
         var drift = AttributeDrift.Between(Code, AttributeAnnotations.Read(Code), Actual(false, "Other.", null), "class", "Bag");
 
         Assert.Collection(drift,
-            one => { Assert.Equal(DriftKind.AnnotationNotApplied, one.Kind); Assert.Equal(1, one.Line); Assert.Contains("VB_PredeclaredId is False", one.Message); Assert.Equal("annotation-not-applied", one.Code); Assert.Equal("warning", one.Severity); },
-            one => { Assert.Equal(DriftKind.AnnotationNotApplied, one.Kind); Assert.Equal(3, one.Line); Assert.Contains("Bag.Item's VB_Description is \"Other.\"", one.Message); Assert.Equal("Item", one.Target); });
+            one => { Assert.Equal(DriftKind.AnnotationNotApplied, one.Kind); Assert.Equal(1, one.Line); Assert.Equal("'@PredeclaredId is not applied: Bag has VB_PredeclaredId = False. Save to apply it, or use the quick fix.", one.Message); Assert.Equal("annotation-not-applied", one.Code); Assert.Equal("warning", one.Severity); },
+            one => { Assert.Equal(DriftKind.AnnotationNotApplied, one.Kind); Assert.Equal(3, one.Line); Assert.Contains("Bag.Item has VB_Description = \"Other.\"", one.Message); Assert.Equal("Item", one.Target); });
     }
 
     [Fact]
@@ -55,8 +55,8 @@ public class AttributeDriftTests
         var drift = AttributeDrift.Between(Code, AttributeAnnotations.Read(Code), Actual(true, "One.", -4, "A bag."), "class", "Bag");
 
         Assert.Collection(drift,
-            one => { Assert.Equal(DriftKind.AttributeNotAnnotated, one.Kind); Assert.Equal(1, one.Line); Assert.Contains("VB_Description is \"A bag.\"", one.Message); Assert.Equal("info", one.Severity); },
-            one => { Assert.Equal(DriftKind.AttributeNotAnnotated, one.Kind); Assert.Equal(6, one.Line); Assert.Contains("enumerator", one.Message); Assert.Equal(AnnotationKind.Enumerator, one.Annotation); Assert.Equal("NewEnum", one.Target); });
+            one => { Assert.Equal(DriftKind.AttributeNotAnnotated, one.Kind); Assert.Equal(1, one.Line); Assert.Equal("Bag has VB_Description = \"A bag.\" but no '@ModuleDescription annotation.", one.Message); Assert.Equal("info", one.Severity); },
+            one => { Assert.Equal(DriftKind.AttributeNotAnnotated, one.Kind); Assert.Equal(6, one.Line); Assert.Equal("NewEnum has VB_UserMemId = -4 (the enumerator) but no '@Enumerator annotation.", one.Message); Assert.Equal(AnnotationKind.Enumerator, one.Annotation); Assert.Equal("NewEnum", one.Target); });
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class AttributeDriftTests
 
         Assert.Equal(2, drift.Count);
         Assert.All(drift, one => Assert.Equal(DriftKind.AnnotationNotApplied, one.Kind));
-        Assert.All(drift, one => Assert.Contains("does not carry Bag's attributes yet", one.Message));
+        Assert.All(drift, one => Assert.Contains("the saved workbook does not include Bag yet", one.Message));
     }
 
     [Theory]
@@ -87,7 +87,7 @@ public class AttributeDriftTests
         var drift = AttributeDrift.Between(Code, AttributeAnnotations.Read(Code), null, "standard", "Macros");
 
         Assert.Equal(DriftKind.AnnotationNotApplicable, drift[0].Kind);
-        Assert.Contains("only on a class module", drift[0].Message);
+        Assert.Contains("only applies to class modules", drift[0].Message);
         Assert.Equal(DriftKind.AnnotationNotApplied, drift[1].Kind);
     }
 
