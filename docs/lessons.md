@@ -3013,7 +3013,10 @@ box pressed by the door, which looked like the fix answering boxes by itself.
 The suite presses Enter from the page four seconds after its last request.
 Every component list the door answers leaves the scratch module out on
 purpose, so "the scratch module is gone" read true on the old build with VBA
-stopped inside it. The editor's own window list is the instrument. And the
+stopped inside it. Asking the module route for it by name is the instrument,
+now `scratchModuleStands()`. native-immediate.mjs had carried the same blind
+check since #21: on a build that left the module standing, the list it read
+did not show the module, and the helper found it. And the
 poll never sets `_inBreak` for a stop inside the scratch module, because it
 returns before that line, so the watcher reads the published mode instead.
 

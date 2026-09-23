@@ -164,12 +164,8 @@ check("lines typed back to back answer in the order they were typed",
   JSON.stringify(results));
 
 // The recovery takes the scratch module away as well; a reset alone leaves it in the project.
-// Asked of the editor's own windows, because every component list this door answers leaves the
-// scratch module out on purpose and would say it was gone while VBA sat stopped inside it. Its
-// code window stands exactly as long as it does (seen standing on the old wiring, 2026-09-22).
-const windows = (await api.windows()).windows ?? [];
-check("the scratch module is gone",
-  !windows.some((one) => /XlideImmediateScratch/i.test(one.caption ?? "")),
-  JSON.stringify(windows.map((one) => one.caption)));
+// Asked by name, because every component list this door answers leaves the scratch module out on
+// purpose, and one said it was gone while VBA sat stopped inside it (scratchModuleStands).
+check("the scratch module is gone", !(await api.scratchModuleStands()));
 
 process.exitCode = done();

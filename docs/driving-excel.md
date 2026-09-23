@@ -389,7 +389,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `locals` | `locals()` | the Locals panel |
 | `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
 | `messages` | `messages(last)` | page traffic, both directions |
-| `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` | through the session's own reader and writer; `live` reads what the surface holds, unwritten. A write the editor refuses throws rather than answering ok |
+| `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` / `scratchModuleStands()` | through the session's own reader and writer; `live` reads what the surface holds, unwritten. A write the editor refuses throws rather than answering ok. The route looks a module up by its exact name, the Immediate evaluator's scratch module included, which is how `scratchModuleStands()` asks for it |
 | `perf` | `perf({reset})` / `engineCosts()` | placement and marshal durations, and the ANALYZER's cost per method |
 | `placement` | `placement()` | forces a placement pass |
 | `problems` | `problems(module)` | the analyzer's findings; each carries `tag`, `unnecessary` on code the module does not need, which the editor fades rather than underlines |
@@ -420,6 +420,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | **What the surface LOOKS like: tabs, tree, panes, dialogs, caret** | **`ui()`** |
 | The whole arrangement: docks, groups, tabs, sizes | `layout()` |
 | A module's text, through the session's own reader | `readModule(name, project)` |
+| Whether the Immediate evaluator's scratch module stands, which no component list shows | `scratchModuleStands()` |
 | The analyzer's findings | `problems(module)` |
 | Locals, Watches | `locals()`, `watches()` |
 | What the page said to itself | `console()` |
@@ -497,8 +498,10 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 > The door takes any dialog that appears within that window of a request (its watch delays,
 > 250 + 750 + 1750ms) for the request's own, and clears it at the next one. Watch the box with
 > `dialogs()`, which never needs the host thread. `immediate-panel.mjs` does all of this, and
-> asks `windows()` whether the scratch module is gone: every component list the door answers
-> leaves it out on purpose, so a list says it is gone while VBA sits stopped inside it.
+> asks `scratchModuleStands()` whether the scratch module is gone. Every component list the door
+> answers leaves it out on purpose, so a list says it is gone while VBA sits stopped inside it;
+> the helper asks the `module` route for it by name. native-immediate.mjs asked a list, and its
+> check could not fail until it moved to the helper.
 
 ### The surface, asked and driven
 

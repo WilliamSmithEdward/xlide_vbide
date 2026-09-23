@@ -119,8 +119,9 @@ try {
     { budgetMs: 10000 });
   await evaluate('? counter + 1', '3');
   check('the source is unchanged', (await api.readModule('Runner', project.projectId)).text === original);
-  check('no scratch module was inserted', !(await api.project(home.project)).components.some(
-    c => c.name === 'XlideImmediateScratch'));
+  // Asked by name: the component list leaves the scratch module out on purpose, so reading it
+  // here said "none inserted" whether or not one stood (see scratchModuleStands).
+  check('no scratch module was inserted', !(await api.scratchModuleStands()));
   const beforeResume = (await rows()).length;
   await api.command('run');
   await waitFor('Walk finishes', async () => !(await stopped()), { budgetMs: 10000 });

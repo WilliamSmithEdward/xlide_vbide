@@ -883,6 +883,29 @@ function clientFor(entry) {
     },
 
     /**
+     * Whether the Immediate evaluator's scratch module stands in any open project.
+     *
+     * ASKED BY NAME. Every component list this door answers leaves the scratch module out on
+     * purpose, so a suite that looked for it in `project().components` read "not there" while
+     * VBA sat stopped inside it (2026-09-22). The module route looks a component up by its exact
+     * name in each project's own component collection, scratch included, and answers "no module
+     * named" when there is none. Any other failure is thrown, so a reworded answer fails the
+     * suite loudly instead of reading as absent.
+     */
+    async scratchModuleStands() {
+      try {
+        await this.readModule("XlideImmediateScratch");
+        return true;
+      } catch (error) {
+        if (/no module named/i.test(error?.message ?? "")) {
+          return false;
+        }
+
+        throw error;
+      }
+    },
+
+    /**
      * A module's procedures, from the analyzer.
      *
      * For asserting on SHAPE without reading the text back and parsing it a second time, in a
