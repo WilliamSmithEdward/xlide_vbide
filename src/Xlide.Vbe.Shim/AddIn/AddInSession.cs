@@ -6988,18 +6988,35 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private ImmediateEvaluator.Result EvaluateImmediate(string line, ImmediateTicket ticket)
     {
-        if (_immediateEvaluationBusy)
+        /*
+         * A LINE UNDER A LINE STILL RUNNING is taken, in the stopped scope only.
+         *
+         * A line that calls into the developer's code - `Runner.Walk` - stops at their breakpoint
+         * with its scratch procedure's Application.Run suspended beneath the stop, and this flag
+         * still set. The editor's own Immediate window evaluates the next line there, in the
+         * stopped procedure's scope, and the paused path IS that window: it types the line into
+         * it and writes no module, so it cannot meet the scratch module the suspended line owns.
+         * Refused as "already in progress" until 2026-09-22. What is still refused is a second
+         * scratch procedure above a suspended one, which is what the flag is for, and a second
+         * paused line inside the first, which the reader refuses itself.
+         *
+         * The nested line leaves the flag alone. It belongs to the suspended line, and the
+         * explorer watch stands down on it for as long as that line's scratch module stands.
+         */
+        var nested = _immediateEvaluationBusy;
+        if (nested)
         {
-            var busy = new ImmediateEvaluator.Result("An Immediate evaluation is already in progress.", true);
-            _editorSurface?.ShowImmediateResult(busy.Text, busy.Failed);
-            return busy;
+            Log.Info("immediate: a line is still running beneath this one; only the stopped scope is open");
+        }
+        else
+        {
+            _immediateEvaluationBusy = true;
         }
 
-        _immediateEvaluationBusy = true;
         try
         {
             ImmediateEvaluator.Result result;
-            try { result = EvaluateImmediateCore(line); }
+            try { result = EvaluateImmediateCore(line, stoppedScopeOnly: nested); }
             catch (Exception ex)
             {
                 Log.Error("immediate: evaluation failed", ex);
@@ -7019,11 +7036,14 @@ internal sealed partial class AddInSession : IDisposable
         }
         finally
         {
-            _immediateEvaluationBusy = false;
+            if (!nested)
+            {
+                _immediateEvaluationBusy = false;
+            }
         }
     }
 
-    private ImmediateEvaluator.Result EvaluateImmediateCore(string line)
+    private ImmediateEvaluator.Result EvaluateImmediateCore(string line, bool stoppedScopeOnly)
     {
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
 
@@ -7086,6 +7106,13 @@ internal sealed partial class AddInSession : IDisposable
                 try { pane?.Invoke("Show"); }
                 catch (Exception ex) { Log.Info("immediate: could not restore the code pane: " + ex.Message); }
             }
+        }
+
+        // Under a line still running, the stopped scope is the only one open: a second scratch
+        // procedure above a suspended one is what the busy flag exists to prevent.
+        if (stoppedScopeOnly)
+        {
+            return new("An Immediate evaluation is already in progress.", true);
         }
 
         if (mode != DesignMode)

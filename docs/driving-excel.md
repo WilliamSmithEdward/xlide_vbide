@@ -491,7 +491,10 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 > door answers a box its line raises, because nobody is at the screen for it, and its reply
 > carries the box's words. The panel leaves the box for the developer, as the editor's own
 > Immediate window does, since it may be their own MsgBox. Once they answer a compile error, the
-> panel clears the stop the line left in the scratch module and shows the box's words. It used to
+> panel clears the stop the line left in the scratch module and shows the box's words. A line
+> that stops at the developer's own breakpoint is left to them, and the next line evaluates in
+> the stopped scope while the first is still suspended beneath it (native-immediate.mjs holds
+> it); only a second scratch procedure above a suspended one is refused. It used to
 > run the line inside the page's message handler, and WebView2 never re-enters a callback: a
 > stopped line held every later page message, Reset and Break included (#30). To raise a box the
 > way a developer does, press Enter from the page at least 2.75 seconds after your last request.

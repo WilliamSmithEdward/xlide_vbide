@@ -131,6 +131,34 @@ try {
   const printed = (await rows()).slice(beforeResume);
   check('running VBA Debug.Print reaches the panel exactly once', printed.length === 1
     && printed[0].text.includes('2') && !printed[0].text.includes("'xlide:"), JSON.stringify(printed));
+
+  // A PANEL LINE THAT STOPS AT THE BREAKPOINT. `Runner.Walk` typed in the panel runs through the
+  // scratch procedure, so that line is still running, suspended beneath the stop, when the next
+  // line arrives. The editor's own Immediate window evaluates it in the stopped scope; the panel
+  // refused it as "already in progress" until the suspended line stopped holding it off.
+  await page("window.xlideBridge.runEditorCommand('xlide.panel.immediate')");
+  await page(`(() => {
+    const input = document.querySelector('#immediate-input');
+    input.value = 'Runner.Walk';
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+  })()`);
+  await waitFor('the panel line stops at the breakpoint', stopped, { budgetMs: 15000 });
+  check('the panel line stopped in the developer\'s own module',
+    (await api.native()).activeModule === 'Runner');
+  await fromUi('? counter', ' 1 ');
+  await fromUi('? UCase$(label)', 'START');
+  const beforeFinish = (await rows()).length;
+  await api.command('run');
+  await waitFor('the panel line finishes', async () => !(await stopped()), { budgetMs: 10000 });
+  await waitFor('its output', async () => (await rows()).length > beforeFinish, { budgetMs: 10000 });
+  await wait(400);
+  const finished = (await rows()).slice(beforeFinish);
+  check('Continue finishes the panel line, and its Debug.Print reaches the panel',
+    finished.some(row => row.text.includes('value=2')), JSON.stringify(finished));
+  const afterward = await api.immediate('? 6 * 7');
+  check('the next line evaluates in design mode, so the finished line let go of the evaluator',
+    afterward.ran && !afterward.failed && afterward.text.trim() === '42', JSON.stringify(afterward));
+  check('and it left no scratch module standing', !(await api.scratchModuleStands()));
 } finally {
   socket.close();
   await api.command('reset');
