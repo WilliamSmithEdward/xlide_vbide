@@ -10,9 +10,17 @@ public static class GitArguments
     /// terminal to page to and `less` would wait for one; quotepath off, so a module name with a
     /// non-ASCII letter comes back as itself rather than as octal escapes; colour off, so no
     /// escape sequence ever reaches a parser, whatever the developer's own git config says.
+    ///
+    /// NO OPTIONAL LOCKS, because the pane's status runs in the background. `git status` writes
+    /// the index out after refreshing an entry whose file time changed, and holds
+    /// .git/index.lock while it does; a `merge --abort` pressed in that moment failed with "Unable
+    /// to create index.lock: File exists" and left the merge standing (the 0.20.0 gate,
+    /// 2026-09-22). git's own status page says a status run in the background should use
+    /// `--no-optional-locks`. It only skips the optional write: a commit, a checkout or an abort
+    /// still takes the locks it needs.
     /// </summary>
     public static IReadOnlyList<string> Prefix { get; } =
-        ["--no-pager", "-c", "core.quotepath=false", "-c", "color.ui=never"];
+        ["--no-pager", "--no-optional-locks", "-c", "core.quotepath=false", "-c", "color.ui=never"];
 
     /// <summary>
     /// The log format <see cref="GitLog.Parse"/> reads. A record starts with a record separator

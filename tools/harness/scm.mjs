@@ -31,7 +31,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
@@ -250,6 +250,20 @@ try {
   check("git agrees there is one commit", git("rev-list", "--count", "HEAD"), "1");
   check("and the files are on disk",
     ["Ledger.bas", "Reports.bas", "Account.cls"].every((file) => existsSync(join(folder, file))), true);
+
+  // A STATUS NEVER WRITES THE INDEX. `git status` refreshes an entry whose file time changed and
+  // writes the index out while it is at it, holding .git/index.lock to do so, and the pane's
+  // refreshes run it in the background: a merge --abort that arrived in that moment failed on the
+  // lock and left the merge standing (the 0.20.0 gate, 2026-09-22). A file whose time changed and
+  // whose text did not is exactly the entry status refreshes, so the index must be as it was.
+  const indexFile = join(folder, ".git", "index");
+  const indexWas = statSync(indexFile).mtimeMs;
+  const ledgerFile = join(folder, "Ledger.bas");
+  const touched = new Date(statSync(ledgerFile).mtimeMs + 5000);
+  utimesSync(ledgerFile, touched, touched);
+  await scm();
+  check("a status leaves the index unwritten, so it never holds the lock a write needs",
+    statSync(indexFile).mtimeMs, indexWas);
 
   // ---- a write shows as one modified row, and the suggestion names the hand ---------------------
 

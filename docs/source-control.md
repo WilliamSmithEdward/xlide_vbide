@@ -261,9 +261,13 @@ pane's state: `project`, `state`, `branch`, `branches` (a remote's with the remo
   Word's save-time temp file as its own after every save; the document the checks look up by
   name comes through the one resolver every reader of a project's file uses (finding 81).
 - git.exe runs on the pool thread through one runner: hidden window, both streams drained, UTF-8,
-  `GIT_TERMINAL_PROMPT=0`, `--no-pager`, `-c core.quotepath=false`, a deadline per command (20
-  seconds; 120 for the remote commands), killed with its tree on timeout. Every invocation is
-  logged with its arguments, exit code and elapsed time.
+  `GIT_TERMINAL_PROMPT=0`, `--no-pager`, `--no-optional-locks`, `-c core.quotepath=false`, a
+  deadline per command (20 seconds; 120 for the remote commands), killed with its tree on
+  timeout. Every invocation is logged with its arguments, exit code and elapsed time.
+  `--no-optional-locks` because a status runs in the background while the developer presses
+  things: `git status` otherwise writes the refreshed index under .git/index.lock, and an Abort
+  pressed in that moment failed on the lock and left the merge standing (2026-09-22).
+  scm.mjs checks that a status leaves the index unwritten.
 - git.exe is found on PATH, then in Git for Windows' three standard locations. Absent, the state is
   `noGit` and the pane's empty state names the download; nothing else in the product changes.
   Found as Git for Windows' `cmd\git.exe` (or `bin\git.exe`), which is a launcher that starts

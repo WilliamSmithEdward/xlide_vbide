@@ -85,7 +85,7 @@ public sealed class GitLogTests
     {
         Assert.Equal("%x1e%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%b%x00%P%x1f", GitArguments.LogFormat);
         Assert.Equal(
-            ["--no-pager", "-c", "core.quotepath=false", "-c", "color.ui=never"],
+            ["--no-pager", "--no-optional-locks", "-c", "core.quotepath=false", "-c", "color.ui=never"],
             GitArguments.Prefix);
     }
 
