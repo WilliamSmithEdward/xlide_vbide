@@ -902,6 +902,11 @@ if ($Live) {
             # the first time the full pass ran after they landed).
             @{ Fixture = 'DebugFixture.xlsm'
                Suites  = @('import-guard.mjs', 'immediate-watch.mjs', 'native-immediate.mjs',
+                                     # immediate-panel types into the page itself and raises the
+                                     # compile box with no request in flight, the one way the door
+                                     # does not claim the box and press it first. The two before
+                                     # it evaluate through the door, and were green over #30.
+                                     'immediate-panel.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',

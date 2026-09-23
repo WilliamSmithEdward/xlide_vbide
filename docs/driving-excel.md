@@ -441,6 +441,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Read the Immediate window as it stands | `immediate()` |
 | The Immediate window and Watch panel, end to end | `node tools\harness\immediate-watch.mjs` |
 | Break-mode evaluation, end to end | `node tools\harness\native-immediate.mjs` |
+| The Immediate PANEL, typed into the page, with a line that will not compile (#30) | `node tools\harness\immediate-panel.mjs` |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
@@ -483,6 +484,21 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 > back to the module before (2026-09-22). `fallback-activation.mjs` holds it, holding the page's
 > thread for a moment so that its answers are late on purpose, and drives the rule through the
 > bridge directly.
+
+> **The panel and `immediate(text)` take one path, and differ in who answers the box.** Both run
+> the line on the host thread and watch it from a pool thread (`AddInSession.Immediate.cs`). The
+> door answers a box its line raises, because nobody is at the screen for it, and its reply
+> carries the box's words. The panel leaves the box for the developer, as the editor's own
+> Immediate window does, since it may be their own MsgBox. Once they answer a compile error, the
+> panel clears the stop the line left in the scratch module and shows the box's words. It used to
+> run the line inside the page's message handler, and WebView2 never re-enters a callback: a
+> stopped line held every later page message, Reset and Break included (#30). To raise a box the
+> way a developer does, press Enter from the page at least 2.75 seconds after your last request.
+> The door takes any dialog that appears within that window of a request (its watch delays,
+> 250 + 750 + 1750ms) for the request's own, and clears it at the next one. Watch the box with
+> `dialogs()`, which never needs the host thread. `immediate-panel.mjs` does all of this, and
+> asks `windows()` whether the scratch module is gone: every component list the door answers
+> leaves it out on purpose, so a list says it is gone while VBA sits stopped inside it.
 
 ### The surface, asked and driven
 

@@ -1334,7 +1334,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
-        _editorSurface.EvaluateRequested = line => EvaluateImmediate(line);
+        _editorSurface.EvaluateRequested = EvaluateFromPanel;
         _editorSurface.ExternalOpenRequested = OpenExternal;
         _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
@@ -6986,7 +6986,7 @@ internal sealed partial class AddInSession : IDisposable
     /// it had run. So the debug route could report that an evaluation had been asked for and never
     /// what it came to, and the Immediate window ended up with a route nothing could assert on.
     /// </summary>
-    private ImmediateEvaluator.Result EvaluateImmediate(string line)
+    private ImmediateEvaluator.Result EvaluateImmediate(string line, ImmediateTicket ticket)
     {
         if (_immediateEvaluationBusy)
         {
@@ -7005,7 +7005,11 @@ internal sealed partial class AddInSession : IDisposable
                 Log.Error("immediate: evaluation failed", ex);
                 result = new("Immediate evaluation failed: " + ex.Message, true);
             }
-            if (result.Failed || result.Text.Length > 0 || result.HasOutput)
+
+            // Withheld when the line's outcome is said from outside: a compile error's own words
+            // go in the panel, and what comes back here once the stopped call is unwound is only
+            // the error of being reset (#30).
+            if ((result.Failed || result.Text.Length > 0 || result.HasOutput) && !ticket.Answered)
             {
                 _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
             }

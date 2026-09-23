@@ -2988,3 +2988,36 @@ still 2. Read it with `.Value`, and try the stop condition before trusting it.
 
 The rule: when a fix is about a side effect of a component, find every place
 that starts the component, including the ones that exist only to test it.
+
+## 96. The page cannot answer from inside its own callback
+
+The Immediate panel ran its line inside WebMessageReceived. A line that would
+not compile, `debug.prnt "A"`, raised the editor's box, and once the box was
+answered VBA stayed stopped inside the scratch procedure, with Application.Run
+still on the stack under that handler (#30). WebView2 runs its callbacks one
+at a time and never re-enters one. Its threading-model page says a nested loop
+inside a handler leaves the handler on the stack indefinitely. So nothing the
+page sent reached the host after that: not the next line, not Reset or Break,
+not the answer to a script. Our window timers are not WebView2 callbacks, so
+the poll and the door went on working. immediate-watch.mjs evaluates through
+the door, and it was green the whole time.
+
+The line runs from the timer queue now, outside any callback, and the page
+stays live however the line ends. A script asked of the page answers in 2ms
+while the box stands. On the old wiring it had no answer after 5 seconds.
+
+Three traps turned up in the checking. The door takes any dialog that appears
+within 2.75 seconds of a request for that request's own, and clears it at the
+next request. A probe that typed the line through the api therefore had its
+box pressed by the door, which looked like the fix answering boxes by itself.
+The suite presses Enter from the page four seconds after its last request.
+Every component list the door answers leaves the scratch module out on
+purpose, so "the scratch module is gone" read true on the old build with VBA
+stopped inside it. The editor's own window list is the instrument. And the
+poll never sets `_inBreak` for a stop inside the scratch module, because it
+returns before that line, so the watcher reads the published mode instead.
+
+The rule: never run anything that can stop, wait or raise a modal inside a
+WebView2 event handler. Post the work and return. And before trusting what
+happens after a box, make sure the box went up where no harness would claim
+it.
