@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-21, at v0.19.0.
+Updated 2026-09-23, at v0.20.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -208,7 +208,7 @@ project after every save (finding 81). Both close the session they opened, so th
 after them find only Excel.
 
 Counts move, so they are given as of this line rather than as standing facts: 664 unit tests,
-69 api routes of which 67 are driven by one of the 75 suites the gate runs, 2 left out on
+69 api routes of which 67 are driven by one of the 77 suites the gate runs, 2 left out on
 purpose, and 134 analyzer rules in the bundled engine.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
