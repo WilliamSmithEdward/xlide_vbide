@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "ebceefd685ca1352e196d111eb5ffea9477e11d2",
+  "commit": "6ead73db155709009adaaeb0ce2272ac7955f773",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
@@ -8,15 +8,16 @@
     "vbaSourceScan"
   ],
   "files": {
-    "analyzer/lexer/keywordTable.ts": "dfb1b22298e37a69f5e42ce6900c41a12601b58230d8c89d22b13895c238d4d9",
-    "analyzer/lexer/strippedLines.ts": "900c70d7c7d5423ec231df7c17f02cc376a651630f1830230ebf233b27c57169",
-    "analyzer/lexer/tokenKinds.ts": "2032c749c1290f2c40e4c7d5882984e092a74e451f0e2dcbc21443fbcee6194e",
-    "analyzer/lexer/tokenize.ts": "f7baad99f3cfb0ce08ec1586a94d008425dcdb3f378ad6642717e9810926e7ab",
-    "analyzer/lexer/trivia.ts": "6fad65c2a9b540b241ddb430eb2898c834210cf59919811aabaf2eebc13cb6d7",
-    "analyzer/parser/nodes.ts": "c46d12d31bf67c557bdfb640a79661f8ce07f564d6a2a1c34d4ed2863a0b2d07",
-    "vbaSmartEnter.ts": "a8a7ce37b8fd5016fc220b0ee8dcfb6d4db79692d534c719f4eb1ca72a300340",
+    "analyzer/lexer/contextualKeywords.ts": "4b4e88b18492890b75610d9e3c48d16990dae99bbf3fe9fa2368003a7651f54d",
+    "analyzer/lexer/keywordTable.ts": "cde3e52f51923083b5818de3c59be4e9b4d7edaea5305b74bae60f5de33285ee",
+    "analyzer/lexer/strippedLines.ts": "ee185913f345a86c18042916a97da4f3e6059062eac7bb80b82929c6931597b2",
+    "analyzer/lexer/tokenKinds.ts": "7853f320e103a4a61d7d669a6e98567388af1abaa81f60915578b534c8aa4c12",
+    "analyzer/lexer/tokenize.ts": "4be44df2c5f4612198b455ea6c56e7dcb752cc7097cabac2a1dab3b25b2b02fb",
+    "analyzer/lexer/trivia.ts": "e2327616f0712b8d7f135537a87e45a5f9cbdb8c588034e4a0eece2a106f47c5",
+    "analyzer/parser/nodes.ts": "dbda0ad9259b58913bdbef8e978d2d8b09ea399b58700fce87e54415fdb42933",
+    "vbaSmartEnter.ts": "739cb244688a19bf3c667386e99c7c7a5782b863fbf5c8f6d6a0355188e360c3",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
-    "vbaSourceScan.ts": "a1c2e54836e98d604aa6ae963d5ba27fe2c99d4e7f44e2746f9ba8c7fab1d3a4",
-    "vbaStructuralDiagnostics.ts": "0980c6cea7694c963597e404ddf98025229004ee2e9d975298137fbc8d0fdeec"
+    "vbaSourceScan.ts": "f53513fc62af4ab68ecb4eb76f9701637bc4d8cbcdf4bfdb10eefd05fbd13d55",
+    "vbaStructuralDiagnostics.ts": "a234956afbde4de5e4772f843b75b65e7210b0493ed33f84ed21a84f8772cded"
   }
 }
