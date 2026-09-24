@@ -3052,3 +3052,14 @@ the typecheck is still `tsc --noEmit`, as CI runs it.
 The rule: a pin is only real in the readers it reaches. List every step that
 reads the pinned code (the build, the currency checks, the typecheck, the
 tests) and make each one prove what it read.
+
+That list missed one, found on the next uptake. The page ships its own copy
+of four of the analyzer's typing helpers in `ui\editor\vendor`, and
+`npm run spec:sync` copied them from the checkout next door whatever the pin
+said. The gate's `vendored spec` step compared against that checkout too.
+10.7.1 changed nine of the ten files. A sync run while someone was editing
+there would have vendored their uncommitted work. The sync and the check read
+`XLIDE_ANALYZER_ROOT`, and a pin that names no folder fails rather than
+falling back to the manifest-only check CI runs. Proven with one copy: it
+passes against the 10.6.0 pin and fails against 10.7.1's, and a missing pin
+is refused.

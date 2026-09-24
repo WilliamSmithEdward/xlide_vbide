@@ -48,6 +48,8 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   what it READ - the metafile's inputs - not by whether the guard went quiet. The engine's
   typecheck follows the same redirect (`engine\check-types.mjs`) and proves from its program's
   files that it read the pin; unpinned it is plain `tsc --noEmit`, as CI runs it (lessons.md 97).
+  So does the page's vendored copy of the spec's typing helpers: `npm run spec:sync` copies from
+  the pin, and the gate's `vendored spec` step compares against it.
 - **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
   put back when the add-in unloads.
 - **The explorer has two layouts.** Tree is the flat list by kind; Folders groups modules by the

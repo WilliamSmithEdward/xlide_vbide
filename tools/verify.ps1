@@ -88,14 +88,17 @@ Step 'vendored spec' {
     # The page bundles the spec repo's typing helpers from a copy in ui/editor/vendor so that CI can
     # build without a neighbouring checkout. This is the step that notices when the copy and the
     # spec have parted ways -- which only this machine can notice, since CI has no spec repo to
-    # compare against.
+    # compare against. With XLIDE_ANALYZER_ROOT set it compares against the pin, as the engine
+    # build does, so a release's page and engine are held to the same analyzer commit.
     Push-Location $pageRoot
     try {
         $out = npm run spec:check 2>&1
         $out | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'the vendored spec copy is out of step' }
     } finally { Pop-Location }
-    if ($out -match 'not present') { 'manifest only' } else { 'matches the spec repo' }
+    if ($out -match 'not present') { 'manifest only' }
+    elseif ($env:XLIDE_ANALYZER_ROOT) { 'matches the analyzer pin' }
+    else { 'matches the spec repo' }
 }
 
 Step 'engine executable is current' {

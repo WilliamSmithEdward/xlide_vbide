@@ -34,12 +34,16 @@ edited by hand. Without a neighbouring checkout — on CI, or in a clone of this
 verifies the copy against its manifest and reports that it could not do more. `tools/verify.ps1`
 runs it, so drift fails on a machine that has both repos rather than going unnoticed.
 
+With `XLIDE_ANALYZER_ROOT` set to a pin (`tools\Pin-Analyzer.ps1`), both commands read the pin
+instead of the checkout, as the engine build does, so a release's page and engine come from one
+analyzer commit. A pin that is not there fails the check rather than falling back to the manifest.
+
 ```bash
 npm run spec:sync
 ```
 
-Re-copies from the neighbouring checkout and rewrites the manifest. Run it after the spec repo
-changes something the page depends on, and commit the result.
+Re-copies from the neighbouring checkout, or from the pin when one is set, and rewrites the
+manifest. Run it after the spec repo changes something the page depends on, and commit the result.
 
 ### What this does not check
 

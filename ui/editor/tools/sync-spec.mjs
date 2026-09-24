@@ -24,9 +24,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const pageRoot = path.resolve(here, "..");
 const repoRoot = path.resolve(pageRoot, "../..");
 
-// The neighbouring-checkout convention this repository uses for anything shared with the spec.
-const specRepo = path.resolve(repoRoot, "..", "xlide_vscode");
-const specRoot = path.join(specRepo, "src");
+// The neighbouring-checkout convention this repository uses for anything shared with the spec, or
+// the PIN a release builds from when XLIDE_ANALYZER_ROOT names one (tools\Pin-Analyzer.ps1). The
+// checkout is a working tree somebody is usually working in, so a sync there can vendor an edit
+// nobody committed, and a check there compares against it; the engine build, its typecheck and
+// the currency guards all read the pin, and the copy the page ships is read from the same place.
+const pinnedSpec = process.env.XLIDE_ANALYZER_ROOT ? path.resolve(process.env.XLIDE_ANALYZER_ROOT) : null;
+const specRepo = pinnedSpec ? path.dirname(pinnedSpec) : path.resolve(repoRoot, "..", "xlide_vscode");
+const specRoot = pinnedSpec ?? path.join(specRepo, "src");
 
 const vendorRoot = path.join(pageRoot, "vendor", "xlide-spec");
 const manifestPath = path.join(pageRoot, "vendor", "xlide-spec.json");
@@ -130,6 +135,10 @@ if (entries.length === 0) fail("The page imports nothing from xlide-spec; refusi
 const vendored = listFiles(vendorRoot);
 const haveSpecRepo = fs.existsSync(specRoot);
 
+// A missing checkout is CI, and the manifest check below is all that can run there. A missing PIN
+// is a mistake, and falling back to the manifest would turn a release's comparison into none.
+if (pinnedSpec && !haveSpecRepo) fail(`XLIDE_ANALYZER_ROOT names a pin that is not there: ${pinnedSpec}`);
+
 if (write) {
   if (!haveSpecRepo) fail(`Cannot sync: the spec repo is not at ${specRepo}.`);
 
@@ -197,4 +206,5 @@ if (stale.length || extra.length) {
   fail(`The vendored copy has drifted from ${posix(path.relative(repoRoot, specRoot))}.\n${parts.join("\n")}\nRun: npm run spec:sync`);
 }
 
-console.log(`vendored copy matches the spec repo (${files.length} files, ${manifest.commit?.slice(0, 7) ?? "unknown commit"})`);
+const against = pinnedSpec ? `the pin at ${pinnedSpec}` : "the spec repo";
+console.log(`vendored copy matches ${against} (${files.length} files, ${manifest.commit?.slice(0, 7) ?? "unknown commit"})`);
