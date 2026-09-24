@@ -75,12 +75,36 @@ async function parity(after) {
     `native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
 }
 
+/**
+ * Shown on BOTH sides: the editor holds this workbook's module, and it is the module the page
+ * believes the host has active - which is what rename, and every provider, checks before it answers.
+ *
+ * This waited for the focused model's address to END in the module's name. The gate runs this
+ * suite with TwinFixture open beside the fixture, and both workbooks hold a Helpers, so that wait
+ * could not tell them apart, and it accepted the page showing one module while believing the host
+ * had another: made on purpose, it passed, and the rename answered "Rename works in the module the
+ * editor is showing", the refusal the 0.20.0 gate's fifth run met once (2026-09-23). Now the wait
+ * names the workbook and both sides, and when it gives up it says what each side held.
+ */
 async function showing(module) {
   await api.pane("open", { module, project: project.projectId });
-  await until(`${module} to be shown`, async () => {
-    const ui = await api.ui();
-    return ui.focus.model?.toLowerCase().endsWith("/" + module.toLowerCase()) ? ui : null;
-  });
+  const isWanted = (address) => isDocument(address, project.project, module);
+  let last = null;
+  try {
+    await until(`${module} in ${project.project} to be shown and host-active`, async () => {
+      last = await api.ui();
+      return isWanted(last.focus.model) && isWanted(last.focus.host?.model) ? last : null;
+    });
+  } catch (error) {
+    throw new Error(`${error.message}: the editor holds ${last?.focus.model ?? "nothing"}, `
+      + `and the host-active model is ${last?.focus.host?.model ?? "not on screen"}`);
+  }
+}
+
+/** Whether a model address names this workbook's module (documents.ts docUriOf writes them). */
+function isDocument(address, workbook, module) {
+  return address != null
+    && decodeURIComponent(String(address)).toLowerCase() === `xlide:/${workbook}/${module}`.toLowerCase();
 }
 
 console.log("rename, against the fixture built for it\n");

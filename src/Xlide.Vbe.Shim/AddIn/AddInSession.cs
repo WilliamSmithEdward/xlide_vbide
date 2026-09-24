@@ -11463,6 +11463,9 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
+            // What the page last heard, so the end of this can tell whether it has heard anything.
+            var listBefore = _lastModulesKey;
+
             // Before the document changes underneath them.
             _editorSurface?.FlushEdits();
 
@@ -11492,6 +11495,29 @@ internal sealed partial class AddInSession : IDisposable
             if (_editorSurface?.Module != component || projectId is not null && _shownProject != projectId)
             {
                 ShowModuleInSurface(component, projectId);
+            }
+
+            /*
+             * AN ASKED-FOR MODULE ALWAYS REACHES THE PAGE AS A LIST, even when nothing moved here.
+             *
+             * The strip goes out on change only, and asking for the module the host already has
+             * active changes nothing, so nothing was sent - and a page that had come to show
+             * something else stayed on it. The page and the host then disagree about which module
+             * is on screen, every provider refuses ("Rename works in the module the editor is
+             * showing"), and the one gesture that should put it right, opening that module from
+             * the tree or through the api, did nothing at all. Made on purpose by revealing a twin
+             * workbook's Helpers on the page alone: opening RenameFixture's Helpers, which the host
+             * already had active, left the page on the twin and the rename refused (2026-09-23).
+             * The 0.20.0 gate's fifth run ended in that same refusal once; what put its page out of
+             * step is not known, and a refused rename now says in the log what each side held.
+             *
+             * A list the page has already had, sent again, is heard: the page reveals whatever a
+             * list names active. Only when this call has not already sent one, so an activation
+             * that did move something still costs one list.
+             */
+            if (_lastModulesKey == listBefore)
+            {
+                _lastModulesKey = null;
             }
 
             PublishModules();

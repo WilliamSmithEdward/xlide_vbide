@@ -2606,6 +2606,31 @@ export class EditorBridge {
       : null;
   }
 
+  /**
+   * Says in the host's log what each side held when a provider refused a model because it is not
+   * the host-active one.
+   *
+   * The 0.20.0 gate's fifth run met "Rename works in the module the editor is showing" once, and
+   * five replays and a stress loop of late page answers could not produce it again. Nothing in the
+   * log said which side had moved, because the page never said what it believed. So a refusal on
+   * this check names the model it refused, the module the last tab list named active and which
+   * list that was, the model that resolves to here, and what the active editor holds: enough to
+   * tell a twin workbook's module, a fallback the host never took and a text that never arrived
+   * apart (2026-09-23).
+   */
+  traceNotHostActive(feature: string, model: monaco.editor.ITextModel): void {
+    const host = this.hostActiveModel();
+    const active = this.workspace?.activeEditor().getModel() ?? null;
+    const named = this.hostActive
+      ? `${this.hostActive.project ?? "(no project)"}/${this.hostActive.module}`
+        + (this.hostActive.face ? ` (${this.hostActive.face})` : "")
+      : "nothing";
+    this.trace(`${feature}: refused ${model.uri.toString()}, which is not the host-active model. `
+      + `Tab list ${this.modulesRevision ?? "(none)"} named ${named}, whose model here is `
+      + `${host ? host.uri.toString() : "not open"}; the active editor holds `
+      + `${active ? active.uri.toString() : "nothing"}.`);
+  }
+
   /** Shows the empty workspace: every pane is closed and the editor should say so. */
   private clearDocuments(): void {
     this.markersByDoc.clear();

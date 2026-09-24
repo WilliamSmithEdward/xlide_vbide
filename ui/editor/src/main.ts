@@ -2145,6 +2145,7 @@ function boot(): void {
   const renameProvider: monaco.languages.RenameProvider = {
     resolveRenameLocation: (model, position): monaco.languages.RenameLocation & monaco.languages.Rejection => {
       if (model !== bridge.hostActiveModel()) {
+        bridge.traceNotHostActive("rename", model);
         return { range: emptyRangeAt(position), text: "", rejectReason: "Rename works in the module the editor is showing." };
       }
 
@@ -2160,6 +2161,7 @@ function boot(): void {
     },
     provideRenameEdits: async (model, position, newName) => {
       if (model !== bridge.hostActiveModel()) {
+        bridge.traceNotHostActive("rename", model);
         return { edits: [], rejectReason: "Rename works in the module the editor is showing." };
       }
 

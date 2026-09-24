@@ -774,6 +774,16 @@ await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the
 > ```bash
 > node -e "import('./tools/harness/xlide-api.mjs').then(async m => { const u = await (await m.open({})).ui(); console.log(u.focus.model === u.focus.host?.model ? 'providers answer' : 'PROVIDERS SILENT: ' + u.focus.model + ' vs ' + u.focus.host?.model); })"
 > ```
+>
+> **A wait for a module to be shown asks the same two things, by the whole address.** A model's
+> address is `xlide:/<workbook>/<module>`, and with two workbooks open that hold one module name,
+> a wait for it to END in `/Helpers` is satisfied by either - and by a page showing one while it
+> believes the host has the other. rename-features waited that way, and made on purpose that state
+> passed its wait and got the refusal the 0.20.0 gate met once (2026-09-23). It waits for
+> `focus.model` and `focus.host.model` to both name the workbook's module now. When they disagree,
+> `api.pane("open", ...)` on the host-active module brings the page back, and a refused rename
+> puts `page: rename: refused ...` in the host's log, naming the model refused, the module the last
+> tab list named active and in which list, and what the active editor holds.
 
 ```js
 await api.act("expandProject", { project: "TwinFixture.xlsm", open: true });

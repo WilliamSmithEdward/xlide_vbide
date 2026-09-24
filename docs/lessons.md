@@ -3063,3 +3063,30 @@ there would have vendored their uncommitted work. The sync and the check read
 falling back to the manifest-only check CI runs. Proven with one copy: it
 passes against the 10.6.0 pin and fails against 10.7.1's, and a missing pin
 is refused.
+
+## 98. The request the dedupe swallowed
+
+The 0.20.0 gate's fifth run refused a rename once: "Rename works in the
+module the editor is showing". Every provider answers only for the
+host-active model, so at that moment the page's editor held one module and
+the page believed the host had another. Five replays did not produce it
+again, nor did a stress loop of late page answers (21 fallback answers left
+alone, no split), nor a watcher polling both sides through the whole group.
+
+Making the state on purpose showed three things. The suite's wait accepted
+it: it waited for the focused model's address to end in `/Helpers`, and
+TwinFixture holds a Helpers too. The rename then refused, word for word.
+And opening RenameFixture's Helpers again, which the host already had
+active, changed nothing. The host sends the tab list on change only, and
+nothing had changed on its side, so the one gesture that should put the
+page right was the one the dedupe swallowed. A developer clicking the tree
+row would have seen nothing happen.
+
+An asked-for module now always reaches the page as a list, the wait names
+the workbook and both sides, and a refused rename writes what each side
+held into the host's log. What split the gate's page is still not known;
+the log will say next time.
+
+The rule: a message sent on change only needs a way through for a request.
+A dedupe that is right for polls is wrong for an explicit ask, because the
+asker is exactly the party whose picture may differ from the sender's.
