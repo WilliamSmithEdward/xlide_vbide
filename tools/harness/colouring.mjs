@@ -19,7 +19,7 @@
  *
  *   node tools\harness\colouring.mjs
  */
-import { open, reporter, scratchModule, waitFor } from "./xlide-api.mjs";
+import { open, reporter, scratchModule, wait, waitFor } from "./xlide-api.mjs";
 
 // XLIDE_PID / XLIDE_PROJECT pick the session when several are live; open() reads them itself.
 const api = await open();
@@ -73,6 +73,16 @@ const lines = [
   "",
 ];
 
+/**
+ * The token class monaco gives text its tokenizer has not reached. No rule in this theme paints a
+ * WORD the editor's default foreground, so a word wearing it is waiting for its colour, not wearing
+ * one.
+ */
+const UNTOKENIZED = /\bmtk1\b/;
+
+/** How many reads found their line still waiting for the tokenizer, said at the end. */
+let readsThatWaited = 0;
+
 /** The colour at a word's first and last character, on the line that contains the given text. */
 async function across(lineText, word) {
   const line = lines.findIndex((one) => one === lineText) + 1;
@@ -82,8 +92,28 @@ async function across(lineText, word) {
   // tall, so everything from the first Sub down answered `(none)` - and `(none)` is also what an
   // unpainted word answers, which is how this suite came to report a working tokenizer as a
   // missing semantic pass (#17). One reveal covers both reads: they are on the same line.
-  const first = await api.revealing({ line, column: start });
-  const last = await api.at({ line, column: start + word.length - 1 });
+  //
+  // AND READ AGAIN WHILE THE LINE IS STILL WAITING FOR THE TOKENIZER. The page rebuilds its
+  // tokenizer when the project's words change - this module's own pass brings CalculérName and
+  // RécordAccent - and a rebuild resets every open model's tokens, so the visible lines are drawn
+  // uncoloured until monaco tokenizes them again. Measured 2026-09-23: the words arrived at 129ms,
+  // Debug and Print read the default foreground at 142ms and 149ms, and Debug was a type by 313ms.
+  // The 0.20.1 gate read Debug inside that window, straight after three-copies, and reported a
+  // correct rule as broken. The wait names the token CLASS, not the colour under test, so a word
+  // painted wrongly for good still answers its wrong colour and fails.
+  let first;
+  let last;
+  const until = Date.now() + 3000;
+  for (let attempt = 0; ; attempt += 1) {
+    first = await api.revealing({ line, column: start });
+    last = await api.at({ line, column: start + word.length - 1 });
+    const waiting = UNTOKENIZED.test(first?.tokenClass ?? "") || UNTOKENIZED.test(last?.tokenClass ?? "");
+    if (!waiting || Date.now() >= until) {
+      readsThatWaited += attempt > 0 ? 1 : 0;
+      break;
+    }
+    await wait(50);
+  }
   return {
     word: first?.word,
     head: first?.colour ?? "(none)",
@@ -257,5 +287,8 @@ try {
     await scratch.dispose();
   }
 
+  if (readsThatWaited > 0) {
+    console.log(`  (${readsThatWaited} read(s) found the line waiting for the tokenizer and read again)`);
+  }
   process.exitCode = done();
 }

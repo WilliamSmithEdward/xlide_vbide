@@ -747,6 +747,13 @@ await api.at("Recalculate");                    // colour as painted, and the ma
 // nothing else, and the viewport is however much height the open docks left the editor - so
 // reading by line number reads null for the far half of any module long enough, and null is
 // also what an unpainted word answers. `rendered` tells them apart; reveal to fix the first.
+//
+// AND A LINE ON SCREEN CAN STILL BE WAITING FOR ITS COLOUR. When the project's words change, the
+// page rebuilds its tokenizer, every open model's tokens are reset, and the visible lines are
+// drawn uncoloured until monaco tokenizes them again: about 150ms, measured 2026-09-23. A word
+// read in that window answers `tokenClass: "mtk1"` and the default foreground
+// `rgb(212, 212, 212)`. No rule paints a word that class, so read again until it goes, as
+// colouring.mjs does; the 0.20.1 gate read `Debug` inside the window and failed a correct rule.
 await api.act("reveal", { line: 22 });          // -> { did, detail, data: { firstVisible, lastVisible } }
 await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the scroll done for it
 ```
