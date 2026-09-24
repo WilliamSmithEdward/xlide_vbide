@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-09-23, at v0.20.0.
+Updated 2026-09-23, at v0.20.1.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
