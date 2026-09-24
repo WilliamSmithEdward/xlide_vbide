@@ -10,6 +10,8 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { canonicalKeyword } from "xlide-spec/analyzer/lexer/keywordTable";
+import { tokenizeCached } from "xlide-spec/analyzer/lexer/tokenize";
 import { CANONICAL_KEYWORDS, VBA_LANGUAGE_ID } from "./vba.js";
 
 export interface FormatOptions {
@@ -47,6 +49,10 @@ const OPENS = [
 
 const CLOSES = [
   /^end\s+(?:sub|function|property|if|with|type|enum|select)\b/i,
+  // `EndIf` in one word closes a block If as `End If` does (MS-VBAL 5.4.2.8), and the VBE writes it
+  // back as `End If`. Without it the If's body never closed, and everything after it down to the
+  // End Sub was formatted one level too deep (upstream #88, measured 2026-09-23).
+  /^endif\b/i,
   /^(?:next|loop|wend)\b/i,
 ];
 
@@ -75,8 +81,66 @@ const LABEL = /^[\p{L}_][\p{L}\p{M}\p{N}_]*:(?!=)/u;
 const NAME_START = /[\p{L}_]/u;
 const NAME_PART = /[\p{L}\p{M}\p{N}_]/u;
 
-/** Directives, which are never indented. */
-const DIRECTIVE = /^#(?:if|elseif|else|end\s+if|const)\b/i;
+/** Directives, which are never indented. `#EndIf` is one, as `#End If` is. */
+const DIRECTIVE = /^#(?:if|elseif|else|end\s*if|const)\b/i;
+
+/** A type-declaration character ending a name, which is no part of the word it spells. */
+const TYPE_SUFFIX = /[%&^!#@$]$/;
+
+/**
+ * What the spec's own lexer reads in a module, line by line, numbered as `formatVba` splits them.
+ *
+ * THREE THINGS THIS FORMATTER USED TO WORK OUT BY ITSELF, AND GOT WRONG IN THE SAME WAY: it read
+ * one physical line at a time, with no idea what the lines around it made of it.
+ *
+ * A comment ending in ` _` runs on through the next line (MS-VBAL 3.3.1), which the VBE takes as
+ * comment text however much it looks like code. Formatted as code, `' note _` above `end sub`
+ * respelled the comment's text to `End Sub` and closed the procedure there (upstream #82). A Rem
+ * comment after a colon, `x = 1: rem if not`, had its words respelled because only an apostrophe
+ * stopped the respeller. And `step`, `error`, `explicit` and `ptrsafe` are keywords only inside
+ * their own statements - a For header, On Error, Option, a Declare - and names everywhere else, so
+ * a variable called `step` came out as `Step` (upstream #86). All three measured 2026-09-23 on
+ * upstream's 10.7.1 cases.
+ *
+ * The lexer the page already bundles answers all three the way the analyzer does, because it IS
+ * the analyzer's: a comment token spans every line it carries, a comment starts wherever the
+ * lexer began one, and a statement-bound keyword standing outside its statement comes back as an
+ * identifier. So the formatter asks it rather than keeping a second opinion.
+ */
+interface LexedLines {
+  /** Lines a comment carries on to: its text, left exactly as written. */
+  carried: ReadonlySet<number>;
+  /** Where each line's comment starts, an apostrophe's or a Rem's. */
+  commentAt: ReadonlyMap<number, number>;
+  /** Columns of words that spell a keyword but stand where the lexer reads them as a name. */
+  names: ReadonlyMap<number, ReadonlySet<number>>;
+}
+
+function lexLines(text: string): LexedLines {
+  const carried = new Set<number>();
+  const commentAt = new Map<number, number>();
+  const names = new Map<number, Set<number>>();
+
+  for (const token of tokenizeCached(text)) {
+    if (token.kind === "comment") {
+      if (!commentAt.has(token.line)) {
+        commentAt.set(token.line, token.character);
+      }
+
+      const physical = token.rawText.split(/\r\n|\r|\n/).length;
+      for (let extra = 1; extra < physical; extra += 1) {
+        carried.add(token.line + extra);
+      }
+    } else if (token.kind === "identifier"
+      && canonicalKeyword(token.rawText.replace(TYPE_SUFFIX, "")) !== undefined) {
+      const columns = names.get(token.line) ?? new Set<number>();
+      columns.add(token.character);
+      names.set(token.line, columns);
+    }
+  }
+
+  return { carried, commentAt, names };
+}
 
 /**
  * Splits a line into the part that decides indentation and the part that must not be examined.
@@ -124,7 +188,11 @@ function continues(text: string): boolean {
   return /(^|\s)_$/.test(text.replace(/\s+$/, ""));
 }
 
-function respell(line: string): string {
+/**
+ * `commentAt` is where the lexer found this line's comment, so a Rem is text as an apostrophe is;
+ * `isName` says the lexer reads the word at a column as a name though it spells a keyword.
+ */
+function respell(line: string, commentAt?: number, isName?: (column: number) => boolean): string {
   // Identifiers only, and never inside a string or a comment. The callback receives each run of
   // word characters; anything not a keyword is returned untouched, which leaves every name the
   // developer chose exactly as they wrote it.
@@ -133,6 +201,11 @@ function respell(line: string): string {
   let index = 0;
 
   while (index < line.length) {
+    if (commentAt !== undefined && index >= commentAt) {
+      result += line.slice(index);
+      break;
+    }
+
     const ch = line[index];
 
     if (inString) {
@@ -169,9 +242,10 @@ function respell(line: string): string {
       const word = line.slice(index, end);
 
       // A word followed by a dot or preceded by one is a member name, not a keyword: `Range.Type`
-      // and `Sheet.Cells` must keep whatever the object model calls them.
+      // and `Sheet.Cells` must keep whatever the object model calls them. So is a keyword the
+      // lexer reads as a name where it stands: `Dim step As Long`.
       const isMember = line.charAt(index - 1) === "." || line.charAt(end) === ".";
-      const canonical = isMember ? undefined : CANONICAL.get(word.toLowerCase());
+      const canonical = isMember || isName?.(index) ? undefined : CANONICAL.get(word.toLowerCase());
 
       result += canonical ?? word;
       index = end;
@@ -193,13 +267,23 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
   const unit = " ".repeat(Math.max(1, options.indentSize));
   const lines = text.split(/\r?\n/);
   const formatted: string[] = [];
+  const lexed = lexLines(text);
 
   let depth = 0;
   // While a statement is continued, its following lines are indented one further and none of
   // them are examined for block structure: they are the middle of one statement.
   let continuing = false;
 
-  for (const original of lines) {
+  for (const [index, original] of lines.entries()) {
+    // A line a comment carries on to is the comment's text: not indented, not respelled, and not
+    // a block's opener or closer, whatever it says. Exactly as written, which is what the VBE
+    // keeps and what upstream's Format Document does since 10.7.1.
+    if (lexed.carried.has(index)) {
+      formatted.push(original);
+      continuing = false;
+      continue;
+    }
+
     const body = original.trim();
 
     if (body.length === 0) {
@@ -207,8 +291,18 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
       continue;
     }
 
-    const code = significant(body);
-    const respelled = options.canonicalKeywords ? respell(body) : body;
+    // Structure is decided on the code BEFORE the comment, wherever the lexer began one: a
+    // `: Rem` comment's words are not a block opener, and its ` _` is not a continuation.
+    const lead = original.length - original.trimStart().length;
+    const commentAt = lexed.commentAt.get(index);
+    const code = significant(commentAt === undefined ? body : original.slice(0, commentAt).trim());
+    const names = lexed.names.get(index);
+    const respelled = options.canonicalKeywords
+      ? respell(
+        body,
+        commentAt === undefined ? undefined : commentAt - lead,
+        (column) => names?.has(lead + column) ?? false)
+      : body;
 
     if (continuing) {
       formatted.push(unit.repeat(depth + 1) + respelled);

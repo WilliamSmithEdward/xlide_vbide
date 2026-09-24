@@ -69,6 +69,8 @@ const lines = [
   "    Debug.Print vbInformation",
   "    Debug.Print xlUp",
   "    Debug.Print xlLandscape",
+  "    ' a note that runs on _",
+  "    Recalculate \"carried\"",
   "End Sub",
   "",
 ];
@@ -264,6 +266,20 @@ try {
   const uncurated = await across("    Debug.Print xlLandscape", "xlLandscape");
   check("and one outside the old list paints the same, which is the point of xlide_vscode#35",
     uncurated.head === HOSTKNOWN, `it is ${nameOf(uncurated.head)}`);
+
+  /*
+   * 3c. A COMMENT ENDING IN ` _` RUNS ON THROUGH THE NEXT LINE (MS-VBAL 3.3.1, upstream #82).
+   *
+   * The VBE takes the carried line as comment text, and the tokenizer painted it as code: the
+   * `Recalculate "carried"` below read as a call (2026-09-23). Compared with the comment's own
+   * colour rather than a named one, so the theme can move without this caring. test/tokenizer.mjs
+   * holds the rule itself, run through monaco's lexer; this holds the page that ships it.
+   */
+  const note = await across("    ' a note that runs on _", "note");
+  const carried = await across("    Recalculate \"carried\"", "Recalculate");
+  check("the line a comment carries on to through ' _' is painted as the comment",
+    note.head !== CALL && carried.head === note.head && carried.oneColour,
+    `the comment is ${nameOf(note.head)}, the carried line reads ${nameOf(carried.head)}`);
 
   // 4. A NAME IS ONE COLOUR ALL THE WAY ALONG.
   const plainType = await across("Public Type PlainRecord", "PlainRecord");

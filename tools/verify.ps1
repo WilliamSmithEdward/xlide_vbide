@@ -259,13 +259,14 @@ Step 'page build' {
 }
 
 Step 'page tests' {
-    # The split tree's arithmetic, then the bundle's structure.
+    # The page's own list, whole: the split tree's arithmetic, Format Module, the tokenizer run
+    # through monaco's lexer, and the bundle's structure among them.
     Push-Location $pageRoot
     try {
         npm test 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'the page tests failed' }
     } finally { Pop-Location }
-    'tree algebra, bundle structure'
+    'tree algebra, Format Module, the tokenizer, bundle structure'
 }
 
 Step 'engine language matrix' {

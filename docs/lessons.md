@@ -3090,3 +3090,30 @@ the log will say next time.
 The rule: a message sent on change only needs a way through for a request.
 A dedupe that is right for polls is wrong for an explicit ask, because the
 asker is exactly the party whose picture may differ from the sender's.
+
+## 99. The second opinion the analyzer update could not reach
+
+Analyzer 10.7.1 fixed upstream's Format Document, grammar and outdent for a
+one-word `EndIf`, a comment ending in ` _` that runs on to the next line,
+and words like `step` that are keywords only in their own statement. None of
+it reached this product. Format Module is `format.ts`, colouring is the
+Monarch tokenizer in `vba.ts`, and neither imports the analyzer, so each
+kept its own reading of the language and each read one line at a time.
+Measured on upstream's own cases: EndIf left the rest of the procedure one
+level too deep, a carried `end sub` was respelled and closed the procedure,
+a `: rem` comment had its words respelled, and `Dim step` became `Dim Step`.
+The VBE, asked directly, rewrites EndIf as End If, keeps the carried line
+verbatim, and leaves a variable called step lowercase beside a For's `Step`.
+
+The formatter now asks the lexer the page already bundles, which is the
+analyzer's own: which lines a comment carries on to, where each line's
+comment starts, and which keyword-spelled words stand as names. The
+tokenizer gained a state that carries a comment until a line without ` _`
+or an empty line, tested through monaco's real Monarch lexer in node, where
+colour had only ever been checked live. Every test went red on the old code
+first; the one that could only pass there was broken on purpose instead.
+
+The rule: an update to the shared analyzer reaches only what imports it.
+Where the page keeps its own version of something the analyzer also does,
+read the changelog for it, and prefer asking the vendored code over keeping
+a second opinion.

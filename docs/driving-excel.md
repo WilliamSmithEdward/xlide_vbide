@@ -754,6 +754,11 @@ await api.at("Recalculate");                    // colour as painted, and the ma
 // read in that window answers `tokenClass: "mtk1"` and the default foreground
 // `rgb(212, 212, 212)`. No rule paints a word that class, so read again until it goes, as
 // colouring.mjs does; the 0.20.1 gate read `Debug` inside the window and failed a correct rule.
+//
+// A LINE A COMMENT CARRIES ON TO IS THE COMMENT'S COLOUR. A comment ending in ` _` runs on through
+// the next line, as the VBE reads it, so that line paints as comment text whatever it spells;
+// colouring.mjs compares it with the comment's own colour, and ui/editor/test/tokenizer.mjs holds
+// the rule through monaco's lexer (2026-09-23).
 await api.act("reveal", { line: 22 });          // -> { did, detail, data: { firstVisible, lastVisible } }
 await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the scroll done for it
 ```

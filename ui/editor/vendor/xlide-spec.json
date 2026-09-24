@@ -2,7 +2,9 @@
   "source": "xlide_vscode",
   "commit": "6ead73db155709009adaaeb0ce2272ac7955f773",
   "entries": [
+    "analyzer/lexer/keywordTable",
     "analyzer/lexer/strippedLines",
+    "analyzer/lexer/tokenize",
     "vbaSmartEnter",
     "vbaSmartTab",
     "vbaSourceScan"

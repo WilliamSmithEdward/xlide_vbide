@@ -120,8 +120,10 @@ const BUILTIN_FUNCTIONS: string[] = [
  * denote types, names that denote procedures - and the tokenizer is rebuilt around them, which
  * is what lets `ROneCOne.Create(...)` read as a type and a call while `values(index, 1)` stays
  * a variable.
+ *
+ * Exported for test/tokenizer.mjs, which runs it through monaco's own Monarch compiler and lexer.
  */
-function buildVbaMonarch(
+export function buildVbaMonarch(
   projectTypes: readonly string[],
   projectProcedures: readonly string[],
 ): monaco.languages.IMonarchLanguage {
@@ -168,7 +170,15 @@ function buildVbaMonarch(
     root: [
       // Rem is a statement level comment. It is matched before identifiers so `Rem` never
       // tokenizes as a plain word; `\b` keeps `Remaining` out of it.
+      //
+      // A COMMENT ENDING IN ` _` RUNS ON THROUGH THE NEXT LINE (MS-VBAL 3.3.1). The VBE takes
+      // that line as comment text however much it looks like code, and so does the analyzer
+      // since 10.7.1 (its #82). This coloured only the first line, so an `End Sub` carried by a
+      // comment painted as a keyword while nothing else treated it as one (2026-09-23). The
+      // underscore needs whitespace before it, as a code continuation's does: `' note_` ends.
+      [/rem\b.*\s_[ \t]*$/, { token: "comment", next: "@carriedComment" }],
       [/rem\b.*$/, "comment"],
+      [/'.*\s_[ \t]*$/, { token: "comment", next: "@carriedComment" }],
       [/'.*$/, "comment"],
 
       // Conditional compilation directives, before the date literal can eat their #.
@@ -311,6 +321,15 @@ function buildVbaMonarch(
       [/""/, "string.escape"],
       [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
     ],
+
+    // The lines a comment carries on to. Each is comment text end to end; one that ends in ` _`
+    // carries it again, and the first that does not ends the run. An EMPTY line ends it too, as
+    // it ends the VBE's: monarch visits an empty line once with nothing to match, and `.*$`
+    // matching nothing there is what pops the state (test/tokenizer.mjs holds both cases).
+    carriedComment: [
+      [/.*\s_[ \t]*$/, "comment"],
+      [/.*$/, { token: "comment", next: "@pop" }],
+    ],
   },
   };
 }
@@ -398,9 +417,12 @@ export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = 
     ),
     // Closes a block. Else/ElseIf/Case pull their own line back; the on-enter rules indent the
     // lines that follow them again.
+    // `EndIf` in one word closes a block If as `End If` does (MS-VBAL 5.4.2.8), and the VBE writes
+    // it back as `End If`; the directive's `#EndIf` was already here and the block's was not
+    // (upstream #88, 2026-09-23). `\b` keeps a name like `EndIfCount` from outdenting.
     decreaseIndentPattern: new RegExp(
       "^[ \\t]*(?:End[ \\t]+(?:Sub|Function|Property|If|With|Select|Type|Enum)"
-      + "|#[ \\t]*End[ \\t]*If\\b|Next\\b|Loop\\b|Wend\\b|Else\\b|ElseIf\\b|Case\\b)",
+      + "|EndIf\\b|#[ \\t]*End[ \\t]*If\\b|Next\\b|Loop\\b|Wend\\b|Else\\b|ElseIf\\b|Case\\b)",
       "i",
     ),
   },

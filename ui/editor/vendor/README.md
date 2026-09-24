@@ -8,7 +8,9 @@ from knows nothing about.
 
 The smart-editing helpers the page bundles from the spec repo (`xlide_vscode`): Smart Enter, Smart
 Tab, and the lexer they lean on. Typing in the VBE surface and typing in the VS Code extension run
-the same code, and that is the point of copying it rather than reimplementing it.
+the same code, and that is the point of copying it rather than reimplementing it. Format Module
+asks the same lexer which lines a comment carries on to and where a keyword stands as a name, so
+it reads a module as the analyzer does.
 
 `xlide-spec.json` records where the copy came from — the commit of the spec repo it was taken at,
 the entry points the page imports, and a hash per file.
