@@ -18,7 +18,8 @@ upgrade to the latest version when a fix is available.
 The [Security workflow](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml)
 runs on pull requests, pushes to `main`, weekly, manually, and when a new release is published.
 CodeQL scans C#, JavaScript/TypeScript, and GitHub Actions with `security-extended` queries.
-C# uses build-free analysis, so generated code and build-specific configurations may not be covered.
+C# analysis builds the Release configuration on Windows with the repository's .NET SDK, including
+source generators. Other build configurations are not analyzed by this workflow.
 Semgrep Community Edition scans source with `p/security-audit` and `p/secrets`; registry rules are
 retrieved at scan time. The scanner version is pinned and updated by Dependabot.
 
