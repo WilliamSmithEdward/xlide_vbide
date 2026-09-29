@@ -1,0 +1,9 @@
+# Keep tests, tools, and vendored source in scope; exclude generated outputs only.
+.git/
+**/node_modules/
+artifacts/
+**/bin/
+**/obj/
+**/dist/
+security-results/
+security-report/

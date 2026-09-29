@@ -43,6 +43,36 @@ if ($head -ne $tagged) {
     throw "HEAD is $($head.Substring(0,7)) but $Tag is $($tagged.Substring(0,7)). Check out the tag before building what it will carry."
 }
 
+$changes = @(git -C $repoRoot status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw 'Could not verify the checkout state.' }
+if ($changes.Count -gt 0) { throw 'Release requires a clean checkout of the scanned commit.' }
+
+# Security is mandatory even with -SkipGate. Only runs on this exact commit from trusted
+# branch/manual/release events qualify; a PR merge-ref scan is not release evidence.
+$repository = 'WilliamSmithEdward/xlide_vbide'
+$runsJson = gh run list --repo $repository --workflow security.yml --commit $head --limit 100 `
+    --json databaseId,headSha,event,status,conclusion,createdAt
+if ($LASTEXITCODE -ne 0) { throw 'Could not retrieve Security workflow runs.' }
+$runs = @($runsJson | ConvertFrom-Json | Where-Object {
+    $_.headSha -eq $head -and $_.event -in @('push', 'workflow_dispatch', 'release', 'schedule')
+} | Sort-Object createdAt -Descending)
+if ($runs.Count -eq 0 -or $runs[0].status -ne 'completed' -or $runs[0].conclusion -ne 'success') {
+    throw 'The latest Security run for this commit must complete successfully before release. Run security.yml on the tag if needed.'
+}
+$securityRun = $runs[0].databaseId
+$securityDirectory = Join-Path $repoRoot ('artifacts/security-release/' + [guid]::NewGuid().ToString('N'))
+gh run download $securityRun --repo $repository --name security-report --dir $securityDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Could not download the security report; rerun Security if its artifact expired.' }
+$securityJson = Join-Path $securityDirectory 'security-report.json'
+$securityMarkdown = Join-Path $securityDirectory 'security-report.md'
+$security = Get-Content -LiteralPath $securityJson -Raw | ConvertFrom-Json
+if ($security.schemaVersion -ne 1 -or $security.passed -isnot [bool] -or $security.passed -ne $true -or $security.commit -ne $head -or
+    $security.repository -ne $repository -or
+    $security.run -ne "https://github.com/$repository/actions/runs/$securityRun" -or
+    -not (Test-Path -LiteralPath $securityMarkdown)) {
+    throw 'The security report is missing, failed, or does not describe this release commit and run.'
+}
+
 # Checked before anything is built, because the alternative is finding out after the gate and a
 # compressed installer that there was nothing to attach it to.
 gh release view $Tag --json tagName 2>&1 | Out-Null
@@ -110,7 +140,7 @@ Write-Host ("==> Attaching xlide-setup.exe ({0:N1} MB) to {1}" -f $size, $Tag) -
 
 # --clobber so a re-run replaces the asset rather than failing, which is what you want when a
 # release is corrected without moving the tag.
-gh release upload $Tag $installer --clobber
+gh release upload $Tag $installer $securityMarkdown $securityJson --repo $repository --clobber
 if ($LASTEXITCODE -ne 0) { throw "Uploading to $Tag failed." }
 
 Write-Host ''

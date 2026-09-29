@@ -1,0 +1,154 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            os: windows-latest
+            build-mode: manual
+          - language: javascript-typescript
+            os: ubuntu-latest
+            build-mode: none
+          - language: actions
+            os: ubuntu-latest
+            build-mode: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        if: matrix.language == 'csharp'
+        with:
+          global-json-file: global.json
+      - uses: github/codeql-action/init@7999b86c43a865dc79d8923397f35af22de63401 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - name: Build C# with source generators for extraction
+        if: matrix.language == 'csharp'
+        run: dotnet build xlide_vbide.slnx --configuration Release --no-incremental -p:UseSharedCompilation=false
+      - uses: github/codeql-action/analyze@7999b86c43a865dc79d8923397f35af22de63401 # v4
+        with:
+          output: security-results/codeql-${{ matrix.language }}
+          category: /language:${{ matrix.language }}
+          upload: ${{ github.event_name == 'release' && 'never' || 'always' }}
+      - name: Preserve results even when analysis fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-codeql-${{ matrix.language }}
+          path: security-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r .github/security/requirements.txt
+      - name: Scan all tracked source with security and secrets rules
+        run: |
+          mkdir -p security-results/semgrep
+          semgrep scan --config p/security-audit --config p/secrets \
+            --error --strict --disable-nosem --metrics off --disable-version-check \
+            --sarif-output security-results/semgrep/semgrep.sarif .
+      - name: Upload to code scanning
+        if: always() && github.event_name != 'release' && hashFiles('security-results/semgrep/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@7999b86c43a865dc79d8923397f35af22de63401 # v4
+        with:
+          sarif_file: security-results/semgrep/semgrep.sarif
+          category: semgrep
+      - name: Preserve results even when analysis fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-semgrep
+          path: security-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  report:
+    name: Security gate
+    if: always()
+    needs: [codeql, semgrep]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: security-*
+          path: security-results
+          merge-multiple: true
+      - name: Write report and reject findings or incomplete scans
+        if: always()
+        env:
+          SCANNER_STATUS: ${{ toJSON(needs) }}
+        run: node tools/security/report.mjs security-results security-report
+      - name: Test failure handling
+        if: always()
+        run: node --test tools/security/report.test.mjs
+      - name: Preserve report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-report
+          path: security-report/
+          if-no-files-found: error
+          retention-days: 90
+
+  release-report:
+    name: Attach release security report
+    if: always() && github.event_name == 'release'
+    needs: [report]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # This write-enabled job never checks out or executes repository code.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: security-report
+          path: report
+      - name: Attach reports, including failed scan reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" report/security-report.md report/security-report.json --clobber
