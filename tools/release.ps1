@@ -77,7 +77,7 @@ if ($security.schemaVersion -ne 1 -or $security.passed -isnot [bool] -or $securi
 # compressed installer that there was nothing to attach it to.
 gh release view $Tag --json tagName 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "No release for $Tag. Create it first: gh release create $Tag --title ... --notes ..."
+    throw "No release for $Tag. Create a draft first: gh release create $Tag --draft --title ... --notes ...; publish after attaching assets."
 }
 
 if (-not $SkipGate) {
