@@ -67,7 +67,7 @@ def prepare(policy, release, output, base_sha, compile_rules=load_yara):
         f"- Compiler warning counts: `{json.dumps(counts, sort_keys=True)}`.\n"
         f"- Candidate diagnostic fingerprint: `{fingerprint}`.\n\n"
         "The updater has NOT approved compiler warnings, extended the review deadline, or changed detection exceptions. "
-        "Security is explicitly dispatched on this PR branch. Changed diagnostics deliberately fail its gate until "
+        "The Malware scan is explicitly dispatched on this PR branch. Changed diagnostics deliberately fail its gate until "
         "a maintainer reviews the evidence and updates the documented baseline. Do not copy the fingerprint just to pass CI.\n\n"
         "Review provider/rule changes, scan results, compiler diagnostics, and docs/security-malware.md before merging. "
         "This updater never merges or approves PRs.\n"
@@ -120,7 +120,7 @@ def publish(proposal, body, original, repository, call=api):
         pull = call(f"{root}/pulls", "POST", {"title": f"Update YARA Forge full to {tag}", "head": branch,
                                              "base": "main", "body": body})
     # workflow_dispatch runs with GITHUB_TOKEN; ordinary bot PR events can require approval.
-    for workflow in ("security.yml", "build.yml"):
+    for workflow in ("malware-scan.yml", "ci.yml"):
         call(f"{root}/actions/workflows/{workflow}/dispatches", "POST", {"ref": branch})
     return pull["html_url"]
 
@@ -146,7 +146,7 @@ def main():
         print(url or "The existing update PR was closed; leaving that decision unchanged")
         if url and os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-                summary.write(f"Proposed YARA Forge update: {url}\n\nSecurity and build explicitly dispatched on its branch.\n")
+                summary.write(f"Proposed YARA Forge update: {url}\n\nMalware scan and CI explicitly dispatched on its branch.\n")
 
 
 if __name__ == "__main__":

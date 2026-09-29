@@ -74,8 +74,8 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(publish(proposal, "Reviewed proposal", self.policy, "owner/repo", api), "https://github.com/owner/repo/pull/1")
         tree = next(payload for endpoint, _, payload in calls if endpoint.endswith("/git/trees"))
         self.assertEqual([entry["path"] for entry in tree["tree"]], [".github/security/malware/policy.json"])
-        self.assertTrue(calls[-2][0].endswith("security.yml/dispatches"))
-        self.assertTrue(calls[-1][0].endswith("build.yml/dispatches"))
+        self.assertTrue(calls[-2][0].endswith("malware-scan.yml/dispatches"))
+        self.assertTrue(calls[-1][0].endswith("ci.yml/dispatches"))
         proposal["policy"]["compilerDiagnostics"]["sha256"] = "e" * 64
         with self.assertRaisesRegex(ValueError, "outside the allowed"):
             publish(proposal, "body", self.policy, "owner/repo", api)

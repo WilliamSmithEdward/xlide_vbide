@@ -100,48 +100,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  malware:
-    name: ClamAV + YARA-X
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-      - run: python -m pip install --require-hashes -r .github/security/malware/requirements.txt
-      - name: Download published release assets without executing them
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/release-assets"
-      - name: Scan every tracked file and any release assets
-        env:
-          SCAN_RELEASE: ${{ github.event_name == 'release' }}
-        run: |
-          args=()
-          if [[ "$SCAN_RELEASE" == true ]]; then args+=(--assets "$RUNNER_TEMP/release-assets"); fi
-          python tools/security/malware.py --output security-results "${args[@]}"
-      - name: Test inventory and scanner failure handling
-        if: always()
-        run: python -m unittest discover -s tools/security -p '*_test.py'
-      - name: Preserve malware scan evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: security-malware
-          path: security-results/
-          if-no-files-found: error
-          retention-days: 30
-
   report:
-    name: Security gate
+    name: Security report
     if: always()
-    needs: [codeql, semgrep, malware]
+    needs: [codeql, semgrep]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -190,3 +152,19 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" report/security-report.md report/security-report.json --clobber
+
+  security-passed:
+    name: Security passed
+    if: always()
+    needs: [codeql, semgrep, report]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check every security job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

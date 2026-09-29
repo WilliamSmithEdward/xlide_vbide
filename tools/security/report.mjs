@@ -33,8 +33,15 @@ export function inspectSarif(sarif) {
   return { findings, problems, tools };
 }
 
-export function createReport(input, statuses, policy = malwarePolicy, context = process.env) {
-  const scans = expectedScans.map(name => {
+// The Security workflow reports on CodeQL and Semgrep; the Malware scan workflow on
+// ClamAV and YARA-X. Each names the jobs that must have succeeded.
+export const reportKinds = {
+  security: { title: 'Security report', file: 'security-report', jobs: ['codeql', 'semgrep'] },
+  malware: { title: 'Malware report', file: 'malware-report', jobs: expectedMalwareScans },
+};
+
+export function createReport(input, statuses, policy = malwarePolicy, context = process.env, kind = 'security') {
+  const scans = (kind === 'security' ? expectedScans : []).map(name => {
     try {
       const files = readdirSync(join(input, name)).filter(file => file.endsWith('.sarif'));
       if (files.length !== 1) throw new Error(`Expected one SARIF file; found ${files.length}`);
@@ -43,7 +50,7 @@ export function createReport(input, statuses, policy = malwarePolicy, context = 
       return { name, findings: null, tools: [], problems: [error.message] };
     }
   });
-  for (const name of expectedMalwareScans) {
+  for (const name of kind === 'malware' ? expectedMalwareScans : []) {
     try {
       const result = JSON.parse(readFileSync(join(input, name, 'result.json'), 'utf8'));
       if (context.GITHUB_SHA && result.commit !== context.GITHUB_SHA) throw new Error('Malware scan describes a different commit');
@@ -54,22 +61,23 @@ export function createReport(input, statuses, policy = malwarePolicy, context = 
   }
   const problems = [];
   const malware = scans.filter(scan => expectedMalwareScans.includes(scan.name));
-  if (malware.every(scan => scan.inventorySha256) && malware[0].inventorySha256 !== malware[1].inventorySha256) {
+  if (malware.length && malware.every(scan => scan.inventorySha256) && malware[0].inventorySha256 !== malware[1].inventorySha256) {
     problems.push('ClamAV and YARA-X scanned different inventories');
   }
-  if (context.GITHUB_EVENT_NAME === 'release' && malware.some(scan =>
+  if (kind === 'malware' && context.GITHUB_EVENT_NAME === 'release' && malware.some(scan =>
     !scan.assets?.some(asset => asset.path === 'release/xlide-setup.exe'))) {
     problems.push('Published release scan did not include the installer');
   }
-  for (const name of ['codeql', 'semgrep', 'malware']) {
+  for (const name of reportKinds[kind].jobs) {
     if (statuses?.[name]?.result !== 'success') problems.push(`${name} job: ${statuses?.[name]?.result ?? 'missing'}`);
   }
   return { passed: problems.length === 0 && scans.every(scan => scan.findings === 0 && scan.problems.length === 0), problems, scans };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [input, output] = process.argv.slice(2);
-  if (!input || !output) throw new Error('Usage: report.mjs INPUT OUTPUT');
+  const [input, output, kind = 'security'] = process.argv.slice(2);
+  if (!input || !output || !reportKinds[kind]) throw new Error('Usage: report.mjs INPUT OUTPUT [security|malware]');
+  const { title, file } = reportKinds[kind];
   let statuses = {};
   try { statuses = JSON.parse(process.env.SCANNER_STATUS ?? '{}'); } catch { /* Missing status fails closed. */ }
   const report = {
@@ -80,10 +88,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     event: process.env.GITHUB_EVENT_NAME,
     run: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
     generatedAt: new Date().toISOString(),
-    ...createReport(input, statuses),
+    ...createReport(input, statuses, malwarePolicy, process.env, kind),
   };
   const markdown = [
-    '# Security report', '',
+    `# ${title}`, '',
     `Status: **${report.passed ? 'PASS' : 'FAIL / INCOMPLETE'}**`, '',
     `Commit: \`${report.commit}\``, '',
     `Workflow: ${report.run}`, '',
@@ -97,8 +105,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     'Release assets are scanned only when listed above. YARA-X scans raw bytes; neither scanner guarantees unpacking of custom installer payloads. Source scans do not include untracked dependencies or the separately bundled analyzer. This is not a guarantee that a release is malware-free.', '',
   ].join('\n');
   mkdirSync(output, { recursive: true });
-  writeFileSync(join(output, 'security-report.json'), JSON.stringify(report, null, 2) + '\n');
-  writeFileSync(join(output, 'security-report.md'), markdown);
+  writeFileSync(join(output, `${file}.json`), JSON.stringify(report, null, 2) + '\n');
+  writeFileSync(join(output, `${file}.md`), markdown);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
   if (!report.passed) process.exitCode = 1;
 }

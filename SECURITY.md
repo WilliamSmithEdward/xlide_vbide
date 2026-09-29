@@ -22,14 +22,14 @@ C# analysis builds the Release configuration on Windows with the repository's .N
 source generators. Other build configurations are not analyzed by this workflow.
 Semgrep Community Edition scans source with `p/security-audit` and `p/secrets`; registry rules are
 retrieved at scan time. The scanner version is pinned and updated by Dependabot.
-The separate **ClamAV + YARA-X** CI row scans every tracked file. ClamAV downloads and tests fresh
+The separate **Malware scan** workflow scans every tracked file, one job each for ClamAV and YARA-X. ClamAV downloads and tests fresh
 official Talos signatures on every run; update failures fail the job with no stale fallback. YARA-X scans
 the same inventory with the SHA-256-pinned YARA Forge **full** public collection. Published-release
 runs also download and scan release assets, including `xlide-setup.exe`, without executing them.
 Versions, hashes, coverage, and the bounded exception policy are in
 [Malware scanning and accepted diagnostics](docs/security-malware.md).
 
-The **Security gate** fails on unexpected findings, scanner failure, new warning/error diagnostics,
+The **Security passed** and **Malware scan passed** gates fail on unexpected findings, scanner failure, new warning/error diagnostics,
 malformed reports, or missing results. CodeQL/Semgrep findings still fail at every severity, including
 suppressed SARIF findings; Semgrep inline `nosemgrep` suppressions are disabled. Malware detections
 may be bypassed only by an explicitly reviewed, expiring entry matching scanner, rule, exact path,
@@ -49,7 +49,8 @@ are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scan
 ## Release security reports
 
 Releases published after this workflow is merged and included in their tagged commit receive
-`security-report.md` and `security-report.json`. Reports name the scanned commit and workflow run,
+`security-report.md` and `security-report.json` from the Security workflow, and `malware-report.md`
+and `malware-report.json` from the Malware scan workflow. Reports name the scanned commit and workflow run,
 list findings by scanner, and clearly mark failed or incomplete scans. Only summaries are attached
 publicly; raw finding details remain in workflow artifacts (also accessible for this public repo).
 Existing releases are not backfilled. Reports arrive asynchronously after publication; a failed scan
@@ -67,8 +68,9 @@ For the local installer release process:
    **and the attached release assets**. That run replaces the initial source-only reports with reports
    listing each scanned asset's SHA-256. Download or scan failures produce a failing/incomplete report.
 
-Repository administrators can require **Security gate** in branch protection/rulesets to prevent
-merging failed checks; adding this workflow does not itself change those merge rules. GitHub UI or
+Repository administrators can require **Security passed** and **Malware scan passed** in branch
+protection/rulesets to prevent merging failed checks; adding these workflows does not itself change
+those merge rules. GitHub UI or
 CLI release creation outside `tools/release.ps1` is not blocked by the local gate.
 
 The pre-publication check is source-only; asset malware scanning occurs after publication and does

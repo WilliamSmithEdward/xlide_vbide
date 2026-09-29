@@ -1,4 +1,4 @@
-name: build
+name: CI
 
 on:
   push:
@@ -157,6 +157,7 @@ jobs:
           }
 
   build:
+    name: Build
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.
     runs-on: windows-latest
@@ -328,3 +329,19 @@ jobs:
           name: shim
           path: artifacts/publish/Xlide.Vbe.Shim/release_win-x64/
           if-no-files-found: error
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [engine, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check every CI job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done
