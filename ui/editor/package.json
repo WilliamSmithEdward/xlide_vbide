@@ -12,8 +12,8 @@
     "spec:sync": "node tools/sync-spec.mjs --write"
   },
   "devDependencies": {
-    "esbuild": "^0.28.1",
-    "monaco-editor": "^0.56.0",
+    "esbuild": "^0.28.2",
+    "monaco-editor": "^0.57.0",
     "typescript": "^7.0.2"
   }
 }
