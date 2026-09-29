@@ -16,13 +16,14 @@ upgrade to the latest version when a fix is available.
 ## Automated analysis
 
 The [Security workflow](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml)
-runs on pull requests, pushes to `main`, weekly, manually, and when a new release is published.
+runs on pull requests, pushes to `main`, daily at 06:23 UTC, manually, and when a new release is published.
 CodeQL scans C#, JavaScript/TypeScript, and GitHub Actions with `security-extended` queries.
 C# analysis builds the Release configuration on Windows with the repository's .NET SDK, including
 source generators. Other build configurations are not analyzed by this workflow.
 Semgrep Community Edition scans source with `p/security-audit` and `p/secrets`; registry rules are
 retrieved at scan time. The scanner version is pinned and updated by Dependabot.
-ClamAV scans every tracked file with freshly updated official Talos signatures. YARA-X scans
+The separate **ClamAV + YARA-X** CI row scans every tracked file. ClamAV downloads and tests fresh
+official Talos signatures on every run; update failures fail the job with no stale fallback. YARA-X scans
 the same inventory with the SHA-256-pinned YARA Forge **full** public collection. Published-release
 runs also download and scan release assets, including `xlide-setup.exe`, without executing them.
 Versions, hashes, coverage, and the bounded exception policy are in
@@ -40,7 +41,9 @@ GitHub code scanning dismissal alone does not bypass this gate.
 Raw SARIF is uploaded to GitHub code scanning for branch/PR runs and retained as workflow artifacts
 for 30 days. Summary reports are retained for 90 days. Dependabot checks npm, NuGet, GitHub Actions,
 and the Semgrep/YARA-X Python requirements and ClamAV container weekly. Public YARA rules are pinned
-for review rather than silently following a moving download. Dependabot alerts and security updates
+for review rather than silently following a moving download. The weekly YARA Forge updater proposes
+new release/checksum/rule-count pins in a PR and explicitly starts Security and build on its branch.
+It never accepts compiler diagnostics or merges PRs. Dependabot alerts and security updates
 are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scanning alert.
 
 ## Release security reports
