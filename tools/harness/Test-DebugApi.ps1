@@ -577,6 +577,7 @@ Check 'eval reaches the palette page as well as the editor' {
         } while (-not $putAway -and (Get-Date) -lt $deadline)
     }
 
+    "palette eval answered=$($answer.answered), title=$($answer.result), hidden=$putAway"
     $answer.answered -and $answer.result -match 'Object Browser' -and $putAway
 }
 

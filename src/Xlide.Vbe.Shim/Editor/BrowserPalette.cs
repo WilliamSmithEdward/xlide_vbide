@@ -61,9 +61,9 @@ internal sealed unsafe class BrowserPalette : IDisposable
             || Win32.SendMessage(_handle, Win32.WmGetIcon, Win32.IconBig, 0) != 0);
 
     /// <summary>Creates the palette over <paramref name="owner"/> and starts its page.</summary>
-    public static BrowserPalette? Open(nint owner)
+    public static BrowserPalette? Open(nint owner, WebView2Surface? editorBrowser)
     {
-        if (owner == 0 || !EnsureClassRegistered())
+        if (owner == 0 || editorBrowser is null || !EnsureClassRegistered())
         {
             return null;
         }
@@ -105,7 +105,8 @@ internal sealed unsafe class BrowserPalette : IDisposable
         palette._browser = WebView2Surface.Start(
             handle,
             new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top),
-            "?view=objbrowser");
+            "?view=objbrowser",
+            editorBrowser);
 
         if (palette._browser is null)
         {
