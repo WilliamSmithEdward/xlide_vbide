@@ -538,8 +538,10 @@ try {
     // never sees. Three mistakes, each with a different fix, in one module.
     const FIXABLE = [
         'Sub Broken()',
-        '    Dim r As Range',
-        '    r = ActiveSheet.Range("A1")',
+        // Collection's default member needs an index, so a bare Let cannot substitute for Set.
+        // Range's parameterless default member permits Let and diagnoses uninitialized r instead.
+        '    Dim r As New Collection',
+        '    r = New Collection',
         '    Call Helper 1, 2',
         'End Sub',
         '',
@@ -571,7 +573,7 @@ try {
     check('a missing Set is offered one', () => {
         const fix = wholeModule.actions.find((action) => action.code === 'set-required');
         assert.ok(fix, 'expected a set-required fix');
-        assert.ok(applyEdits(FIXABLE, fix.edits).includes('Set r = ActiveSheet'),
+        assert.ok(applyEdits(FIXABLE, fix.edits).includes('Set r = New Collection'),
             'expected the fix to insert Set');
     });
 
@@ -595,7 +597,7 @@ try {
     });
 
     // A caret rather than a selection: only the finding it sits in answers.
-    const caret = FIXABLE.indexOf('r = ActiveSheet') + 1;
+    const caret = FIXABLE.indexOf('r = New Collection') + 1;
     const atCaret = await call('textDocument/codeAction', {
         projectId: 'Smoke',
         moduleName: 'BadModule',
@@ -614,7 +616,7 @@ try {
     // Text the diagnostics have never run against still gets fixes: a fix is an edit by offset,
     // so answering from findings made against older text would place it by arithmetic that has
     // stopped holding.
-    const EDITED = FIXABLE.replace('Dim r As Range', 'Dim r As Range   ');
+    const EDITED = FIXABLE.replace('Dim r As New Collection', 'Dim r As New Collection   ');
     const untouched = await call('textDocument/codeAction', {
         projectId: 'Smoke',
         moduleName: 'BadModule',
@@ -627,7 +629,7 @@ try {
     check('never-analysed text is analysed rather than answered stale', () => {
         const fix = untouched.actions.find((action) => action.code === 'set-required');
         assert.ok(fix, 'expected a set-required fix against the edited text');
-        assert.ok(applyEdits(EDITED, fix.edits).includes('Set r = ActiveSheet'),
+        assert.ok(applyEdits(EDITED, fix.edits).includes('Set r = New Collection'),
             `got: ${JSON.stringify(applyEdits(EDITED, fix.edits))}`);
     });
 

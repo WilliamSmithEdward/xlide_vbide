@@ -20,7 +20,7 @@
  *
  *   node tools\harness\import-guard.mjs
  */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { open, reporter, scratchModule, wait, waitFor } from "./xlide-api.mjs";
@@ -28,8 +28,7 @@ import { open, reporter, scratchModule, wait, waitFor } from "./xlide-api.mjs";
 const api = await open();
 const project = await api.project();
 const name = `Guard${process.pid}`;
-const folder = join(tmpdir(), `xlide-import-guard-${process.pid}`);
-mkdirSync(folder, { recursive: true });
+const folder = mkdtempSync(join(tmpdir(), 'xlide-import-guard-'));
 
 const { check, done } = reporter();
 const scratch = scratchModule(api, project.projectId, name);

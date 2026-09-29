@@ -122,7 +122,7 @@ jobs:
         run: node tools/security/report.mjs security-results security-report
       - name: Test failure handling
         if: always()
-        run: node --test tools/security/report.test.mjs
+        run: node --test tools/security/*.test.mjs
       - name: Preserve report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

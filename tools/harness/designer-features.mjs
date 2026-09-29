@@ -11,7 +11,7 @@
  * later designer claim is measured against, and this suite is what keeps the instrument
  * honest.
  */
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { open, reporter, waitFor } from "./xlide-api.mjs";
@@ -735,7 +735,7 @@ try {
   const okLine = lineOf(/<CommandButton Name="OkButton"/);
   // A fresh indented line INSIDE the form, before its close: after `</Form>` is outside the
   // document's one root element, and nothing is offered there.
-  const freshDoc = addElement(String(tabMarkup.data), "").replace(/    \r\n<\/Form>/, "    \r\n</Form>");
+  const freshDoc = addElement(String(tabMarkup.data), "");
   await api.act("designerSetMarkup", { module: form, markup: freshDoc });
   const freshLine = freshDoc.replace(/\r\n/g, "\n").split("\n").findIndex((text) => text === "    ") + 1;
   const fresh = await api.act("designerComplete", { module: form, line: freshLine, column: 5 });
@@ -1802,9 +1802,7 @@ try {
   // .frx and the text names it. The markup is the design as TEXT, so a form finally round-trips
   // through a folder the way a module does - and the file is the same projection the designer tab
   // edits, which is what keeps the two from drifting.
-  const syncFolder = join(tmpdir(), `xlide-design-${process.pid}`);
-  rmSync(syncFolder, { recursive: true, force: true });
-  mkdirSync(syncFolder, { recursive: true });
+  const syncFolder = mkdtempSync(join(tmpdir(), 'xlide-design-'));
 
   try {
     // ---- EXPORT SHIPS WHAT IS ON SCREEN (the owner, 2026-08-19) ----
@@ -3153,8 +3151,10 @@ try {
   // are BMPs, and hands back a picture of kind Icon - which GetDIBits cannot read at all, so the
   // canvas has to draw it onto a DIB section instead. Nothing in the repository is a classic
   // icon (see form-plan), so the suite writes one: sixteen by sixteen, solid red, opaque.
-  const iconPath = join(tmpdir(), "xlide-suite-classic.ico");
-  writeFileSync(iconPath, classicIcon(16, [0x00, 0x00, 0xFF, 0xFF]));
+  const iconFolder = mkdtempSync(join(tmpdir(), 'xlide-icon-'));
+  const iconPath = join(iconFolder, 'classic.ico');
+  try {
+  writeFileSync(iconPath, classicIcon(16, [0x00, 0x00, 0xFF, 0xFF]), { flag: 'wx' });
 
   const asIcon = await api.designerEdit("set", {
     module: form, project, name: "Badge", property: "Picture", value: iconPath,
@@ -3165,7 +3165,9 @@ try {
     (await canvasPictures()).some((one) => one.name === "Badge" && one.bytes > 1000), { budgetMs: 15000 });
   check("and an icon becomes pixels the canvas can draw - the DrawIconEx road", true);
 
-  rmSync(iconPath, { force: true });
+  } finally {
+    rmSync(iconFolder, { recursive: true, force: true });
+  }
   await api.designerEdit("set", {
     module: form, project, name: "Badge", property: "Picture", value: FORM_PICTURES.bitmap,
   });

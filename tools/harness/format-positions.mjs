@@ -403,7 +403,7 @@ if (runnable) try {
         .split(/\r?\n/).length > 6);
 
     const built = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
-      .split("\n").map((one) => one.replace("\r", ""));
+      .split(/\r?\n/);
 
     const body = built.findIndex((one) => one.trim().length === 0 && one.length > 0);
     check(`Enter after ${what} For Each indents the body past the opener`,

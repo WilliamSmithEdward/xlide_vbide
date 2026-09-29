@@ -24,6 +24,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { loopbackUrl, localRoute } from './loopback-url.mjs';
 
 const DISCOVERY_DIRECTORY = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
 const run = promisify(execFile);
@@ -300,8 +301,8 @@ export async function discover() {
   // A discovery file outlives a killed Excel, so answering is the only proof of life. The
   // sessions sweep corpses at start-up, but a client should never wait for that.
   const live = await Promise.all(candidates.map(async (entry) => {
-    const client = clientFor(entry);
     try {
+      const client = clientFor(entry);
       const state = await client.state(1500);
       return { ...entry, state, api: client };
     } catch {
@@ -391,15 +392,19 @@ const WRITE_ACTIONS = new Set([
 ]);
 
 function clientFor(entry) {
-  const base = `http://127.0.0.1:${entry.port}/${entry.token}`;
+  if (typeof entry.token !== 'string' || !/^[0-9a-f]{16}$/i.test(entry.token)) {
+    throw new Error('Invalid local API token in discovery file');
+  }
+  const base = loopbackUrl(entry.port, `/${encodeURIComponent(entry.token)}/`);
 
   async function call(route, { method = "GET", body, timeout = 10000, raw = false } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
-      const response = await fetch(`${base}/${route}`, {
+      const response = await fetch(localRoute(base, route), {
         method,
         body,
+        redirect: 'error',
         signal: controller.signal,
       }).catch(async (reason) => {
         // A HOST THAT HAS GONE says only `fetch failed` and `ECONNREFUSED`, which is the shape of

@@ -4,6 +4,8 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Keep the existing VSTest CLI and VS adapter; xUnit 4 otherwise opts into MTP. -->
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
     <RootNamespace>Xlide.Vbe.Core.Tests</RootNamespace>
     <PublishAot>false</PublishAot>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
