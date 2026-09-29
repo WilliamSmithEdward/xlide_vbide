@@ -25,7 +25,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve, relative, isAbsolute, sep } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,9 +56,15 @@ export function serveDist(override, directory = dist) {
 
     try {
       const root = await realpath(directory);
-      const target = await realpath(resolve(root, '.' + decodeURIComponent(asked)));
-      const within = relative(root, target);
-      if (within === '..' || within.startsWith('..' + sep) || isAbsolute(within)) {
+      const candidate = resolve(root, '.' + decodeURIComponent(asked));
+      // Reject traversal before any filesystem lookup, then reject escaping symlinks.
+      if (!candidate.startsWith(root + sep)) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+      const target = await realpath(candidate);
+      if (!target.startsWith(root + sep)) {
         response.writeHead(403);
         response.end();
         return;

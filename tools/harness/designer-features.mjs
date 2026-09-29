@@ -3154,16 +3154,16 @@ try {
   const iconFolder = mkdtempSync(join(tmpdir(), 'xlide-icon-'));
   const iconPath = join(iconFolder, 'classic.ico');
   try {
-  writeFileSync(iconPath, classicIcon(16, [0x00, 0x00, 0xFF, 0xFF]), { flag: 'wx' });
+    writeFileSync(iconPath, classicIcon(16, [0x00, 0x00, 0xFF, 0xFF]), { flag: 'wx' });
 
-  const asIcon = await api.designerEdit("set", {
-    module: form, project, name: "Badge", property: "Picture", value: iconPath,
-  });
-  check("a classic icon loads as an ICON, not as a flattened bitmap",
-    /Picture is \(Icon\)/.test(asIcon.detail ?? ""), asIcon.detail);
-  await waitFor("the icon to reach the canvas, drawn rather than read", async () =>
-    (await canvasPictures()).some((one) => one.name === "Badge" && one.bytes > 1000), { budgetMs: 15000 });
-  check("and an icon becomes pixels the canvas can draw - the DrawIconEx road", true);
+    const asIcon = await api.designerEdit("set", {
+      module: form, project, name: "Badge", property: "Picture", value: iconPath,
+    });
+    check("a classic icon loads as an ICON, not as a flattened bitmap",
+      /Picture is \(Icon\)/.test(asIcon.detail ?? ""), asIcon.detail);
+    await waitFor("the icon to reach the canvas, drawn rather than read", async () =>
+      (await canvasPictures()).some((one) => one.name === "Badge" && one.bytes > 1000), { budgetMs: 15000 });
+    check("and an icon becomes pixels the canvas can draw - the DrawIconEx road", true);
 
   } finally {
     rmSync(iconFolder, { recursive: true, force: true });

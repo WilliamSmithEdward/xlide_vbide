@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = await mkdtemp(path.join(tmpdir(), 'xlide-editor-security-'));
@@ -38,9 +39,11 @@ try {
   assert.ok(form.test('<Frame Name="Main" Caption="a > b">'));
   assert.ok(!form.test('<Frame Name="Main" />'));
   assert.ok(!form.test('</Frame>'));
-  const start = performance.now();
-  assert.ok(!form.test('<Form ' + '"'.repeat(10000) + 'x'));
-  assert.ok(performance.now() - start < 1000, 'malformed markup must not stall the editor');
+  // A separate process keeps the regression itself bounded if backtracking returns.
+  const stress = spawnSync(process.execPath, ['-e',
+    'const re=new RegExp(process.argv[1]);process.exit(re.test("<Form "+String.fromCharCode(34).repeat(10000)+"x")?1:0)',
+    form.source], { timeout: 2000 });
+  assert.equal(stress.status, 0, 'malformed markup must not stall the editor');
   console.log('Unicode indentation and malformed markup security regressions passed');
 } finally {
   await rm(scratch, { recursive: true, force: true });
