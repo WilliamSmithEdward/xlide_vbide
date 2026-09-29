@@ -1,8 +1,11 @@
 import { readdirSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { inspectMalware } from './malware-policy.mjs';
 
 export const expectedScans = ['codeql-csharp', 'codeql-javascript-typescript', 'codeql-actions', 'semgrep'];
+export const expectedMalwareScans = ['clamav', 'yara-x'];
+const malwarePolicy = JSON.parse(readFileSync(new URL('../../.github/security/malware/policy.json', import.meta.url), 'utf8'));
 
 export function inspectSarif(sarif) {
   if (sarif.version !== '2.1.0' || !Array.isArray(sarif.runs) || !sarif.runs.length) {
@@ -30,7 +33,7 @@ export function inspectSarif(sarif) {
   return { findings, problems, tools };
 }
 
-export function createReport(input, statuses) {
+export function createReport(input, statuses, policy = malwarePolicy, context = process.env) {
   const scans = expectedScans.map(name => {
     try {
       const files = readdirSync(join(input, name)).filter(file => file.endsWith('.sarif'));
@@ -40,8 +43,25 @@ export function createReport(input, statuses) {
       return { name, findings: null, tools: [], problems: [error.message] };
     }
   });
+  for (const name of expectedMalwareScans) {
+    try {
+      const result = JSON.parse(readFileSync(join(input, name, 'result.json'), 'utf8'));
+      if (context.GITHUB_SHA && result.commit !== context.GITHUB_SHA) throw new Error('Malware scan describes a different commit');
+      scans.push({ name, ...inspectMalware(result, name, policy) });
+    } catch (error) {
+      scans.push({ name, findings: null, tools: [], problems: [error.message] });
+    }
+  }
   const problems = [];
-  for (const name of ['codeql', 'semgrep']) {
+  const malware = scans.filter(scan => expectedMalwareScans.includes(scan.name));
+  if (malware.every(scan => scan.inventorySha256) && malware[0].inventorySha256 !== malware[1].inventorySha256) {
+    problems.push('ClamAV and YARA-X scanned different inventories');
+  }
+  if (context.GITHUB_EVENT_NAME === 'release' && malware.some(scan =>
+    !scan.assets?.some(asset => asset.path === 'release/xlide-setup.exe'))) {
+    problems.push('Published release scan did not include the installer');
+  }
+  for (const name of ['codeql', 'semgrep', 'malware']) {
     if (statuses?.[name]?.result !== 'success') problems.push(`${name} job: ${statuses?.[name]?.result ?? 'missing'}`);
   }
   return { passed: problems.length === 0 && scans.every(scan => scan.findings === 0 && scan.problems.length === 0), problems, scans };
@@ -68,12 +88,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     `Commit: \`${report.commit}\``, '',
     `Workflow: ${report.run}`, '',
     `Generated: ${report.generatedAt}`, '',
-    '| Scanner | Findings | Diagnostics |', '| --- | ---: | --- |',
-    ...report.scans.map(scan => `| ${scan.name} | ${scan.findings ?? 'unavailable'} | ${scan.problems.length ? 'FAIL / incomplete' : 'Complete'} |`), '',
+    '| Scanner | Unexpected findings | Accepted findings | Diagnostics |', '| --- | ---: | ---: | --- |',
+    ...report.scans.map(scan => `| ${scan.name} | ${scan.findings ?? 'unavailable'} | ${scan.accepted?.length ?? 0} | ${scan.problems.length ? 'FAIL / incomplete' : `Complete${scan.acceptedDiagnostics ? `; ${scan.acceptedDiagnostics} reviewed compiler warnings` : ''}`} |`), '',
     ...report.problems.map(problem => `- ${problem}`), '',
-    'All findings and incomplete scans fail the gate. Raw SARIF and diagnostics are retained in workflow artifacts for 30 days.', '',
-    'Scope: this repository at the commit above. CodeQL uses security-extended for C#, JavaScript/TypeScript, and Actions; Semgrep uses p/security-audit and p/secrets.', '',
-    'This is source analysis, not an audit of the installer binary, runtime dependencies, or the separately bundled xlide_vscode analyzer. A passing scan does not guarantee absence of vulnerabilities.', '',
+    'Unexpected findings and incomplete scans fail the gate. Exact, expiring malware exceptions and the pinned YARA compiler-warning baseline are documented in docs/security-malware.md. Raw scan evidence is retained for 30 days.', '',
+    'Scope: tracked repository files. CodeQL uses security-extended; Semgrep uses p/security-audit and p/secrets. ClamAV uses freshly updated official Talos signatures; YARA-X uses the pinned YARA Forge full collection.', '',
+    ...report.scans.filter(scan => scan.name === 'yara-x').flatMap(scan => (scan.assets ?? []).map(asset => `Release asset: \`${asset.path}\`; SHA-256 \`${asset.sha256}\`.`)), '',
+    'Release assets are scanned only when listed above. YARA-X scans raw bytes; neither scanner guarantees unpacking of custom installer payloads. Source scans do not include untracked dependencies or the separately bundled analyzer. This is not a guarantee that a release is malware-free.', '',
   ].join('\n');
   mkdirSync(output, { recursive: true });
   writeFileSync(join(output, 'security-report.json'), JSON.stringify(report, null, 2) + '\n');

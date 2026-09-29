@@ -236,9 +236,12 @@ agree on what VBA means.
 
 ## Security
 
-CodeQL and Semgrep scan pull requests, `main`, weekly, and new releases. Security checks fail on
-findings or incomplete analysis. Future releases include a security report identifying the scanned
-commit; the installer release script requires a passing security run. Dependabot maintains npm,
+CodeQL, Semgrep, ClamAV, and YARA-X scan pull requests, `main`, weekly, and new releases. Malware
+scans use Talos signatures and the full YARA Forge public collection, including release assets after
+publication. Security checks fail on unexpected findings or incomplete analysis; exact accepted
+diagnostics and the expiring exception policy are [documented](docs/security-malware.md).
+Future releases include a security report identifying the scanned commit and any scanned asset hashes;
+the installer release script requires a passing security run. Dependabot maintains npm,
 NuGet, GitHub Actions, and scanner dependencies.
 
 See [the security policy](SECURITY.md) for coverage, release gates, and supported versions.
