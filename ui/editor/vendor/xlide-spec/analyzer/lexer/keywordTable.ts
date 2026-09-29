@@ -143,9 +143,18 @@ const KEYWORD_CASING_LISTS: readonly (readonly string[])[] = [
 	FUTURE_RESERVED,
 ];
 
+/**
+ * Reserved in the live VBE though absent from MS-VBAL 3.3.5.2. `Local` is the
+ * `On Local Error` keyword: `Dim Local As Long` is a Syntax error and
+ * `Function Local()` is "Expected: identifier" (Excel 16.0 build 20326,
+ * 2026-09-26, issue #98), so it can never be a name.
+ */
+export const MEASURED_RESERVED: readonly string[] = ['Local'];
+
 const RESERVED_IDENTIFIER_LISTS: readonly (readonly string[])[] = [
 	...KEYWORD_CASING_LISTS,
 	RESERVED_FOR_IMPLEMENTATION_USE,
+	MEASURED_RESERVED,
 ];
 
 /**
@@ -157,7 +166,12 @@ export const RESERVED_IDENTIFIERS: ReadonlySet<string> = new Set(
 );
 
 function buildKeywordMap(): Record<string, string> {
-	const map: Record<string, string> = {};
+	// No prototype: the table is indexed by whatever lower-cased word the
+	// source contains, and on a plain object `constructor` found
+	// Object.prototype.constructor, so `Dim constructor As Long` handed the
+	// lexer a function as the token's canonical text and the parser threw
+	// (issue #148).
+	const map: Record<string, string> = Object.create(null);
 	const add = (word: string): void => {
 		const key = word.toLowerCase();
 		// Reserved-identifier casing wins over contextual casing on conflict, but
