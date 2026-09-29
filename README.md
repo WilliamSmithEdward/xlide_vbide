@@ -1,7 +1,9 @@
 # xlide
 
 [![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/xlide_vbide)](https://github.com/WilliamSmithEdward/xlide_vbide/releases/latest)
-[![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ROneCOne)](LICENSE)
+[![Build](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/build.yml)
+[![Security](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml)
+[![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/xlide_vbide)](LICENSE)
 [![Microsoft 365 Windows x64 on Excel, Word, PowerPoint and Access](https://img.shields.io/badge/Microsoft_365_Windows_x64-Excel,_Word,_PowerPoint,_Access-0078D4)](README.md)
 
 ![The xlide surface inside the VBE: editing side by side, completion from the analyzer, diagnostics with quick fixes, and break mode with live locals](assets/images/tour.gif)
@@ -231,6 +233,17 @@ extensibility model, the forms designer object model, Win32, and published binar
 specifications. The analyzer is the author's own prior work, shared with the
 [XLIDE editor extension](https://github.com/WilliamSmithEdward/xlide_vscode) so that both products
 agree on what VBA means.
+
+## Security
+
+CodeQL and Semgrep scan pull requests, `main`, weekly, and new releases. Security checks fail on
+findings or incomplete analysis. Future releases include a security report identifying the scanned
+commit; the installer release script requires a passing security run. Dependabot maintains npm,
+NuGet, GitHub Actions, and scanner dependencies.
+
+See [the security policy](SECURITY.md) for coverage, release gates, and supported versions.
+To disclose a vulnerability privately, use
+[Report a vulnerability](https://github.com/WilliamSmithEdward/xlide_vbide/security/advisories/new).
 
 ## License
 
