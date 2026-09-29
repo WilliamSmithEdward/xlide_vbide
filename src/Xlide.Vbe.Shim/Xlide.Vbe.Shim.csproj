@@ -62,7 +62,7 @@
       itself is installed machine-wide and found by the loader, but the loader is not on any search
       path the host process uses.
     -->
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" ExcludeAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" ExcludeAssets="all" GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(PkgMicrosoft_Web_WebView2)' != ''">
