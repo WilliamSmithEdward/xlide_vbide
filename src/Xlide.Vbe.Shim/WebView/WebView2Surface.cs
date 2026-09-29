@@ -65,9 +65,14 @@ internal sealed class WebView2Surface : IDisposable
     /// work is started; nothing is rendered until the two callbacks have run. The optional
     /// <paramref name="entryQuery"/> rides the bundle navigation ("?view=..."), which is how a
     /// second surface - the Object Browser palette - boots the same bundle into a different
-    /// page.
+    /// page. A companion surface can reuse <paramref name="environmentSource"/>'s environment
+    /// so host changes to WebView2 environment variables cannot split their browser options.
     /// </summary>
-    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds, string entryQuery = "")
+    public static WebView2Surface? Start(
+        nint parentWindow,
+        PixelRect bounds,
+        string entryQuery = "",
+        WebView2Surface? environmentSource = null)
     {
         if (parentWindow == 0)
         {
@@ -76,6 +81,22 @@ internal sealed class WebView2Surface : IDisposable
 
         var surface = new WebView2Surface(parentWindow, bounds);
         surface._entryQuery = entryQuery;
+        if (environmentSource is not null)
+        {
+            if (environmentSource._disposed || environmentSource._environment is null)
+            {
+                Log.Error("webview: the companion's environment is not ready");
+                return null;
+            }
+
+            // Office can set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS after our first surface
+            // starts. Creating another environment then fails with ERROR_INVALID_STATE.
+            // Borrow takes an independent COM reference, released with this surface.
+            Log.Info("webview: reusing the editor environment for a companion surface");
+            surface.OnEnvironmentCreated(0, environmentSource._environment.Pointer);
+            return surface;
+        }
+
         return surface.BeginEnvironment() ? surface : null;
     }
 

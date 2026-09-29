@@ -3549,7 +3549,7 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        var palette = BrowserPalette.Open(_frame);
+        var palette = BrowserPalette.Open(_frame, _editorSurface?.Browser);
         if (palette is null)
         {
             _editorSurface?.Notify("The Object Browser window could not be opened.");
