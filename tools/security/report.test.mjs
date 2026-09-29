@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReport, expectedScans, inspectSarif } from './report.mjs';
+import { fixtures } from './malware-fixtures.mjs';
 
 const clean = () => ({ version: '2.1.0', runs: [{ tool: { driver: { name: 'test-scanner', version: '1' } }, results: [] }] });
-const statuses = { codeql: { result: 'success' }, semgrep: { result: 'success' } };
+const statuses = { codeql: { result: 'success' }, semgrep: { result: 'success' }, malware: { result: 'success' } };
 
 test('all findings count, including notes and suppressed results', () => {
   const sarif = clean();
@@ -30,22 +31,44 @@ test('malformed and empty SARIF is rejected', () => {
 
 test('gate requires every scanner, valid artifacts and successful jobs', () => {
   const root = mkdtempSync(join(tmpdir(), 'xlide-security-'));
+  const { policy, result: yara, clam } = fixtures();
+  const report = (status, context = {}) => createReport(root, status, policy, context);
   try {
-    assert.equal(createReport(root, statuses).passed, false);
+    assert.equal(report(statuses).passed, false);
     for (const name of expectedScans) {
       mkdirSync(join(root, name));
       writeFileSync(join(root, name, 'result.sarif'), JSON.stringify(clean()));
     }
-    assert.equal(createReport(root, statuses).passed, true);
-    for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
-      assert.equal(createReport(root, { ...statuses, semgrep: { result } }).passed, false);
+    assert.equal(report(statuses).passed, false);
+    for (const result of [yara, clam]) {
+      result.commit = process.env.GITHUB_SHA;
+      mkdirSync(join(root, result.scanner));
+      writeFileSync(join(root, result.scanner, 'result.json'), JSON.stringify(result));
     }
-    assert.equal(createReport(root, null).passed, false);
+    assert.equal(report(statuses).passed, true);
+    assert.equal(report(statuses, { GITHUB_SHA: 'different-commit' }).passed, false);
+    assert.equal(report(statuses, { GITHUB_EVENT_NAME: 'release' }).passed, false);
+    for (const result of [yara, clam]) {
+      result.inventory.push({ path: 'release/xlide-setup.exe', sha256: 'd'.repeat(64), size: 123 });
+      result.scannedFiles++;
+      writeFileSync(join(root, result.scanner, 'result.json'), JSON.stringify(result));
+    }
+    assert.equal(report(statuses, { GITHUB_EVENT_NAME: 'release' }).passed, true);
+    clam.inventory[1].sha256 = 'e'.repeat(64);
+    writeFileSync(join(root, 'clamav', 'result.json'), JSON.stringify(clam));
+    assert.equal(report(statuses).passed, false);
+    clam.inventory[1].sha256 = 'd'.repeat(64);
+    writeFileSync(join(root, 'clamav', 'result.json'), JSON.stringify(clam));
+    for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
+      assert.equal(report({ ...statuses, semgrep: { result } }).passed, false);
+      assert.equal(report({ ...statuses, malware: { result } }).passed, false);
+    }
+    assert.equal(report(null).passed, false);
     writeFileSync(join(root, 'semgrep', 'result.sarif'), '{broken');
-    assert.equal(createReport(root, statuses).passed, false);
+    assert.equal(report(statuses).passed, false);
     writeFileSync(join(root, 'semgrep', 'result.sarif'), JSON.stringify(clean()));
     writeFileSync(join(root, 'semgrep', 'unexpected.sarif'), JSON.stringify(clean()));
-    assert.equal(createReport(root, statuses).passed, false);
+    assert.equal(report(statuses).passed, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

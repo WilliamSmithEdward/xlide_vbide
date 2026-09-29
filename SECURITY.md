@@ -22,16 +22,26 @@ C# analysis builds the Release configuration on Windows with the repository's .N
 source generators. Other build configurations are not analyzed by this workflow.
 Semgrep Community Edition scans source with `p/security-audit` and `p/secrets`; registry rules are
 retrieved at scan time. The scanner version is pinned and updated by Dependabot.
+ClamAV scans every tracked file with freshly updated official Talos signatures. YARA-X scans
+the same inventory with the SHA-256-pinned YARA Forge **full** public collection. Published-release
+runs also download and scan release assets, including `xlide-setup.exe`, without executing them.
+Versions, hashes, coverage, and the bounded exception policy are in
+[Malware scanning and accepted diagnostics](docs/security-malware.md).
 
-The **Security gate** fails on any finding, including low severity and suppressed SARIF findings,
-scanner failure, warning/error diagnostic, malformed report, or missing scanner result. There is no
-baseline or allowlist, and Semgrep inline `nosemgrep` suppressions are disabled. Findings must be
-investigated and fixed; any future policy exception must be an explicit, reviewed repository change.
+The **Security gate** fails on unexpected findings, scanner failure, new warning/error diagnostics,
+malformed reports, or missing results. CodeQL/Semgrep findings still fail at every severity, including
+suppressed SARIF findings; Semgrep inline `nosemgrep` suppressions are disabled. Malware detections
+may be bypassed only by an explicitly reviewed, expiring entry matching scanner, rule, exact path,
+and SHA-256. The current detection exception list is empty. A pinned fingerprint accepts reviewed
+legacy YARA compiler warnings, without disabling any rules. Operational failures and missing coverage
+cannot be bypassed. Changes to the accepted evidence require a reviewed repository change.
 GitHub code scanning dismissal alone does not bypass this gate.
 
 Raw SARIF is uploaded to GitHub code scanning for branch/PR runs and retained as workflow artifacts
 for 30 days. Summary reports are retained for 90 days. Dependabot checks npm, NuGet, GitHub Actions,
-and the Semgrep Python requirement weekly. Dependabot alerts and security updates are enabled.
+and the Semgrep/YARA-X Python requirements and ClamAV container weekly. Public YARA rules are pinned
+for review rather than silently following a moving download. Dependabot alerts and security updates
+are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scanning alert.
 
 ## Release security reports
 
@@ -50,12 +60,16 @@ For the local installer release process:
 3. Run `tools/release.ps1 -Tag <tag>`. It requires a clean checkout and the latest eligible Security
    run for that exact commit to have passed, validates the downloaded report, and uploads it with
    the installer. `-SkipGate` skips only the existing local verification gate, never security.
-4. Review the assets and publish the draft. Publication triggers another scan of the tagged commit.
+4. Review the assets and publish the draft. Publication triggers another scan of the tagged commit
+   **and the attached release assets**. That run replaces the initial source-only reports with reports
+   listing each scanned asset's SHA-256. Download or scan failures produce a failing/incomplete report.
 
 Repository administrators can require **Security gate** in branch protection/rulesets to prevent
 merging failed checks; adding this workflow does not itself change those merge rules. GitHub UI or
 CLI release creation outside `tools/release.ps1` is not blocked by the local gate.
 
-These reports analyze this repository's source. They do not certify the installer binary, audit
-all dependency vulnerabilities, scan the separately bundled `xlide_vscode` analyzer, or replace
-manual security review. A passing scan is not a guarantee that the product is vulnerability-free.
+The pre-publication check is source-only; asset malware scanning occurs after publication and does
+not unpublish a release. Neither scanner is guaranteed to unpack the installer's custom compressed
+payload. Untracked dependencies and the separately bundled `xlide_vscode` analyzer source are outside
+the tracked-file scan. These checks do not certify binaries, audit every dependency vulnerability,
+or replace manual review. A passing scan is not a guarantee that the product is vulnerability-free.

@@ -57,3 +57,5 @@ artifacts/fixtures/
 # Editor and agent scratch, never the repo's business.
 .claude/
 ~$*
+# Python security-tool caches
+__pycache__/
