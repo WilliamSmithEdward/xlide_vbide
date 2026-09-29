@@ -200,7 +200,7 @@ const findings = await call('textDocument/diagnostics', {
 });
 check('the class the stubs were written into reports nothing',
     (findings.diagnostics ?? []).length === 0,
-    (findings.diagnostics ?? []).map((one) => `${one.code}@${one.at.startLine}`).join(', ') || '(none)');
+    (findings.diagnostics ?? []).map((one) => `${one.code}@${one.at.startLine}: ${one.message}`).join(', ') || '(none)');
 
 stop();
 done();

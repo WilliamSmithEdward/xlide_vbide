@@ -26,7 +26,7 @@ const scratch = scratchModule(api, project.projectId, name);
 
 const live = async () =>
   ((await api.readModule(name, project.projectId, { live: true })).text ?? "")
-    .split("\n").map((one) => one.replace("\r", ""));
+    .split(/\r?\n/);
 
 /**
  * Seeds the module, puts the caret at the end of a line, and presses Enter.

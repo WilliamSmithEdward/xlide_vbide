@@ -9,6 +9,12 @@ updates:
         patterns: ['*']
   - package-ecosystem: npm
     directories: [/engine, /ui/editor]
+    # Compiler API migrations and Node runtime upgrades need coordinated changes.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
     schedule:
       interval: weekly
     groups:

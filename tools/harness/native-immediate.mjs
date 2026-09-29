@@ -1,5 +1,6 @@
 // Regression suite for #21, through the same evaluation path as the Immediate panel.
 import { open, wait, waitFor, reporter } from './xlide-api.mjs';
+import { loopbackUrl } from './loopback-url.mjs';
 
 const pid = Number(process.argv[2] ?? process.env.XLIDE_PID);
 if (!Number.isInteger(pid) || pid <= 0) throw new Error('Pass the isolated DebugFixture Excel PID.');
@@ -15,7 +16,7 @@ const stopped = async () => (await api.breakpoints()).mode === 'break';
 
 // Exercise the real input handler too: the API has its own historical modal rescue loop,
 // so API-only checks cannot prove that a person typing an invalid expression can recover.
-const targets = await (await fetch(`http://127.0.0.1:${api.devtoolsPort}/json`)).json();
+const targets = await (await fetch(loopbackUrl(api.devtoolsPort, '/json'), { redirect: 'error' })).json();
 const target = targets.find(target => target.title === 'xlide editor');
 if (!target) throw new Error('The editor DevTools target is unavailable.');
 const socket = new WebSocket(target.webSocketDebuggerUrl);

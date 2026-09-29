@@ -23,9 +23,9 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +41,7 @@ const TYPES = {
   ".json": "application/json",
 };
 
-function serveDist(override) {
+export function serveDist(override, directory = dist) {
   const server = createServer(async (request, response) => {
     const asked = request.url === "/" ? "/index.html" : request.url.split("?")[0];
 
@@ -55,7 +55,21 @@ function serveDist(override) {
     }
 
     try {
-      const body = await readFile(join(dist, asked));
+      const root = await realpath(directory);
+      const candidate = resolve(root, '.' + decodeURIComponent(asked));
+      // Reject traversal before any filesystem lookup, then reject escaping symlinks.
+      if (!candidate.startsWith(root + sep)) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+      const target = await realpath(candidate);
+      if (!target.startsWith(root + sep)) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
+      const body = await readFile(target);
       response.writeHead(200, { "content-type": TYPES[extname(asked)] ?? "application/octet-stream" });
       response.end(body);
     } catch {

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self'">
+<title>xlide editor</title>
+<!-- Before the stylesheet arrives, the page is already the editor's dark ground: the host holds
+     the browser hidden until ready, and this keeps even a reload from ever flashing white. -->
+<style>html,body{margin:0;height:100%;background:#1e1e1e}</style>
+<link rel="stylesheet" href="./editor.css">
+<!-- THE FIRST THING THAT RUNS, and it has to be, because what it catches is the bundle failing
+     to run at all. A classic script tag in the head executes synchronously before ./editor.js,
+     so the error handlers are already standing when the bundle's modules initialise.
+
+     A separate file rather than an inline block: the CSP above is script-src 'self' with no
+     'unsafe-inline', and weakening it to hold six lines of bootstrap would be a poor trade. -->
+<script src="./boot.js"></script>
+</head>
+<body>
+<div id="shell">
+  <!-- ONE BAR. The menu bar was its own row above this one, mirroring the editor's ten native
+       menus; nine of them are gone and the tenth is this product's own, so a row holding a single
+       button was a row spent on nothing (the developer, 2026-08-09: get rid of the native bar
+       entirely). The menu button leads the toolbar and the wordmark closes it.
+
+       Both live inside the toolbar and both survive its rebuild: buildToolbar keeps whatever it
+       finds here and puts the sliding strip of commands between them. -->
+  <div id="toolbar" role="toolbar" aria-label="Editor commands">
+    <div id="menubar" role="menubar" aria-label="Menus"></div>
+    <div id="brand" aria-hidden="true"><span id="brand-name">XLIDE</span><span id="brand-version"></span></div>
+  </div>
+  <!-- The four dock sections around the editor. Each holds a split tree of tabbed pane
+       groups; the panes themselves are the elements below, which the dock system places
+       wherever the developer has dragged them. -->
+  <div id="main">
+    <div id="dock-left" hidden></div>
+    <div id="dock-left-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the left panes" tabindex="0" hidden></div>
+    <div id="workspace">
+      <div id="dock-top" hidden></div>
+      <div id="dock-top-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the top panes" tabindex="0" hidden></div>
+      <div id="editor-area"></div>
+      <div id="empty-view" hidden aria-hidden="true">
+        <div id="empty-view-message">
+          <span class="codicon codicon-files"></span>
+          <p>No module is open.</p>
+          <p class="empty-hint">Pick one in the explorer, or right-click a workbook to add one.</p>
+        </div>
+      </div>
+      <div id="dock-bottom-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the bottom panes" tabindex="0" hidden></div>
+      <div id="dock-bottom" hidden></div>
+    </div>
+    <div id="dock-right-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the right panes" tabindex="0" hidden></div>
+    <div id="dock-right" hidden></div>
+  </div>
+  <!-- The pane bodies. Parked here at load; the dock system moves each into the group its
+       tab sits in, so their markup never has to know where they live. -->
+  <div id="pane-bodies" hidden>
+    <div id="explorer-views" role="tablist" aria-label="Explorer layout"></div>
+    <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
+    <div id="properties-object" aria-label="Selected object"></div>
+    <div id="properties-list" role="list" aria-label="Properties of the selected component"></div>
+    <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
+      <button class="problems-filter" data-severity-filter="errors" type="button" aria-pressed="true"><span class="codicon codicon-error" aria-hidden="true"></span><span class="filter-count">0 Errors</span></button>
+      <button class="problems-filter" data-severity-filter="warnings" type="button" aria-pressed="true"><span class="codicon codicon-warning" aria-hidden="true"></span><span class="filter-count">0 Warnings</span></button>
+      <button class="problems-filter" data-severity-filter="messages" type="button" aria-pressed="true"><span class="codicon codicon-info" aria-hidden="true"></span><span class="filter-count">0 Messages</span></button>
+    </div>
+    <div id="panel-list" role="list"></div>
+    <div id="immediate">
+      <div id="immediate-log" role="log" aria-live="polite" aria-label="Immediate window output"></div>
+      <div id="immediate-entry">
+        <button id="immediate-clear" type="button" title="Clear the output"
+                aria-label="Clear the Immediate output"><span class="codicon codicon-clear-all" aria-hidden="true"></span></button>
+        <span id="immediate-prompt" aria-hidden="true">&gt;</span>
+        <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
+               aria-label="Evaluate an expression or run a statement" placeholder="? 1 + 1">
+      </div>
+    </div>
+    <div id="locals">
+      <div id="locals-context" aria-live="polite" hidden></div>
+      <div id="locals-table" role="table" aria-label="Local variables"></div>
+    </div>
+    <div id="watch">
+      <div id="watch-actions" role="toolbar" aria-label="Watch expressions">
+        <button id="watch-add" type="button" title="Add a watch"><span class="codicon codicon-add" aria-hidden="true"></span>Add</button>
+        <button id="watch-edit" type="button" title="Edit or delete the selected watch"><span class="codicon codicon-edit" aria-hidden="true"></span>Edit</button>
+        <button id="watch-quick" type="button" title="Quick watch on the selected expression (Shift+F9)"><span class="codicon codicon-eye" aria-hidden="true"></span>Quick</button>
+      </div>
+      <div id="watch-table" role="table" aria-label="Watch expressions"></div>
+    </div>
+    <div id="tests">
+      <div id="tests-actions" role="toolbar" aria-label="Test runner">
+        <button id="tests-run" type="button" disabled title="Run every test"><span class="codicon codicon-run-all" aria-hidden="true"></span><span class="tests-label">Run All</span></button>
+        <button id="tests-run-failed" type="button" disabled title="Rerun what failed"><span class="codicon codicon-debug-rerun" aria-hidden="true"></span><span class="tests-label">Run Failed</span></button>
+        <button id="tests-run-displayed" type="button" disabled title="Run exactly the tests the filters are showing"><span class="codicon codicon-play-circle" aria-hidden="true"></span><span class="tests-label">Run Displayed</span></button>
+        <button id="tests-refresh" type="button" title="Rediscover tests"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <span id="tests-scope-seat"></span>
+        <span id="tests-tags-seat"></span>
+        <span id="tests-filters" role="group" aria-label="Filter tests by outcome"></span>
+        <span id="tests-standing">
+          <span id="tests-summary" aria-live="polite"></span>
+          <span id="tests-ran" hidden></span>
+          <button id="tests-install" type="button" hidden></button>
+        </span>
+      </div>
+      <div id="tests-list" role="tree" aria-label="Tests"></div>
+    </div>
+    <div id="changes">
+      <div id="changes-actions" role="toolbar" aria-label="Change log">
+        <button id="changes-snapshot" type="button" title="End the current round. Later writes are counted separately from these."><span class="codicon codicon-history" aria-hidden="true"></span><span class="changes-label-text">Snapshot</span></button>
+        <button id="changes-accept" type="button" title="Mark these rounds as reviewed. They stay in the log, and new ones appear above them."><span class="codicon codicon-check" aria-hidden="true"></span><span class="changes-label-text">Accept</span></button>
+        <button id="changes-reject" type="button" title="Put every module back the way it was at the accept mark."><span class="codicon codicon-discard" aria-hidden="true"></span><span class="changes-label-text">Reject</span></button>
+        <button id="changes-summary" type="button" hidden title="Everything since the accept mark, summed. Click for the changed modules; click a module to see its changes highlighted in the editor."></button>
+        <select id="changes-file" class="scope-select scope-select-file" aria-label="Show changes from"></select>
+        <span id="changes-project" aria-live="polite"></span>
+      </div>
+      <div id="changes-body">
+        <div id="changes-list" role="list" aria-label="Rounds"></div>
+        <div id="changes-diff" aria-label="What changed"></div>
+      </div>
+    </div>
+    <div id="scm">
+      <div id="scm-actions" role="toolbar" aria-label="Source control">
+        <button id="scm-refresh" type="button" title="Read the repository again"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <button id="scm-commit" type="button" disabled title="Save, export, and commit the ticked modules with the message"><span class="codicon codicon-check" aria-hidden="true"></span><span class="scm-label-text">Commit</span></button>
+        <button id="scm-export" type="button" disabled title="Write every module to the folder (project to folder)"><span class="codicon codicon-arrow-down" aria-hidden="true"></span><span class="scm-label-text">Export</span></button>
+        <button id="scm-import" type="button" disabled title="Read the Folder rows into the project (folder to project)"><span class="codicon codicon-arrow-up" aria-hidden="true"></span><span class="scm-label-text">Import</span></button>
+        <button id="scm-fetch" type="button" disabled title="git fetch"><span class="codicon codicon-cloud-download" aria-hidden="true"></span><span class="scm-label-text">Fetch</span></button>
+        <button id="scm-pull" type="button" disabled title="git pull, then import what changed"><span class="codicon codicon-repo-pull" aria-hidden="true"></span><span class="scm-label-text">Pull</span></button>
+        <button id="scm-push" type="button" disabled title="git push"><span class="codicon codicon-repo-push" aria-hidden="true"></span><span class="scm-label-text">Push</span></button>
+        <button id="scm-blame" type="button" title="Show who last touched each line of the active module"><span class="codicon codicon-person" aria-hidden="true"></span><span class="scm-label-text">Blame</span></button>
+        <select id="scm-branch" class="scope-select" aria-label="Branch" hidden></select>
+        <select id="scm-file" class="scope-select scope-select-file" aria-label="Show the repository of"></select>
+        <span id="scm-project" aria-live="polite"></span>
+      </div>
+      <div id="scm-body">
+        <div id="scm-list" role="list" aria-label="Changes, folder and history"></div>
+        <div id="scm-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the changes and history" title="Drag to resize the changes and history" tabindex="0"><div id="scm-grip"></div></div>
+        <div id="scm-detail">
+          <div id="scm-notice" role="status" aria-live="polite"></div>
+          <textarea id="scm-message" rows="3" spellcheck="true" aria-label="Commit message" placeholder="Commit message"></textarea>
+          <div id="scm-diff" aria-label="Comparison"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-procedure"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
+</div>
+<script src="./editor.js"></script>
+</body>
+</html>
+

@@ -11,7 +11,7 @@
  * Run against DebugFixture.xlsm with the editor open.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { open, wait, waitFor, waitUntilStable, comparingReporter } from "./xlide-api.mjs";
@@ -44,9 +44,7 @@ const { check, done } = comparingReporter();
 const probe = `SyncProbe${process.pid}`;
 const stale = `SyncStale${process.pid}`;
 
-const folder = join(tmpdir(), `xlide-sync-${process.pid}`);
-rmSync(folder, { recursive: true, force: true });
-mkdirSync(folder, { recursive: true });
+const folder = mkdtempSync(join(tmpdir(), 'xlide-sync-'));
 
 const project = (await api.projects()).projects[0];
 const made = [];

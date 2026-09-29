@@ -740,7 +740,8 @@ export function registerMarkupLanguage(): void {
     tokenizer: {
       root: [
         // A comment swallows everything to its close, across lines.
-        [/<!--/, "comment", "@comment"],
+        // A constructor avoids the legacy HTML-comment token in third-party JS parsers.
+        [new RegExp('<!--'), "comment", "@comment"],
         // An opening or closing tag hands the rest of the element to @tag, so an attribute list
         // that wraps across lines keeps painting as attributes rather than as loose words.
         // The `next` rides the LAST GROUP rather than sitting as a third element: with an array
@@ -759,7 +760,7 @@ export function registerMarkupLanguage(): void {
         [/[<>]/, "delimiter.angle"],
       ],
       comment: [
-        [/-->/, "comment", "@pop"],
+        [/--!?>/, "comment", "@pop"],
         [/[^-]+/, "comment"],
         [/./, "comment"],
       ],
@@ -786,7 +787,7 @@ export function registerMarkupLanguage(): void {
     // An unclosed container tag opens a level, the way the printer indents its children; a
     // self-closing one does not, which is why the rule looks for a `>` that no `/` precedes.
     onEnterRules: [{
-      beforeText: /^\s*<(?:Frame|MultiPage|Page|TabStrip|Form)\b(?:[^>]|"[^"]*")*[^/]>\s*$/,
+      beforeText: /^\s*<(?:Frame|MultiPage|Page|TabStrip|Form)\b(?:[^>"\r\n]|"[^"\r\n]*")*(?<!\/)>\s*$/,
       action: { indentAction: monaco.languages.IndentAction.Indent },
     }],
     brackets: [],

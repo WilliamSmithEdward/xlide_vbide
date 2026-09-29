@@ -13,6 +13,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loopbackUrl, localHttpUrl, localRoute } from './loopback-url.mjs';
 
 /**
  * The session to probe: the one XLIDE_PID names when it is set, which is how the gate aims every
@@ -49,8 +50,8 @@ function discoverDoors() {
 const args = process.argv.slice(2);
 const doors = args.includes("--api") && args.includes("--cdp") ? null : discoverDoors();
 const apiBase = args.includes("--api")
-  ? args[args.indexOf("--api") + 1]
-  : `http://127.0.0.1:${doors.port}/${doors.token}`;
+  ? localHttpUrl(args[args.indexOf("--api") + 1]).replace(/\/?$/, '/')
+  : loopbackUrl(doors.port, `/${encodeURIComponent(doors.token)}/`);
 const cdpPort = args.includes("--cdp") ? Number(args[args.indexOf("--cdp") + 1]) : doors.devtoolsPort;
 
 const checks = [];
@@ -59,7 +60,7 @@ const sleep = (ms) => new Promise((settle) => setTimeout(settle, ms));
 
 async function api(route) {
   const posts = route.startsWith("command") || route.startsWith("palette");
-  const reply = await fetch(`${apiBase}/${route}`, { method: posts ? "POST" : "GET" });
+  const reply = await fetch(localRoute(apiBase, route), { method: posts ? "POST" : "GET", redirect: 'error' });
   return reply.json();
 }
 
@@ -95,7 +96,7 @@ function connect(wsUrl) {
 }
 
 async function attachToPage(send, titled) {
-  const targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json();
+  const targets = await (await fetch(loopbackUrl(cdpPort, '/json'), { redirect: 'error' })).json();
   const target = targets.find((one) => one.type === "page" && one.title === titled);
   if (!target) {
     throw new Error(`no page target titled ${titled}; saw ${targets.map((one) => one.title).join("|")}`);
@@ -144,7 +145,7 @@ try {
         : "one is STANDING VISIBLE: whatever summoned it did not put it away");
 
   // One socket serves every target in the shared browser cluster.
-  const versionReply = await (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).json();
+  const versionReply = await (await fetch(loopbackUrl(cdpPort, '/json/version'), { redirect: 'error' })).json();
   const { socket, send } = await connect(versionReply.webSocketDebuggerUrl);
 
   // Summon the Browser the way a person does: the toolbar button, clicked as an element.
