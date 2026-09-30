@@ -21,7 +21,7 @@ CodeQL scans C#, JavaScript/TypeScript, and GitHub Actions with `security-extend
 C# analysis builds the Release configuration on Windows with the repository's .NET SDK, including
 source generators. Other build configurations are not analyzed by this workflow.
 Semgrep Community Edition scans source with `p/security-audit` and `p/secrets`; registry rules are
-retrieved at scan time. The scanner version is pinned and updated by Dependabot.
+retrieved at scan time. Semgrep runs from its official image, pinned by digest in `.github/security/semgrep/Dockerfile` and updated by Dependabot.
 The separate **Malware scan** workflow scans every tracked file, one job each for ClamAV and YARA-X. ClamAV downloads and tests fresh
 official Talos signatures on every run; update failures fail the job with no stale fallback. YARA-X scans
 the same inventory with the SHA-256-pinned YARA Forge **full** public collection. Published-release
@@ -40,7 +40,7 @@ GitHub code scanning dismissal alone does not bypass this gate.
 
 Raw SARIF is uploaded to GitHub code scanning for branch/PR runs and retained as workflow artifacts
 for 30 days. Summary reports are retained for 90 days. Dependabot checks npm, NuGet, GitHub Actions,
-and the Semgrep/YARA-X Python requirements and ClamAV container weekly. Public YARA rules are pinned
+the YARA-X Python requirements, and the ClamAV and Semgrep images weekly. Public YARA rules are pinned
 for review rather than silently following a moving download. The weekly YARA Forge updater proposes
 new release/checksum/rule-count pins in a PR and explicitly starts Security and build on its branch.
 It never accepts compiler diagnostics or merges PRs. Dependabot alerts and security updates

@@ -28,10 +28,10 @@ updates:
       nuget:
         patterns: ['*']
   - package-ecosystem: pip
-    directories: [/.github/security, /.github/security/malware]
+    directory: /.github/requirements
     schedule:
       interval: weekly
   - package-ecosystem: docker
-    directory: /.github/security/malware
+    directories: [/.github/security/clamav, /.github/security/semgrep]
     schedule:
       interval: weekly

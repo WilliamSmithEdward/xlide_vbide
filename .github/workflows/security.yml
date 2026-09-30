@@ -75,14 +75,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -r .github/security/requirements.txt
+      - name: Build the pinned Semgrep image
+        run: docker build --quiet --tag semgrep-pinned .github/security/semgrep
+      # The runner's user owns the checkout, so Semgrep runs as that user to
+      # read it through git and to write results the later steps can read.
       - name: Scan all tracked source with security and secrets rules
         run: |
           mkdir -p security-results/semgrep
-          semgrep scan --config p/security-audit --config p/secrets \
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp --volume "$PWD:/src" --workdir /src semgrep-pinned \
+            semgrep scan --config p/security-audit --config p/secrets \
             --error --strict --disable-nosem --metrics off --disable-version-check \
             --sarif-output security-results/semgrep/semgrep.sarif .
       - name: Upload to code scanning

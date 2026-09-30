@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install --require-hashes -r .github/security/malware/requirements.txt
+      - run: python -m pip install --require-hashes -r .github/requirements/malware.txt
       - name: Fetch latest stable upstream release metadata
         env:
           GH_TOKEN: ${{ github.token }}
