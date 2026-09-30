@@ -16,7 +16,7 @@ jobs:
   prepare:
     name: Verify new rule release
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       changed: ${{ steps.proposal.outputs.changed }}
@@ -48,7 +48,7 @@ jobs:
     name: Propose a YARA rule update
     needs: prepare
     if: needs.prepare.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
