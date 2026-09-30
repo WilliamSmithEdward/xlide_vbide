@@ -20,8 +20,25 @@ import {
     EMPTY_HOST_MODEL,
     hostObjectModelForToken,
     hostObjectModelForTokens,
+    registerHostObjectModel,
 } from '../../../xlide_vscode/src/analyzer/host/hostRegistry';
 import { getExcelObjectModel, type HostObjectModel } from '../../../xlide_vscode/src/analyzer';
+import { getAccessObjectModel } from '../../../xlide_vscode/src/analyzer/host/accessObjectModel';
+import { getPowerPointObjectModel } from '../../../xlide_vscode/src/analyzer/host/powerpointObjectModel';
+import { getVb6ObjectModel } from '../../../xlide_vscode/src/analyzer/host/vb6ObjectModel';
+import { getWordObjectModel } from '../../../xlide_vscode/src/analyzer/host/wordObjectModel';
+
+// THE ENGINE REGISTERS EVERY HOST THE VBE LOADS IN. The analyzer's registry is moving to build in
+// Excel's model only, so a bundle that analyzes Excel alone need not carry Word's, Access's and
+// the rest (xlide_vscode#251); a caller registers the hosts it answers for. This engine answers
+// for all of them, so it registers all of them, once, at load - before `project/open` can name a
+// host. Registering through `registerHostObjectModel`, which the registry has always exported,
+// rather than the analyzer's newer `registerBuiltInHostModels`, keeps this building against the
+// analyzer before and after that change alike: the checkout beside this one is unpinned.
+registerHostObjectModel('word', getWordObjectModel);
+registerHostObjectModel('powerpoint', getPowerPointObjectModel);
+registerHostObjectModel('access', getAccessObjectModel);
+registerHostObjectModel('vb6', getVb6ObjectModel);
 
 let current = 'excel';
 
