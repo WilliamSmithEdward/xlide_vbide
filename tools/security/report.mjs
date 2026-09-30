@@ -5,7 +5,11 @@ import { inspectMalware } from './malware-policy.mjs';
 
 export const expectedScans = ['codeql-csharp', 'codeql-javascript-typescript', 'codeql-actions', 'semgrep'];
 export const expectedMalwareScans = ['clamav', 'yara-x'];
-const malwarePolicy = JSON.parse(readFileSync(new URL('../../.github/security/malware/policy.json', import.meta.url), 'utf8'));
+// The accepted findings, and the rule pack the standard YARA updater pins.
+const malwarePolicy = {
+  ...JSON.parse(readFileSync(new URL('../../.github/security/malware/policy.json', import.meta.url), 'utf8')),
+  pins: JSON.parse(readFileSync(new URL('../../.github/security/yara.json', import.meta.url), 'utf8')),
+};
 
 export function inspectSarif(sarif) {
   if (sarif.version !== '2.1.0' || !Array.isArray(sarif.runs) || !sarif.runs.length) {
@@ -97,9 +101,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     `Workflow: ${report.run}`, '',
     `Generated: ${report.generatedAt}`, '',
     '| Scanner | Unexpected findings | Accepted findings | Diagnostics |', '| --- | ---: | ---: | --- |',
-    ...report.scans.map(scan => `| ${scan.name} | ${scan.findings ?? 'unavailable'} | ${scan.accepted?.length ?? 0} | ${scan.problems.length ? 'FAIL / incomplete' : `Complete${scan.acceptedDiagnostics ? `; ${scan.acceptedDiagnostics} reviewed compiler warnings` : ''}`} |`), '',
+    ...report.scans.map(scan => `| ${scan.name} | ${scan.findings ?? 'unavailable'} | ${scan.accepted?.length ?? 0} | ${scan.problems.length ? 'FAIL / incomplete' : `Complete${scan.diagnostics ? `; ${scan.diagnostics} upstream rule warnings recorded` : ''}`} |`), '',
     ...report.problems.map(problem => `- ${problem}`), '',
-    'Unexpected findings and incomplete scans fail the gate. Exact, expiring malware exceptions and the pinned YARA compiler-warning baseline are documented in docs/security-malware.md. Raw scan evidence is retained for 30 days.', '',
+    'Unexpected findings and incomplete scans fail the gate. Exact, expiring malware exceptions are documented in docs/security-malware.md. Raw scan evidence is retained for 30 days.', '',
     'Scope: tracked repository files. CodeQL uses security-extended; Semgrep uses p/security-audit and p/secrets. ClamAV uses freshly updated official Talos signatures; YARA-X uses the pinned YARA Forge full collection.', '',
     ...report.scans.filter(scan => scan.name === 'yara-x').flatMap(scan => (scan.assets ?? []).map(asset => `Release asset: \`${asset.path}\`; SHA-256 \`${asset.sha256}\`.`)), '',
     'Release assets are scanned only when listed above. YARA-X scans raw bytes; neither scanner guarantees unpacking of custom installer payloads. Source scans do not include untracked dependencies or the separately bundled analyzer. This is not a guarantee that a release is malware-free.', '',

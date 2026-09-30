@@ -27,23 +27,23 @@ official Talos signatures on every run; update failures fail the job with no sta
 the same inventory with the SHA-256-pinned YARA Forge **full** public collection. Published-release
 runs also download and scan release assets, including `xlide-setup.exe`, without executing them.
 Versions, hashes, coverage, and the bounded exception policy are in
-[Malware scanning and accepted diagnostics](docs/security-malware.md).
+[Malware scanning and accepted detections](docs/security-malware.md).
 
-The **Security passed** and **Malware scan passed** gates fail on unexpected findings, scanner failure, new warning/error diagnostics,
+The **Security passed** and **Malware scan passed** gates fail on unexpected findings, scanner failure, compile errors,
 malformed reports, or missing results. CodeQL/Semgrep findings still fail at every severity, including
 suppressed SARIF findings; Semgrep inline `nosemgrep` suppressions are disabled. Malware detections
 may be bypassed only by an explicitly reviewed, expiring entry matching scanner, rule, exact path,
-and SHA-256. The current detection exception list is empty. A pinned fingerprint accepts reviewed
-legacy YARA compiler warnings, without disabling any rules. Operational failures and missing coverage
+and SHA-256. The current detection exception list is empty. Upstream YARA compiler warnings are
+recorded, not gated, and no rules are disabled. Operational failures and missing coverage
 cannot be bypassed. Changes to the accepted evidence require a reviewed repository change.
 GitHub code scanning dismissal alone does not bypass this gate.
 
 Raw SARIF is uploaded to GitHub code scanning for branch/PR runs and retained as workflow artifacts
 for 30 days. Summary reports are retained for 90 days. Dependabot checks npm, NuGet, GitHub Actions,
 the YARA-X Python requirements, and the ClamAV and Semgrep images weekly. Public YARA rules are pinned
-for review rather than silently following a moving download. The weekly YARA Forge updater proposes
-new release/checksum/rule-count pins in a PR and explicitly starts Security and build on its branch.
-It never accepts compiler diagnostics or merges PRs. Dependabot alerts and security updates
+for review rather than silently following a moving download. The weekly YARA updater proposes new
+pins in `.github/security/yara.json` in a PR and explicitly starts CI, Security and Malware scan on
+its branch. It never merges PRs. Dependabot alerts and security updates
 are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scanning alert.
 
 ## Release security reports
