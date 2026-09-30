@@ -27,7 +27,7 @@ jobs:
   # up on one platform and not the other. The companion's language job runs both for the same
   # reason.
   engine:
-    name: Engine (${{ matrix.os }})
+    name: Engine tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -156,18 +156,15 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-  build:
-    name: Build
-    # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
-    # publishing needs the platform linker, which the Windows runner image already carries.
+  # The editor page: built, typechecked and tested here, then handed to the shim job, which
+  # has to carry it.
+  page:
+    name: Editor page
+    # Windows, like the shim that carries the bundle, so the bundle is built where it always was.
     runs-on: windows-2025
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -179,7 +176,8 @@ jobs:
       # is not committed, so a run that never built the page published a shim carrying no
       # editor at all — a green build whose artifact shows the native pane and logs "no
       # bundle" — and a TypeScript error merged just as green (2026-08-06). Building the page
-      # BEFORE the publish also puts the bundle where the shim's csproj expects to find it.
+      # BEFORE the publish, and handing it to the shim job, puts the bundle where the shim's
+      # csproj expects to find it.
       - name: Install the page's dependencies
         working-directory: ui/editor
         run: npm ci
@@ -211,9 +209,29 @@ jobs:
       # shape check for the 2026-08-05 crash storm, where a VARIANT declared 16 bytes on an x64
       # host wrote 8 bytes past its buffer and the symptom was stack-layout roulette.
       #
-      # They need no Excel and no publish, so they belong in front of the expensive steps.
+      # They need no Excel and no publish, so they run in front of the expensive steps: the route
+      # audit here, the variant guard first in the .NET job.
       - name: Audit the xlide api's routes
         run: node tools/harness/audit-routes.mjs
+
+      # The shim job puts this back at ui/editor/dist, where the shim's csproj picks it up.
+      - name: Upload the built page
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: editor-page
+          path: ui/editor/dist/
+          if-no-files-found: error
+
+  dotnet:
+    name: .NET build and tests
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
 
       - name: Check that no variant is read as an object
         shell: pwsh
@@ -253,6 +271,28 @@ jobs:
       # in the live gate instead (tools\harness\module-sync.mjs, section 7).
       - name: Languages
         run: dotnet test --no-build -c Release --filter "FullyQualifiedName~Language|FullyQualifiedName~ModuleTextConversion"
+
+  shim:
+    name: Native shim
+    # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
+    # publishing needs the platform linker, which the Windows runner image already carries.
+    needs: page
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # The page job's bundle, back where the shim's csproj globs for it. The publish below
+      # builds the shim itself, so this job needs nothing from the .NET job.
+      - name: Download the built page
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: editor-page
+          path: ui/editor/dist
 
       - name: Publish the native shim
         run: dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Release -r win-x64
@@ -333,7 +373,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [engine, build]
+    needs: [engine, page, dotnet, shim]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

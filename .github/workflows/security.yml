@@ -133,7 +133,7 @@ jobs:
           retention-days: 90
 
   release-report:
-    name: Attach release security report
+    name: Attach release report
     if: always() && github.event_name == 'release'
     needs: [report]
     runs-on: ubuntu-24.04
