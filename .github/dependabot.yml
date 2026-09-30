@@ -7,6 +7,7 @@ updates:
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directories: [/engine, /ui/editor]
     # Compiler API migrations and Node runtime upgrades need coordinated changes.
@@ -20,6 +21,7 @@ updates:
     groups:
       npm:
         patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: nuget
     directory: /
     schedule:
@@ -27,11 +29,23 @@ updates:
     groups:
       nuget:
         patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: pip
     directory: /.github/requirements
     schedule:
-      interval: weekly
+      interval: daily
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    cooldown:
+      default-days: 7
+      exclude: [pyopenvba, pyofficeeditor, pyprettyvba, pyvbareference, pyvbaanalysis, pyvbaharness, xlide-mcp]
   - package-ecosystem: docker
     directories: [/.github/security/clamav, /.github/security/semgrep]
     schedule:
       interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
