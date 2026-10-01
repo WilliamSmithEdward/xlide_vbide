@@ -68,8 +68,15 @@ malformed report or a missing result fails the gate too.
   scanning; a release run keeps them as workflow artifacts instead.
 - **Workflows:** zizmor audits the GitHub Actions workflows; a finding fails
   Security.
-- **Dependencies:** there is no dependency audit job. Dependabot alerts and
-  security updates watch the npm, NuGet and Python dependencies.
+- **Dependencies:** the Dependency audit job runs `npm audit` over the
+  engine's and the editor page's lockfiles, development tools included,
+  without running install scripts, and lists every NuGet package of the
+  solution with a known vulnerability, transitive ones included. Any
+  advisory fails Security, whatever its severity. The editor page overrides
+  the DOMPurify that monaco-editor 0.57.0 pins exactly (3.4.15) with
+  3.4.16, the release that fixes GHSA-p98j-92pf-mc4p; remove the override
+  in `ui/editor/package.json` once monaco-editor ships a fixed DOMPurify
+  itself.
 - **Malware:** ClamAV, with signatures freshclam fetches and verifies on
   every run, and YARA-X, with the YARA Forge rules pinned to a release and
   its SHA-256, scan every Git-tracked file and, on a published release,

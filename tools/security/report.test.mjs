@@ -9,7 +9,7 @@ import { createReport, expectedScans, inspectSarif } from './report.mjs';
 import { fixtures } from './malware-fixtures.mjs';
 
 const clean = () => ({ version: '2.1.0', runs: [{ tool: { driver: { name: 'test-scanner', version: '1' } }, results: [] }] });
-const statuses = { codeql: { result: 'success' }, semgrep: { result: 'success' } };
+const statuses = { codeql: { result: 'success' }, semgrep: { result: 'success' }, dependencies: { result: 'success' } };
 const malwareStatuses = { clamav: { result: 'success' }, 'yara-x': { result: 'success' } };
 
 test('all findings count, including notes and suppressed results', () => {
