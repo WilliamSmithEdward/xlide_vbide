@@ -43,7 +43,9 @@ export function readCfb(pathOrBytes) {
   const difatCount = bytes.readUInt32LE(72);
   const firstDifat = bytes.readUInt32LE(68);
 
-  const at = (sector) => 512 + sector * sectorSize;
+  // The header takes the whole first sector (512 bytes padded to 4096 in version 4), so sector n
+  // starts at (n + 1) * sectorSize - the same rule as CompoundFile.cs.
+  const at = (sector) => (sector + 1) * sectorSize;
 
   // The FAT, through the DIFAT: the header holds the first 109 entries, then a chain.
   const fatSectors = [];

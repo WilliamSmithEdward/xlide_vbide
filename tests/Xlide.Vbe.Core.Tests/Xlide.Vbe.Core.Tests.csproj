@@ -21,4 +21,8 @@
     <ProjectReference Include="..\..\src\Xlide.Vbe.Core\Xlide.Vbe.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
