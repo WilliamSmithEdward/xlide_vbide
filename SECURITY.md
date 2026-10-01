@@ -43,8 +43,26 @@ for 30 days. Summary reports are retained for 90 days. Dependabot checks npm, Nu
 the YARA-X Python requirements, and the ClamAV and Semgrep images weekly. Public YARA rules are pinned
 for review rather than silently following a moving download. The weekly YARA updater proposes new
 pins in `.github/security/yara.json` in a PR and explicitly starts CI, Security and Malware scan on
-its branch. It never merges PRs. Dependabot alerts and security updates
-are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scanning alert.
+its branch. Its PR, and a minor or patch Dependabot update, merges itself once CI, Security and
+Malware scan pass; a third-party major version waits for review. Dependabot alerts and security
+updates are enabled. Raw malware evidence is a workflow artifact, not a GitHub code-scanning alert.
+
+The editor page's readers of module text, which run over whatever a workbook carries, are also
+checked by property: fast-check generates module text, and Format Module must keep every line,
+change only indentation and keyword case, indent in whole units of spaces and change nothing when
+run again; the procedure scanner must tile the module; and the tokenizer must cover every line with
+tokens in order (`ui/editor/test/properties.ts`). `npm test` runs every property a hundred times;
+the [Fuzz workflow](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/fuzz.yml)
+runs them twenty thousand times when the page changes and two hundred thousand times daily. It is
+not a gate: a failure prints the smallest input that breaks the property, which becomes a case in
+that reader's own suite.
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/xlide_vbide)
+rates the repository's security practices on every change to `main` and weekly, and publishes the
+result the README badge shows. Some of its checks do not fit this project: a single maintainer
+cannot have a second person approve every change, and the installer is built locally by
+`tools/release.ps1`, so a release carries the reports' SHA-256 digests rather than a build
+provenance signature.
 
 ## Release security reports
 

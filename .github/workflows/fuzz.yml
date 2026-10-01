@@ -1,0 +1,49 @@
+name: Fuzz
+
+# Property-based fuzzing, with fast-check, of the editor page's readers of module text: Format
+# Module, the procedure scanner and the VBA tokenizer (ui/editor/test/properties.ts). Module text
+# is whatever a workbook carries, often somebody else's. npm test runs the properties a hundred
+# cases each on every change; this runs them at twenty thousand when the readers change and two
+# hundred thousand daily. A failure prints the smallest input that breaks the property and the
+# seed that replays it (XLIDE_PROPERTY_SEED); the input becomes a case in that reader's own suite
+# with the fix. This is not a required check, so a finding in code a pull request did not touch
+# does not block it.
+
+on:
+  push:
+    branches: [main]
+    paths: [ui/editor/src/**, ui/editor/vendor/**, ui/editor/test/properties.*, ui/editor/package-lock.json, .github/workflows/fuzz.yml]
+  pull_request:
+    paths: [ui/editor/src/**, ui/editor/vendor/**, ui/editor/test/properties.*, ui/editor/package-lock.json, .github/workflows/fuzz.yml]
+  schedule:
+    - cron: '43 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  properties:
+    name: Module text properties
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.2'
+          cache: npm
+          cache-dependency-path: ui/editor/package-lock.json
+
+      - name: Install
+        working-directory: ui/editor
+        run: npm ci
+
+      - name: Run the properties
+        working-directory: ui/editor
+        env:
+          XLIDE_PROPERTY_RUNS: ${{ github.event_name == 'schedule' && '200000' || '20000' }}
+        run: node test/properties.mjs

@@ -11,6 +11,7 @@
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { canonicalKeyword } from "xlide-spec/analyzer/lexer/keywordTable";
+import { isWsc } from "xlide-spec/analyzer/lexer/tokenKinds";
 import { tokenizeCached } from "xlide-spec/analyzer/lexer/tokenize";
 import { CANONICAL_KEYWORDS, VBA_LANGUAGE_ID } from "./vba.js";
 
@@ -179,8 +180,31 @@ function significant(line: string): string {
     result += ch;
   }
 
-  const trimmed = result.trim();
+  const trimmed = trimWsc(result);
   return /^rem\b/i.test(trimmed) ? "" : trimmed;
+}
+
+/*
+ * WHITESPACE IS THE VBE'S, NOT JAVASCRIPT'S. `trim()` also removes a no-break space, which the VBE
+ * does not count as whitespace: at the start of a line it is part of a name (the lexer's
+ * `isWsc`). Trimmed the JavaScript way, Format Module deleted a pasted ` error`'s first
+ * character and so turned a name into the Error statement, and formatting the result again
+ * respelled it (found by test/properties.ts, 2026-09-30).
+ */
+function trimStartWsc(text: string): string {
+  let start = 0;
+  while (start < text.length && isWsc(text.charAt(start))) {
+    start += 1;
+  }
+  return text.slice(start);
+}
+
+function trimWsc(text: string): string {
+  let end = text.length;
+  while (end > 0 && isWsc(text.charAt(end - 1))) {
+    end -= 1;
+  }
+  return trimStartWsc(text.slice(0, end));
 }
 
 /** True when the line ends in a continuation, so the next line belongs to this statement. */
@@ -284,7 +308,7 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
       continue;
     }
 
-    const body = original.trim();
+    const body = trimWsc(original);
 
     if (body.length === 0) {
       formatted.push("");
@@ -293,9 +317,9 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
 
     // Structure is decided on the code BEFORE the comment, wherever the lexer began one: a
     // `: Rem` comment's words are not a block opener, and its ` _` is not a continuation.
-    const lead = original.length - original.trimStart().length;
+    const lead = original.length - trimStartWsc(original).length;
     const commentAt = lexed.commentAt.get(index);
-    const code = significant(commentAt === undefined ? body : original.slice(0, commentAt).trim());
+    const code = significant(commentAt === undefined ? body : trimWsc(original.slice(0, commentAt)));
     const names = lexed.names.get(index);
     const respelled = options.canonicalKeywords
       ? respell(

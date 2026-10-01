@@ -4,6 +4,7 @@
   "entries": [
     "analyzer/lexer/keywordTable",
     "analyzer/lexer/strippedLines",
+    "analyzer/lexer/tokenKinds",
     "analyzer/lexer/tokenize",
     "vbaSmartEnter",
     "vbaSmartTab",

@@ -239,6 +239,15 @@ check("already right: spaces after a continuation's _ continue it (#83), If x Th
   ]);
 });
 
+// The VBE does not count a no-break space as whitespace: at the start of a line it is part of a
+// name. JavaScript's trim() does, so the line lost it, became the Error statement, and a second
+// format respelled it. Found by test/properties.ts.
+check("a no-break space is kept, and formatting twice changes nothing more", () => {
+  const once = format("Sub T()", " error", "End Sub");
+  assert.deepEqual(once, ["Sub T()", "     error", "End Sub"]);
+  assert.deepEqual(format(...once), once);
+});
+
 check("the editor outdents a line as it becomes EndIf, and End If as before", () => {
   const outdents = vbaLanguageConfiguration.indentationRules.decreaseIndentPattern;
   assert.equal(outdents.test("    EndIf"), true, "EndIf");
