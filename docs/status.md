@@ -30,9 +30,9 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   running, stepping, compiling and Design Mode are toolbar buttons.
 - **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe`, 31.6 MB,
   per user, no administrator rights, nothing required beforehand. It refuses to build without a
-  language engine or a built page. `tools\release.ps1` attaches it to a tag, refusing to
-  ship an engine older than the analyzer sources it was built from, and hashing the uploaded
-  asset against the local one.
+  language engine or a built page. A pushed `vX.Y.Z` tag builds it in CI
+  (`.github\workflows\publish.yml`) from the analyzer commit in `.github\analyzer.json`, scans
+  it, signs its build provenance and creates the release; `tools\release.ps1` is gone.
 - **A release builds the engine from a PINNED analyzer.** The engine bundles the editor
   extension's analyzer from the neighbouring checkout, which is a working tree somebody is
   usually working in - and three releases were blocked or contaminated by that. `v0.17.0` was the

@@ -239,12 +239,13 @@ agree on what VBA means.
 
 ## Security
 
-CodeQL, Semgrep, ClamAV, and YARA-X scan pull requests, `main`, daily, and new releases. Malware
-scans use Talos signatures and the full YARA Forge public collection, including release assets after
-publication. Security checks fail on unexpected findings or incomplete analysis; exact accepted
+CodeQL, Semgrep, ClamAV, and YARA-X scan pull requests, `main`, daily, and every release. Malware
+scans use Talos signatures and the full YARA Forge public collection, and in a release the installer
+too. Security checks fail on unexpected findings or incomplete analysis; exact accepted
 diagnostics and the expiring exception policy are [documented](docs/security-malware.md).
-Future releases include a security report identifying the scanned commit and any scanned asset hashes;
-the installer release script requires a passing security run. Dependabot maintains npm,
+Releases are built in CI from the tag, and the release is created only when both scans pass; it
+carries the security and malware reports and the installer's signed build provenance
+(`gh attestation verify xlide-setup.exe --repo WilliamSmithEdward/xlide_vbide`). Dependabot maintains npm,
 NuGet, GitHub Actions, and scanner dependencies. A weekly updater proposes pinned YARA Forge
 rule releases in PRs and starts Security before merge; ClamAV refreshes signatures on every scan.
 

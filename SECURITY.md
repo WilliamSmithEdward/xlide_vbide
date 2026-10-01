@@ -102,10 +102,9 @@ malformed report or a missing result fails the gate too.
   is not a gate: a finding becomes a regression test with its fix.
 - **OpenSSF Scorecard** rates the repository's security practices on every
   change to `main` and weekly, and the README badge shows the result.
-  Two of its checks do not fit this project: a single maintainer cannot have
-  a second person approve every change, and the installer is built locally
-  by `tools/release.ps1`, so a release carries the reports' SHA-256 digests
-  rather than a build provenance signature.
+  One of its checks does not fit this project: a single maintainer cannot
+  have a second person approve every change. Signed-Releases rises as
+  releases carry the provenance bundle; it counts the last five.
 
 ## Accepted findings
 
@@ -119,7 +118,8 @@ entry that no longer matches a finding, until it is removed. An entry for a
 release asset is judged only by a scan of a release. A ClamAV alert for
 a scan limit or encrypted content cannot be accepted. CodeQL and Semgrep
 have no accepted list. zizmor keeps its exceptions in `.github/zizmor.yml`
-or inline beside the line they excuse, each with its reason. There are none.
+or inline beside the line they excuse, each with its reason: two rules are
+off there, both for publish.yml.
 
 ## Pinning and updates
 
@@ -132,10 +132,11 @@ Forge rules to a release and its SHA-256. ClamAV's signatures change too
 often to pin, so freshclam fetches and verifies them on every run. Semgrep's
 registry rules are also fetched at scan time.
 
-One input is deliberately not pinned: CI tests the engine against the
+One input is deliberately not pinned in CI: it tests the engine against the
 companion analyzer's `main` in xlide_vscode, so the two move together. A
-release build can pin the analyzer to one commit with
-`tools/Pin-Analyzer.ps1`.
+release builds the engine from the analyzer commit named in
+`.github/analyzer.json`, which moves by hand; `tools/Pin-Analyzer.ps1` makes
+the same pin for a local build.
 
 Dependabot proposes updates to GitHub Actions, npm, NuGet and the ClamAV and
 Semgrep images weekly, and to the hash-locked Python tools (YARA-X and
@@ -147,31 +148,36 @@ waits for review.
 
 ## Releases
 
-A release is a `v*` tag with a GitHub release carrying `xlide-setup.exe`.
-The installer is built locally, because it contains the language engine,
-which is built from the xlide_vscode checkout that CI does not have.
+Pushing a `vX.Y.Z` tag runs the Publish workflow. On a Windows runner it
+builds `xlide-setup.exe` from the tagged commit: the language engine from
+the analyzer commit in `.github/analyzer.json`, tested against it first,
+then the editor page and the native shim. It refuses a tag that is not the
+`<Version>` in `Directory.Build.props`, or a version without release notes
+in `docs/releases/vX.Y.Z.md`. Security runs on that commit and Malware scan
+on that commit and that installer, and only when both pass does Publish sign
+the installer's build provenance and create the GitHub release with:
 
-1. Merge the changes and wait for Security to pass on the exact release
-   commit.
-2. Tag that commit and create a **draft** GitHub release.
-3. Run `tools/release.ps1 -Tag <tag>`. It requires a clean checkout of the
-   tag, and that the latest Security run for that commit passed. It checks
-   the downloaded report names that commit and run, and uploads it with the
-   installer. `-SkipGate` skips only the local verification gate, never the
-   Security check.
-4. Review the assets and publish the draft.
+- `xlide-setup.exe`
+- `xlide-<version>.sigstore.json`, its signed build provenance
+- `security-report.md` and `security-report.json`
+- `malware-report.md` and `malware-report.json`, which give the
+  installer's SHA-256
 
-Publication starts Security and Malware scan again, on the tagged commit and
-the attached assets. They replace the source-only security report with
-`security-report.md` and `security-report.json`, and attach
-`malware-report.md` and `malware-report.json`, which list each scanned
-asset's SHA-256. Only the summaries are attached; the raw results stay in
-the workflow runs, for 30 days, and the reports for 90. The reports arrive
-after publication, and a failed scan attaches a failing report but does not
-unpublish the release. A release created outside `tools/release.ps1` skips
-its Security check, and replacing an asset on a published release does not
-start another scan. Releases made before these workflows are not
-backfilled.
+To check that an installer was built by this repository's Publish workflow
+from a tagged commit:
+
+```bash
+gh attestation verify xlide-setup.exe --repo WilliamSmithEdward/xlide_vbide
+```
+
+The provenance is not an Authenticode signature, so Windows still shows the
+installer's publisher as unknown. The live gate (`tools/verify.ps1`) needs a
+real Excel and cannot run in CI; it is run on the release commit before the
+tag is pushed. Started by hand, Publish is a dry run: it builds, scans and
+assembles the same files as the `release-preview` artifact and releases
+nothing. The raw scan results stay in the workflow runs for 30 days and the
+reports for 90. Releases up to 0.20.2 were built locally and carry no
+provenance, and releases before these workflows carry no reports.
 
 The checks record what was scanned. They do not certify the binaries, audit
 every dependency, or replace manual review.

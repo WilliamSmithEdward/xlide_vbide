@@ -19,7 +19,7 @@
         $env:XLIDE_ANALYZER_ROOT = (tools\Pin-Analyzer.ps1 -Ref v9.0.0)
         npm run package --prefix engine
 
-    The same variable is read by the engine-currency checks in verify.ps1 and release.ps1, so a
+    The same variable is read by the engine-currency check in verify.ps1, so a
     pinned build is compared against the pinned sources rather than against the working tree.
 
 .PARAMETER Ref
