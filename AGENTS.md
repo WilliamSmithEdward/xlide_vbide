@@ -5,7 +5,7 @@
 
 These rules are the same in every WilliamSmithEdward repository.
 
-- **How a release happens here:** publishing a GitHub release starts the release reports, which scan it and attach their reports to it. Any other step, such as a marketplace upload, is described elsewhere in this file.
+- **How a release happens here:** pushing a `vX.Y.Z` tag runs Publish, which builds the release files in CI and creates the GitHub release with them, their signed provenance and the security reports. Any other step, such as a marketplace upload, is described elsewhere in this file.
 - **Starting a workflow by hand never releases anything.** Publish and every
   release report are dry runs when started with `gh workflow run` or the Run
   workflow button. They build, scan and assemble the release files exactly
@@ -32,3 +32,20 @@ These rules are the same in every WilliamSmithEdward repository.
 - **A scanner finding is fixed or accepted with a written reason** in the
   repository's accepted list. Never silence a scanner without one.
 <!-- repo-standards:end -->
+
+## Releasing
+
+1. Set `<Version>` in `Directory.Build.props`, write the release notes in
+   `docs/releases/vX.Y.Z.md`, and set `.github/analyzer.json` to the
+   xlide_vscode release the engine ships with: `ref` its tag, `commit` the
+   commit that tag names
+   (`gh api repos/WilliamSmithEdward/xlide_vscode/git/ref/tags/<tag>`).
+2. Run the live gate on that commit, pinned the same way:
+   `$env:XLIDE_ANALYZER_ROOT = (tools\Pin-Analyzer.ps1 -Ref <commit>)`, then
+   `tools\verify.ps1 -Deep`. CI cannot run it: it drives a real Excel.
+3. Merge to `main`. Optionally dry-run Publish:
+   `gh workflow run publish.yml --ref main`, then
+   `gh run download <run-id> -n release-preview`.
+4. The owner pushes the `vX.Y.Z` tag on that commit. Publish builds the
+   installer from it on a Windows runner, runs Security and Malware scan,
+   and only when both pass signs the installer and creates the release.

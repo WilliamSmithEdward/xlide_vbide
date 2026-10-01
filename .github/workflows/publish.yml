@@ -1,0 +1,281 @@
+name: Publish
+
+# A vX.Y.Z tag releases xlide. The build job makes xlide-setup.exe from the
+# tagged commit on a Windows runner: the language engine from the analyzer
+# commit pinned in .github/analyzer.json, the editor page, and the native shim,
+# packed by installer/build.ps1. It refuses a tag that is not the <Version> in
+# Directory.Build.props, or a version with no docs/releases/vX.Y.Z.md. Security
+# and Malware scan run on that commit, Malware scan on that installer too; this
+# workflow then signs the installer's build provenance and creates the GitHub
+# release with it, the signed bundle and both reports.
+#
+# The live gate (tools/verify.ps1, which drives a real Excel) cannot run here;
+# run it on the release commit before pushing the tag.
+#
+# Started by hand, this is always a dry run: it builds, scans and assembles
+# the release files exactly as a release would, and uploads them as the
+# release-preview artifact instead of signing or releasing anything.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  build:
+    name: Build the installer
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: xlide_vbide
+          persist-credentials: false
+
+      # First, so a mistyped tag fails before anything is built. CI tests the
+      # engine against the analyzer's moving main; a release builds it from one
+      # commit, named in .github/analyzer.json. No updater follows that pin: to
+      # move it, set ref to an xlide_vscode release tag and commit to the
+      # commit it names (gh api repos/WilliamSmithEdward/xlide_vscode/git/ref/tags/<tag>).
+      - name: Read the version and the analyzer pin
+        id: release
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          $version = (Select-Xml -Path Directory.Build.props -XPath '//Version').Node.InnerText.Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Directory.Build.props has no single X.Y.Z <Version>." }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "The tag is $env:GITHUB_REF_NAME, but Directory.Build.props is version $version."
+          }
+          if (-not (Test-Path "docs/releases/v$version.md")) { throw "docs/releases/v$version.md, the release notes, is missing." }
+          $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
+          if ($pin.commit -notmatch '^[0-9a-f]{40}$') { throw '.github/analyzer.json names no full commit SHA.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "analyzer=$($pin.commit)" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $version, analyzer $($pin.ref) at $($pin.commit)"
+
+      # Beside this checkout, where the engine build looks for the analyzer.
+      - name: Check out the pinned analyzer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: WilliamSmithEdward/xlide_vscode
+          ref: ${{ steps.release.outputs.analyzer }}
+          path: xlide_vscode
+          persist-credentials: false
+
+      # No package cache: a cache written by another run must not reach what
+      # a release is built from.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: xlide_vbide/global.json
+
+      - name: Install the analyzer's dependencies
+        working-directory: xlide_vscode
+        run: npm ci
+
+      - name: Install the engine's dependencies
+        working-directory: xlide_vbide/engine
+        run: npm ci
+
+      - name: Typecheck the engine against the pinned analyzer
+        working-directory: xlide_vbide/engine
+        run: npm run check-types
+
+      - name: Test the engine against the pinned analyzer
+        working-directory: xlide_vbide/engine
+        run: npm test
+
+      - name: Package the engine
+        working-directory: xlide_vbide/engine
+        run: npm run package
+
+      - name: Install the page's dependencies
+        working-directory: xlide_vbide/ui/editor
+        run: npm ci
+
+      - name: Build the page
+        working-directory: xlide_vbide/ui/editor
+        run: npm run build
+
+      - name: Check the page bundle
+        working-directory: xlide_vbide/ui/editor
+        run: npm test
+
+      # Publishes the shim, stages the engine and the page as the payload, and
+      # compiles the installer ahead of time. It refuses to build without an
+      # engine or a page.
+      - name: Build the installer
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: ./installer/build.ps1
+
+      # The same check CI makes of every shim: the shipped build keeps the api
+      # shut and carries no unauthenticated door.
+      - name: Check that the release ships the api shut
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          $shim = 'artifacts/bin/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
+          if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
+          $bytes = [IO.File]::ReadAllBytes($shim)
+          $text = [Text.Encoding]::Unicode.GetString($bytes) +
+            [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
+            [Text.Encoding]::ASCII.GetString($bytes)
+          if (-not $text.Contains('this build keeps the door shut unless told otherwise')) { throw 'Release does not say it ships the api shut.' }
+          if ($text.Contains('this build opens the door unless told otherwise')) { throw 'RELEASE SHIPS THE API OPEN.' }
+          foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
+            if ($text.Contains($needle)) { throw "Release carries an unauthenticated door: found '$needle'." }
+          }
+          $installer = 'artifacts/xlide-setup.exe'
+          if (-not (Test-Path $installer)) { throw "No installer at $installer." }
+          Get-FileHash $installer -Algorithm SHA256 | Format-List
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer
+          path: xlide_vbide/artifacts/xlide-setup.exe
+          if-no-files-found: error
+
+  security:
+    name: Security
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  malware-scan:
+    name: Malware scan
+    needs: build
+    uses: ./.github/workflows/malware-scan.yml
+    permissions:
+      contents: read
+    with:
+      installer-artifact: installer
+
+  publish:
+    name: Attest the release files
+    needs: [build, security, malware-scan]
+    if: ${{ startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write # sign the attestation
+      attestations: write # store it
+    steps:
+      - name: Download the installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer
+          path: installer/
+
+      # Signed build provenance: `gh attestation verify xlide-setup.exe --repo
+      # WilliamSmithEdward/xlide_vbide` shows which commit and run built it.
+      - name: Attest the installer
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: installer/xlide-setup.exe
+
+      # The signed bundle goes on the GitHub release too, so a download can be
+      # checked offline: gh attestation verify <file> --bundle <bundle>.
+      - name: Keep the provenance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provenance
+          path: ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+
+  # On a dry run `publish` is skipped; this job still assembles the release
+  # and uploads it as an artifact, and only the last step is skipped.
+  github-release:
+    name: Create GitHub release
+    needs: [build, security, malware-scan, publish]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success'
+      && needs.security.result == 'success' && needs.malware-scan.result == 'success'
+      && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer
+          path: release/
+
+      - name: Download the security report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: security-report
+          path: security-report/
+
+      - name: Download the malware report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: malware-report
+          path: malware-report/
+
+      - name: Download the provenance bundle
+        if: env.DRY_RUN != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: provenance
+          path: provenance/
+
+      - name: Assemble the release
+        run: |
+          cp security-report/security-report.md security-report/security-report.json \
+            malware-report/malware-report.md malware-report/malware-report.json release/
+          if [ "$DRY_RUN" != true ]; then
+            test "$(find provenance -type f | wc -l)" = 1
+            mv provenance/* "release/xlide-$VERSION.sigstore.json"
+          fi
+          cp "docs/releases/v$VERSION.md" release_notes.md
+          test -s release_notes.md
+          ls -l release
+
+      - name: Keep what the release would carry
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-preview
+          path: |
+            release/
+            release_notes.md
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          # The title is the tag and nothing else. The headline is in the body.
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: release/*
+          fail_on_unmatched_files: true

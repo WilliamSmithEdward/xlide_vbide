@@ -7,8 +7,9 @@ on:
   schedule:
     - cron: '23 6 * * *'
   workflow_dispatch:
-  release:
-    types: [published]
+  # The publish workflow calls this one, so a release waits on it and carries
+  # the report it writes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -54,7 +55,7 @@ jobs:
         with:
           output: security-results/codeql-${{ matrix.language }}
           category: /language:${{ matrix.language }}
-          upload: ${{ github.event_name == 'release' && 'never' || 'always' }}
+          upload: ${{ github.ref_type == 'tag' && 'never' || 'always' }}
       - name: Preserve results even when analysis fails
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -87,7 +88,7 @@ jobs:
             --error --strict --disable-nosem --metrics off --disable-version-check \
             --sarif-output security-results/semgrep/semgrep.sarif .
       - name: Upload to code scanning
-        if: always() && github.event_name != 'release' && hashFiles('security-results/semgrep/*.sarif') != ''
+        if: always() && github.ref_type != 'tag' && hashFiles('security-results/semgrep/*.sarif') != ''
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           sarif_file: security-results/semgrep/semgrep.sarif
@@ -229,39 +230,6 @@ jobs:
           path: security-report/
           if-no-files-found: error
           retention-days: 90
-
-  release-report:
-    name: Attach release report
-    # Started by hand, this is a dry run: the files it would attach stay on
-    # the run as the release-preview artifact.
-    if: always() && (github.event_name == 'release' || github.event_name == 'workflow_dispatch')
-    needs: [report]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      # This write-enabled job never checks out or executes repository code.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: security-report
-          path: report
-      - name: Keep what the release would carry
-        if: github.event_name != 'release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-preview
-          path: |
-            report/security-report.md
-            report/security-report.json
-          if-no-files-found: error
-      - name: Attach reports, including failed scan reports
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" report/security-report.md report/security-report.json --clobber
 
   security-passed:
     name: Security passed

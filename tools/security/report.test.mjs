@@ -51,15 +51,15 @@ test('gate requires every scanner, valid artifacts and successful jobs', () => {
     }
     assert.equal(malware(malwareStatuses).passed, true);
     assert.equal(malware(malwareStatuses, { GITHUB_SHA: 'different-commit' }).passed, false);
-    assert.equal(malware(malwareStatuses, { GITHUB_EVENT_NAME: 'release' }).passed, false);
+    assert.equal(malware(malwareStatuses, { RELEASE_SCAN: 'true' }).passed, false);
     // The installer is the malware report's concern, not the security report's.
-    assert.equal(report(statuses, { GITHUB_EVENT_NAME: 'release' }).passed, true);
+    assert.equal(report(statuses, { RELEASE_SCAN: 'true' }).passed, true);
     for (const result of [yara, clam]) {
       result.inventory.push({ path: 'release/xlide-setup.exe', sha256: 'd'.repeat(64), size: 123 });
       result.scannedFiles++;
       writeFileSync(join(root, result.scanner, 'result.json'), JSON.stringify(result));
     }
-    assert.equal(malware(malwareStatuses, { GITHUB_EVENT_NAME: 'release' }).passed, true);
+    assert.equal(malware(malwareStatuses, { RELEASE_SCAN: 'true' }).passed, true);
     clam.inventory[1].sha256 = 'e'.repeat(64);
     writeFileSync(join(root, 'clamav', 'result.json'), JSON.stringify(clam));
     assert.equal(malware(malwareStatuses).passed, false);

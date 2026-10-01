@@ -12,12 +12,11 @@
     touching a single file in this repository. Watching engine\src alone would call a stale
     executable current, which is the one answer this must never give.
 
-    This is the shared half of two callers that had drifted apart. tools\verify.ps1 asks and then
-    packages when the answer is not empty; tools\release.ps1 asks and REFUSES, because a release is
-    the wrong moment to silently rebuild the thing being shipped. Before this existed, release.ps1
-    did not ask at all when it was run with -SkipGate, and installer\build.ps1 copies whatever .exe
-    is sitting in engine\dist - so the one path that skipped the gate was also the one path that
-    could ship a stale engine, silently.
+    tools\verify.ps1 asks and then packages when the answer is not empty. It once had a second
+    caller, tools\release.ps1, which asked and refused, because installer\build.ps1 copies whatever
+    .exe is sitting in engine\dist. Releases are now built in CI (.github\workflows\publish.yml),
+    which packages the engine fresh from the pinned analyzer every time, so no release can carry a
+    stale one.
 
 .OUTPUTS
     The FileInfo objects that are newer than the executable. Nothing when it is current.

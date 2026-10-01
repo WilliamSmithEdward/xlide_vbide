@@ -68,9 +68,9 @@ export function createReport(input, statuses, policy = malwarePolicy, context = 
   if (malware.length && malware.every(scan => scan.inventorySha256) && malware[0].inventorySha256 !== malware[1].inventorySha256) {
     problems.push('ClamAV and YARA-X scanned different inventories');
   }
-  if (kind === 'malware' && context.GITHUB_EVENT_NAME === 'release' && malware.some(scan =>
+  if (kind === 'malware' && context.RELEASE_SCAN === 'true' && malware.some(scan =>
     !scan.assets?.some(asset => asset.path === 'release/xlide-setup.exe'))) {
-    problems.push('Published release scan did not include the installer');
+    problems.push('Release scan did not include the installer');
   }
   for (const name of reportKinds[kind].jobs) {
     if (statuses?.[name]?.result !== 'success') problems.push(`${name} job: ${statuses?.[name]?.result ?? 'missing'}`);
