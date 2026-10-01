@@ -101,6 +101,62 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Known advisories in the locked npm and NuGet dependencies, development
+  # tools included. Any advisory fails, whatever its severity. npm reads only
+  # the lockfiles and runs no install scripts; NuGet needs a restore first,
+  # on Windows because the projects target net10.0-windows.
+  dependencies:
+    name: Dependency audit
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+      - name: Audit the npm lockfiles
+        shell: bash
+        run: |
+          status=0
+          for project in engine ui/editor; do
+            echo "npm audit: $project"
+            npm audit --prefix "$project" --package-lock-only --ignore-scripts --include=dev --audit-level=info || status=1
+          done
+          exit "$status"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Restore NuGet packages
+        run: dotnet restore xlide_vbide.slnx
+      # The list command exits 0 even when it finds a vulnerable package, so
+      # its JSON is read instead: a package listed under any project fails.
+      - name: Audit the NuGet packages
+        shell: bash
+        run: |
+          dotnet list xlide_vbide.slnx package --vulnerable --include-transitive --format json > nuget-audit.json
+          node -e '
+            const audit = JSON.parse(require("node:fs").readFileSync("nuget-audit.json", "utf8"));
+            if (!audit.projects?.length) throw new Error("No projects were audited");
+            let vulnerable = 0;
+            for (const project of audit.projects) {
+              for (const framework of project.frameworks ?? []) {
+                for (const item of [...(framework.topLevelPackages ?? []), ...(framework.transitivePackages ?? [])]) {
+                  vulnerable++;
+                  console.log(`${project.path}: ${item.id} ${item.resolvedVersion}`);
+                  for (const advisory of item.vulnerabilities ?? []) console.log(`  ${advisory.severity} ${advisory.advisoryurl}`);
+                }
+              }
+            }
+            for (const problem of audit.problems ?? []) { vulnerable++; console.log(problem.text ?? JSON.stringify(problem)); }
+            console.log(`${audit.projects.length} projects audited, ${vulnerable} vulnerable packages or problems`);
+            process.exitCode = vulnerable ? 1 : 0;
+          '
+
   # zizmor audits the workflows themselves: template injection, credential
   # persistence, over-broad permissions, dangerous triggers, and actions with
   # known advisories or impostor commits. Findings it should not raise are
@@ -145,7 +201,7 @@ jobs:
   report:
     name: Security report
     if: always()
-    needs: [codeql, semgrep]
+    needs: [codeql, semgrep, dependencies]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -210,7 +266,7 @@ jobs:
   security-passed:
     name: Security passed
     if: always()
-    needs: [codeql, semgrep, zizmor, report]
+    needs: [codeql, semgrep, dependencies, zizmor, report]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

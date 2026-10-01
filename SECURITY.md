@@ -68,8 +68,15 @@ malformed report or a missing result fails the gate too.
   scanning; a release run keeps them as workflow artifacts instead.
 - **Workflows:** zizmor audits the GitHub Actions workflows; a finding fails
   Security.
-- **Dependencies:** there is no dependency audit job. Dependabot alerts and
-  security updates watch the npm, NuGet and Python dependencies.
+- **Dependencies:** the Dependency audit job runs `npm audit` over the
+  engine's and the editor page's lockfiles, development tools included,
+  without running install scripts, and lists every NuGet package of the
+  solution with a known vulnerability, transitive ones included. Any
+  advisory fails Security, whatever its severity. The editor page overrides
+  the DOMPurify that monaco-editor 0.57.0 pins exactly (3.4.15) with
+  3.4.16, the release that fixes GHSA-p98j-92pf-mc4p; remove the override
+  in `ui/editor/package.json` once monaco-editor ships a fixed DOMPurify
+  itself.
 - **Malware:** ClamAV, with signatures freshclam fetches and verifies on
   every run, and YARA-X, with the YARA Forge rules pinned to a release and
   its SHA-256, scan every Git-tracked file and, on a published release,
@@ -107,8 +114,9 @@ A finding is fixed, or accepted with a written reason in
 which holds ClamAV and YARA-X detections only. An entry matches the scanner,
 the exact rule, the exact path and the file's SHA-256, so a changed file
 needs another review. Each entry also names its reviewer and an expiry date;
-an expired, wildcard or unexplained entry fails the report. An entry that no
-longer matches does not fail it yet, so remove it by hand. A ClamAV alert for
+an expired, wildcard or unexplained entry fails the report, and so does an
+entry that no longer matches a finding, until it is removed. An entry for a
+release asset is judged only by a scan of a release. A ClamAV alert for
 a scan limit or encrypted content cannot be accepted. CodeQL and Semgrep
 have no accepted list. zizmor keeps its exceptions in `.github/zizmor.yml`
 or inline beside the line they excuse, each with its reason. There are none.
@@ -131,11 +139,11 @@ release build can pin the analyzer to one commit with
 
 Dependabot proposes updates to GitHub Actions, npm, NuGet and the ClamAV and
 Semgrep images weekly, and to the hash-locked Python tools (YARA-X and
-zizmor) daily, once a version is a week old; and at once for a security
-advisory. The week's wait applies to the Python tools only for now. The
-Update YARA rules workflow proposes new YARA pins each week. A minor or
-patch update, and the YARA pull request, merges itself once CI, Security and
-Malware scan pass; a third-party major version waits for review.
+zizmor) daily, in every ecosystem once a version is a week old; and at once
+for a security advisory. The Update YARA rules workflow proposes new YARA
+pins each week. A minor or patch update, and the YARA pull request, merges
+itself once CI, Security and Malware scan pass; a third-party major version
+waits for review.
 
 ## Releases
 

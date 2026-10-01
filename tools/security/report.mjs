@@ -40,7 +40,7 @@ export function inspectSarif(sarif) {
 // The Security workflow reports on CodeQL and Semgrep; the Malware scan workflow on
 // ClamAV and YARA-X. Each names the jobs that must have succeeded.
 export const reportKinds = {
-  security: { title: 'Security report', file: 'security-report', jobs: ['codeql', 'semgrep'] },
+  security: { title: 'Security report', file: 'security-report', jobs: ['codeql', 'semgrep', 'dependencies'] },
   malware: { title: 'Malware report', file: 'malware-report', jobs: expectedMalwareScans },
 };
 
