@@ -107,8 +107,9 @@ A finding is fixed, or accepted with a written reason in
 which holds ClamAV and YARA-X detections only. An entry matches the scanner,
 the exact rule, the exact path and the file's SHA-256, so a changed file
 needs another review. Each entry also names its reviewer and an expiry date;
-an expired, wildcard or unexplained entry fails the report. An entry that no
-longer matches does not fail it yet, so remove it by hand. A ClamAV alert for
+an expired, wildcard or unexplained entry fails the report, and so does an
+entry that no longer matches a finding, until it is removed. An entry for a
+release asset is judged only by a scan of a release. A ClamAV alert for
 a scan limit or encrypted content cannot be accepted. CodeQL and Semgrep
 have no accepted list. zizmor keeps its exceptions in `.github/zizmor.yml`
 or inline beside the line they excuse, each with its reason. There are none.
@@ -131,11 +132,11 @@ release build can pin the analyzer to one commit with
 
 Dependabot proposes updates to GitHub Actions, npm, NuGet and the ClamAV and
 Semgrep images weekly, and to the hash-locked Python tools (YARA-X and
-zizmor) daily, once a version is a week old; and at once for a security
-advisory. The week's wait applies to the Python tools only for now. The
-Update YARA rules workflow proposes new YARA pins each week. A minor or
-patch update, and the YARA pull request, merges itself once CI, Security and
-Malware scan pass; a third-party major version waits for review.
+zizmor) daily, in every ecosystem once a version is a week old; and at once
+for a security advisory. The Update YARA rules workflow proposes new YARA
+pins each week. A minor or patch update, and the YARA pull request, merges
+itself once CI, Security and Malware scan pass; a third-party major version
+waits for review.
 
 ## Releases
 

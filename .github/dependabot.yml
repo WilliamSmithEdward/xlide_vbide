@@ -8,6 +8,8 @@ updates:
       actions:
         patterns: ['*']
         update-types: [minor, patch]
+    cooldown:
+      default-days: 7
   - package-ecosystem: npm
     directories: [/engine, /ui/editor]
     # Compiler API migrations and Node runtime upgrades need coordinated changes.
@@ -22,6 +24,8 @@ updates:
       npm:
         patterns: ['*']
         update-types: [minor, patch]
+    cooldown:
+      default-days: 7
   - package-ecosystem: nuget
     directory: /
     schedule:
@@ -30,6 +34,8 @@ updates:
       nuget:
         patterns: ['*']
         update-types: [minor, patch]
+    cooldown:
+      default-days: 7
   - package-ecosystem: pip
     directory: /.github/requirements
     schedule:
@@ -49,3 +55,5 @@ updates:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    cooldown:
+      default-days: 7
