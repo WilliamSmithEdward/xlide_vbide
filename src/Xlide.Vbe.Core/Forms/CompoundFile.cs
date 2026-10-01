@@ -42,8 +42,19 @@ public sealed class CompoundFile
     private CompoundFile(byte[] source)
     {
         bytes = source;
-        sectorSize = 1 << Read16(30);
-        miniSize = 1 << Read16(32);
+
+        // MS-CFB 2.2: 512-byte sectors in version 3, 4096 in version 4, 64-byte mini sectors in
+        // both. Any other shift is not a compound file, and `1 << shift` of an arbitrary one can
+        // be 1, negative, or wrap.
+        var version = Read16(26);
+        var shift = Read16(30);
+        if (shift != (version == 3 ? 9 : version == 4 ? 12 : -1) || Read16(32) != 6)
+        {
+            throw new InvalidDataException($"Not a version 3 or 4 compound file (version {version}, shift {shift}).");
+        }
+
+        sectorSize = 1 << shift;
+        miniSize = 64;
         miniCutoff = Read32(56);
 
         // The FAT reaches through the DIFAT: 109 entries live in the header, the rest in a chain
@@ -60,11 +71,19 @@ public sealed class CompoundFile
             fatSectors.Add(sector);
         }
 
+        // The header's count is only a claim, up to four billion: a chain that loops back on
+        // itself would add 127 sectors a step for that long, inside Excel's process.
         var difat = Read32(68);
         var difatCount = Read32(72);
+        var visited = new HashSet<uint>();
         for (var n = 0; n < difatCount && difat != FreeSector && difat != EndOfChain; n++)
         {
-            var here = At(difat);
+            if (!visited.Add(difat) || visited.Count > MostSectors)
+            {
+                throw new InvalidDataException($"The DIFAT chain returns to sector {difat}.");
+            }
+
+            var here = Offset(difat);
             for (var i = 0; i < (sectorSize / 4) - 1; i++)
             {
                 var sector = Read32(here + (i * 4));
@@ -77,11 +96,18 @@ public sealed class CompoundFile
             difat = Read32(here + sectorSize - 4);
         }
 
+        // Every FAT sector is in the file, so there are no more of them than the file has room for;
+        // checked before the table is sized from the count.
+        if (fatSectors.Count > bytes.Length / sectorSize)
+        {
+            throw new InvalidDataException($"{fatSectors.Count} FAT sectors do not fit a file of {bytes.Length} bytes.");
+        }
+
         var entries = new uint[fatSectors.Count * (sectorSize / 4)];
         var written = 0;
         foreach (var sector in fatSectors)
         {
-            var here = At(sector);
+            var here = Offset(sector);
             for (var i = 0; i < sectorSize / 4; i++)
             {
                 entries[written++] = Read32(here + (i * 4));
@@ -164,18 +190,19 @@ public sealed class CompoundFile
             return ReadChain(entry.Start, entry.Size);
         }
 
-        var whole = new byte[entry.Size];
+        // A small stream lives in the mini stream, so it is no longer than the mini stream.
+        var whole = new byte[Math.Min(entry.Size, miniStream.Length)];
         var sector = entry.Start;
         var written = 0;
-        for (var n = 0; n < MostSectors && sector != EndOfChain && sector != FreeSector; n++)
+        for (var n = 0; n < MostSectors && written < whole.Length && sector != EndOfChain && sector != FreeSector; n++)
         {
-            var from = (int)sector * miniSize;
+            var from = (long)sector * miniSize;
             if (from >= miniStream.Length)
             {
                 break;
             }
 
-            var take = Math.Min(miniSize, Math.Min(miniStream.Length - from, whole.Length - written));
+            var take = (int)Math.Min(miniSize, Math.Min(miniStream.Length - from, whole.Length - written));
             Array.Copy(miniStream, from, whole, written, take);
             written += take;
             if (written >= whole.Length || sector >= miniFat.Length)
@@ -189,7 +216,25 @@ public sealed class CompoundFile
         return whole;
     }
 
-    private int At(uint sector) => 512 + ((int)sector * sectorSize);
+    /// <summary>
+    /// Where a sector starts. The header takes the whole first sector: 512 bytes in version 3,
+    /// and 512 bytes padded to 4096 in version 4 (MS-CFB 2.2), so sector n starts at
+    /// (n + 1) * sectorSize, not after the 512 header bytes. Long, because a damaged file's
+    /// sector number times 4096 does not fit an int.
+    /// </summary>
+    private long At(uint sector) => ((long)sector + 1) * sectorSize;
+
+    /// <summary>A sector the reader must have: one past the end of the file is a damaged file.</summary>
+    private int Offset(uint sector)
+    {
+        var at = At(sector);
+        if (at + sectorSize > bytes.Length)
+        {
+            throw new InvalidDataException($"Sector {sector} is past the end of the file.");
+        }
+
+        return (int)at;
+    }
 
     private ushort Read16(int at) => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at));
 
@@ -197,9 +242,12 @@ public sealed class CompoundFile
 
     private byte[] ReadChain(uint start, int size)
     {
+        // Each sector once: a chain that loops is cut where it returns, rather than read round
+        // and round to the cap.
         var sectors = new List<uint>();
+        var seen = new HashSet<uint>();
         var sector = start;
-        for (var n = 0; n < MostSectors && sector != EndOfChain && sector != FreeSector; n++)
+        for (var n = 0; n < MostSectors && sector != EndOfChain && sector != FreeSector && seen.Add(sector); n++)
         {
             sectors.Add(sector);
             if (sector >= fat.Length)
@@ -210,7 +258,9 @@ public sealed class CompoundFile
             sector = fat[sector];
         }
 
-        var whole = new byte[size >= 0 ? size : sectors.Count * sectorSize];
+        // No stream is longer than the file that holds it, whatever its directory entry claims.
+        var length = size >= 0 ? (long)size : (long)sectors.Count * sectorSize;
+        var whole = new byte[Math.Min(length, bytes.Length)];
         var written = 0;
         foreach (var one in sectors)
         {
@@ -220,7 +270,7 @@ public sealed class CompoundFile
                 break;
             }
 
-            var take = Math.Min(sectorSize, Math.Min(bytes.Length - from, whole.Length - written));
+            var take = (int)Math.Min(sectorSize, Math.Min(bytes.Length - from, whole.Length - written));
             Array.Copy(bytes, from, whole, written, take);
             written += take;
         }
