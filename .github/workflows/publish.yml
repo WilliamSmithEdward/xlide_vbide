@@ -96,13 +96,15 @@ jobs:
         working-directory: xlide_vbide/engine
         run: npm run check-types
 
-      - name: Test the engine against the pinned analyzer
-        working-directory: xlide_vbide/engine
-        run: npm test
-
+      # The tests drive the built bundle, engine/dist/engine.cjs, so they run
+      # after packaging, which writes it beside the executable.
       - name: Package the engine
         working-directory: xlide_vbide/engine
         run: npm run package
+
+      - name: Test the engine against the pinned analyzer
+        working-directory: xlide_vbide/engine
+        run: npm test
 
       - name: Install the page's dependencies
         working-directory: xlide_vbide/ui/editor
