@@ -1,11 +1,13 @@
 # xlide
 
 [![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/xlide_vbide)](https://github.com/WilliamSmithEdward/xlide_vbide/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WilliamSmithEdward/xlide_vbide/total)](https://github.com/WilliamSmithEdward/xlide_vbide/releases)
 [![CI](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/ci.yml)
 [![Security](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/security.yml)
+[![Malware scan](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/malware-scan.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/xlide_vbide/actions/workflows/malware-scan.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/WilliamSmithEdward/xlide_vbide/badge)](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/xlide_vbide)
-[![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/xlide_vbide)](LICENSE)
-[![Microsoft 365 Windows x64 on Excel, Word, PowerPoint and Access](https://img.shields.io/badge/Microsoft_365_Windows_x64-Excel,_Word,_PowerPoint,_Access-0078D4)](README.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/WilliamSmithEdward/xlide_vbide/blob/main/LICENSE)
+[![Microsoft 365 Windows x64 on Excel, Word, PowerPoint and Access](https://img.shields.io/badge/Microsoft_365_Windows_x64-Excel,_Word,_PowerPoint,_Access-0078D4)](https://github.com/WilliamSmithEdward/xlide_vbide)
 
 ![The xlide surface inside the VBE: editing side by side, completion from the analyzer, diagnostics with quick fixes, and break mode with live locals](assets/images/tour.gif)
 ***(Yes! This is really the VBA Editor in Excel)***
