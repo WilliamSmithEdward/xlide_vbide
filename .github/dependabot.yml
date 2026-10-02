@@ -57,3 +57,14 @@ updates:
         update-types: [minor, patch]
     cooldown:
       default-days: 7
+  # The SDK pinned in global.json.
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    cooldown:
+      default-days: 7
