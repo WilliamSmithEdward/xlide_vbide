@@ -1359,6 +1359,20 @@ body.live-resize .minimap {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
+/* Monaco's editor context view is a separate overlay. Its inline menu colours can lose
+   their theme variables in the host, leaving black labels over transparent code. */
+.context-view.monaco-component.monaco-menu-container > .monaco-scrollable-element {
+  background-color: #252526 !important;
+  color: #f0f0f0 !important;
+}
+
+@media (prefers-color-scheme: light) {
+  .context-view.monaco-component.monaco-menu-container > .monaco-scrollable-element {
+    background-color: #ffffff !important;
+    color: #1b1b1f !important;
+  }
+}
+
 .menu-item {
   display: flex;
   align-items: center;
