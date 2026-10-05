@@ -74,6 +74,17 @@ check("codicon font shipped and referenced relatively from the stylesheet", asyn
   assert.match(css, /url\(["']?\.\/codicon\.ttf["']?\)/, "editor.css does not reference ./codicon.ttf");
 });
 
+check("editor context menu ships opaque, contrasting surfaces in both themes (#51)", async () => {
+  const css = await readFile(path.join(dist, "editor.css"), "utf8");
+  const surfaces = [...css.matchAll(/\.context-view\.monaco-component\.monaco-menu-container\s*>\s*\.monaco-scrollable-element\s*\{([^}]+)\}/g)];
+  assert.equal(surfaces.length, 2, "the editor context menu needs dark and light surface rules");
+  assert.match(surfaces[0][1], /background-color:\s*#252526\s*!important/i);
+  assert.match(surfaces[0][1], /color:\s*#f0f0f0\s*!important/i);
+  assert.match(css, /@media\s*\(prefers-color-scheme:\s*light\)\s*\{/i);
+  assert.match(surfaces[1][1], /background-color:\s*(?:#fff|#ffffff)\s*!important/i);
+  assert.match(surfaces[1][1], /color:\s*#1b1b1f\s*!important/i);
+});
+
 check("worker is bundled and wired up with a relative url", async () => {
   const worker = path.join(dist, "editor.worker.js");
   assert.ok(await fileExists(worker), "dist/editor.worker.js is missing");
