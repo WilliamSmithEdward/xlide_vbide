@@ -84,13 +84,15 @@ check("editor context menu ships opaque, contrasting surfaces in both themes (#5
   assert.match(hosts[0][1], /--vscode-menu-foreground:\s*#f0f0f0/i);
   assert.match(hosts[0][1], /--vscode-strokeThickness:\s*1px/i);
   assert.match(hosts[0][1], /--vscode-menu-border:\s*#6b747d/i);
-  assert.match(hosts[0][1], /--vscode-list-hoverBackground:\s*#176da5/i);
+  assert.match(hosts[0][1], /--vscode-menu-selectionBackground:\s*#094771/i);
+  assert.match(hosts[0][1], /--vscode-list-hoverBackground:\s*#094771/i);
   assert.match(hosts[0][1], /--vscode-menu-selectionBorder:\s*#8ac8f5/i);
   assert.match(css, /@media\s*\(prefers-color-scheme:\s*light\)\s*\{/i);
   assert.match(hosts[1][1], /--vscode-menu-background:\s*(?:#fff|#ffffff)/i);
   assert.match(hosts[1][1], /--vscode-menu-foreground:\s*#1b1b1f/i);
   assert.match(hosts[1][1], /--vscode-menu-border:\s*#858c96/i);
-  assert.match(hosts[1][1], /--vscode-list-hoverBackground:\s*#91c8f3/i);
+  assert.match(hosts[1][1], /--vscode-menu-selectionBackground:\s*#cce8ff/i);
+  assert.match(hosts[1][1], /--vscode-list-hoverBackground:\s*#cce8ff/i);
   assert.match(hosts[1][1], /--vscode-menu-selectionBorder:\s*#3178b8/i);
 });
 

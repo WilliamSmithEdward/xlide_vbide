@@ -60,9 +60,9 @@ const inspectHover = `(() => {
 try {
   for (const [scheme, background, foreground, border, hoverBackground, hoverForeground, hoverOutline] of [
     ['dark', 'rgb(37, 37, 38)', 'rgb(240, 240, 240)',
-      'rgb(107, 116, 125)', 'rgb(23, 109, 165)', 'rgb(255, 255, 255)', 'rgb(138, 200, 245)'],
+      'rgb(107, 116, 125)', 'rgb(9, 71, 113)', 'rgb(255, 255, 255)', 'rgb(138, 200, 245)'],
     ['light', 'rgb(255, 255, 255)', 'rgb(27, 27, 31)',
-      'rgb(133, 140, 150)', 'rgb(145, 200, 243)', 'rgb(27, 27, 31)', 'rgb(49, 120, 184)'],
+      'rgb(133, 140, 150)', 'rgb(204, 232, 255)', 'rgb(27, 27, 31)', 'rgb(49, 120, 184)'],
   ]) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
     const found = await api.ask(inspect);
