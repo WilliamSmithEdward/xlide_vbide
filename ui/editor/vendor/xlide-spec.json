@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "535af19a2a62b36107383b3037d30c656b064b0c",
+  "commit": "303790100e62d4fae3986aa2001fbe9d2d19e809",
   "entries": [
     "analyzer/lexer/keywordTable",
     "analyzer/lexer/strippedLines",
@@ -13,14 +13,14 @@
   "files": {
     "analyzer/lexer/contextualKeywords.ts": "4b4e88b18492890b75610d9e3c48d16990dae99bbf3fe9fa2368003a7651f54d",
     "analyzer/lexer/keywordTable.ts": "42aea898db4abc3fdeb3f2070aea8a2fa56618ec0e52ffd80764e13c03de0fbb",
-    "analyzer/lexer/strippedLines.ts": "ee185913f345a86c18042916a97da4f3e6059062eac7bb80b82929c6931597b2",
+    "analyzer/lexer/strippedLines.ts": "3ad74b7c6809b072c73c3259ace5af509af239ca0f8c097cf4c7966d905171e6",
     "analyzer/lexer/tokenKinds.ts": "f3a5c9e9aeff0383df24407e3d5bf4bce208895d965e3704b185aa69a88b223d",
-    "analyzer/lexer/tokenize.ts": "b15c29229e7d82764d8593b91392a2939dea9130d88efda79b49094752ae3e33",
+    "analyzer/lexer/tokenize.ts": "abf1c340ae119a5db6a7123c6194ac386e8554673e23c7bb5e6c1387a611661c",
     "analyzer/lexer/trivia.ts": "e2327616f0712b8d7f135537a87e45a5f9cbdb8c588034e4a0eece2a106f47c5",
-    "analyzer/parser/nodes.ts": "dbda0ad9259b58913bdbef8e978d2d8b09ea399b58700fce87e54415fdb42933",
-    "vbaSmartEnter.ts": "739cb244688a19bf3c667386e99c7c7a5782b863fbf5c8f6d6a0355188e360c3",
+    "analyzer/parser/nodes.ts": "f6e42f83049f72198bcdeadcf6d5b90ac0030bfaa750bc780e1db04ce5c37041",
+    "vbaSmartEnter.ts": "32ae33c3a98f7e1db43749dfa25cd859e35ae64f3dd0c39f9c06452e6d792439",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
-    "vbaSourceScan.ts": "24010d190e87f27ef086b89662859d1ea2a66ef8adc298f197b3657eedb9a82c",
+    "vbaSourceScan.ts": "58b98fe739501a19f7927f3ae2ee5b56e08c22d6d01c837420fece0286b7b631",
     "vbaStructuralDiagnostics.ts": "78d223c0dc02fea223e6178663dc3d4675a3d3049bef0c332e495ffae5153d58"
   }
 }
