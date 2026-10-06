@@ -76,13 +76,15 @@ check("codicon font shipped and referenced relatively from the stylesheet", asyn
 
 check("editor context menu ships opaque, contrasting surfaces in both themes (#51)", async () => {
   const css = await readFile(path.join(dist, "editor.css"), "utf8");
-  const surfaces = [...css.matchAll(/\.context-view\.monaco-component\.monaco-menu-container\s*>\s*\.monaco-scrollable-element\s*\{([^}]+)\}/g)];
-  assert.equal(surfaces.length, 2, "the editor context menu needs dark and light surface rules");
-  assert.match(surfaces[0][1], /background-color:\s*#252526\s*!important/i);
-  assert.match(surfaces[0][1], /color:\s*#f0f0f0\s*!important/i);
+  // Monaco creates the menu inside a shadow root. The earlier rule selected its inner element
+  // from the document stylesheet and passed this test despite never affecting the live menu.
+  const hosts = [...css.matchAll(/\.shadow-root-host\s*\{([^}]+)\}/g)];
+  assert.equal(hosts.length, 2, "the shadow host needs dark and light menu theme variables");
+  assert.match(hosts[0][1], /--vscode-menu-background:\s*#252526/i);
+  assert.match(hosts[0][1], /--vscode-menu-foreground:\s*#f0f0f0/i);
   assert.match(css, /@media\s*\(prefers-color-scheme:\s*light\)\s*\{/i);
-  assert.match(surfaces[1][1], /background-color:\s*(?:#fff|#ffffff)\s*!important/i);
-  assert.match(surfaces[1][1], /color:\s*#1b1b1f\s*!important/i);
+  assert.match(hosts[1][1], /--vscode-menu-background:\s*(?:#fff|#ffffff)/i);
+  assert.match(hosts[1][1], /--vscode-menu-foreground:\s*#1b1b1f/i);
 });
 
 check("worker is bundled and wired up with a relative url", async () => {
