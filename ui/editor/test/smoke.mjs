@@ -76,6 +76,12 @@ check("codicon font shipped and referenced relatively from the stylesheet", asyn
 
 check("editor context menu ships opaque, contrasting surfaces in both themes (#51)", async () => {
   const css = await readFile(path.join(dist, "editor.css"), "utf8");
+  const shellMenus = [...css.matchAll(/\.menu-dropdown\s*\{([^}]+)\}/g)];
+  assert.equal(shellMenus.length, 2, "shell menus need dark and light selection colors");
+  assert.match(shellMenus[0][1], /--vscode-menu-selectionBackground:\s*#094771/i);
+  assert.match(shellMenus[0][1], /--vscode-menu-selectionForeground:\s*#ffffff/i);
+  assert.match(shellMenus[1][1], /--vscode-menu-selectionBackground:\s*#cce8ff/i);
+  assert.match(shellMenus[1][1], /--vscode-menu-selectionForeground:\s*#1b1b1f/i);
   // Monaco creates the menu inside a shadow root. The earlier rule selected its inner element
   // from the document stylesheet and passed this test despite never affecting the live menu.
   const hosts = [...css.matchAll(/\.shadow-root-host\s*\{([^}]+)\}/g)];
