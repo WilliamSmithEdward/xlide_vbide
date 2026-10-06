@@ -1331,7 +1331,8 @@ internal sealed class AnalysisService : IAsyncDisposable
 
                 var opened = await engine.OpenProjectAsync(
                     snapshot.ProjectId, snapshot.Generation, snapshot.Modules,
-                    snapshot.ConditionalConstants, snapshot.ReferenceGuids, _stopping.Token)
+                    snapshot.ConditionalConstants, snapshot.ReferenceGuids,
+                    snapshot.ReferenceLibraries, _stopping.Token)
                     .ConfigureAwait(false);
 
                 if (opened is not null)
