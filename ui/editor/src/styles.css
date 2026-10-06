@@ -1346,6 +1346,10 @@ body.live-resize .minimap {
 }
 
 .menu-dropdown {
+  /* Shell menus live outside Monaco's themed element, so give them the same
+     selection colors as the editor menu's shadow host below. */
+  --vscode-menu-selectionBackground: #094771;
+  --vscode-menu-selectionForeground: #ffffff;
   position: fixed;
   z-index: 90;
   min-width: 200px;
@@ -1377,6 +1381,11 @@ body.live-resize .minimap {
 }
 
 @media (prefers-color-scheme: light) {
+  .menu-dropdown {
+    --vscode-menu-selectionBackground: #cce8ff;
+    --vscode-menu-selectionForeground: #1b1b1f;
+  }
+
   .shadow-root-host {
     --vscode-menu-background: #ffffff;
     --vscode-menu-foreground: #1b1b1f;

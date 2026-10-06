@@ -56,6 +56,19 @@ const inspectHover = `(() => {
   return { selected: !!item, background: style?.backgroundColor, foreground: style?.color,
     outlineWidth: style?.outlineWidth, outlineColor: style?.outlineColor };
 })()`;
+const inspectShellHover = `(() => {
+  const row = [...document.querySelectorAll('[data-component], [data-project]')]
+    .find((one) => one.getBoundingClientRect().width > 0);
+  if (!row) throw new Error('No visible Explorer row for the shell context menu');
+  const rect = row.getBoundingClientRect();
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+    clientX: rect.left + 8, clientY: rect.top + rect.height / 2, button: 2 }));
+  const item = document.querySelector('.menu-dropdown .menu-item:not(.disabled)');
+  item?.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const selected = document.querySelector('.menu-dropdown .menu-item.highlight');
+  const style = selected && getComputedStyle(selected);
+  return { selected: !!selected, background: style?.backgroundColor, foreground: style?.color };
+})()`;
 
 try {
   for (const [scheme, background, foreground, border, hoverBackground, hoverForeground, hoverOutline] of [
@@ -79,10 +92,15 @@ try {
       || hovered.outlineColor !== hoverOutline) {
       throw new Error(`${scheme} context menu hover: ${JSON.stringify(hovered)}`);
     }
+    const shell = await api.ask(inspectShellHover);
+    if (!shell?.selected || shell.background !== hoverBackground
+      || shell.foreground !== hoverForeground) {
+      throw new Error(`${scheme} Explorer menu hover: ${JSON.stringify(shell)}`);
+    }
     console.log(`${scheme} context menu: opaque ${found.background}, ${found.borderWidth} border,`
-      + ` hover ${hovered.background} with ${hovered.outlineColor} outline`);
+      + ` editor and Explorer hover ${hovered.background} with ${hovered.outlineColor} editor outline`);
   }
-  console.log('RESULT: PASS - live context menu surface, border, and hover in both themes');
+  console.log('RESULT: PASS - live editor and Explorer menu highlights match in both themes');
 } finally {
   await cdp('Emulation.setEmulatedMedia', { features: [] });
   const closed = new Promise((resolve) => { socket.onclose = resolve; });
