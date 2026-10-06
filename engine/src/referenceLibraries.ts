@@ -23,7 +23,9 @@ export function registerReferenceLibraries(
         }
 
         const digest = createHash('sha256').update(JSON.stringify(library)).digest('hex').slice(0, 16);
-        const token = `typelib:${guid}:${digest}`;
+        // The upstream registry normalizes lookup tokens to lower case. Keep registration in
+        // that same spelling so custom models survive registry normalization (v11.0.1).
+        const token = `typelib:${guid.toLowerCase()}:${digest}`;
         if (!registered.has(token)) {
             const model = modelFor(library);
             registerHostObjectModel(token as VbaHostToken, () => model);
