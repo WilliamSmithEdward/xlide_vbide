@@ -33,6 +33,17 @@ These rules are the same in every WilliamSmithEdward repository.
   repository's accepted list. Never silence a scanner without one.
 <!-- repo-standards:end -->
 
+## Verifying issue reports
+
+For an issue about behavior inside Excel or the VBE, use a focused live harness when the
+host is available. Reproduce the contributor's concrete case before the fix when possible,
+then test the same case against the built add-in in a real host. Check the observable result
+the contributor reported (for example, the actual completion menu or Problems finding),
+not only an engine response or a successful build. Use a disposable workbook or module,
+clean up the harness-owned state, and record both the live result and any verification
+limits in the issue outcome. Keep the targeted check proportional to the report; the full
+live release gate belongs to releases.
+
 ## Releasing
 
 1. Set `<Version>` in `Directory.Build.props`, write the release notes in
