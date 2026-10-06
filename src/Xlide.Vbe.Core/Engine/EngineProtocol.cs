@@ -524,6 +524,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
 [JsonSerializable(typeof(EngineProjectOpened))]
+[JsonSerializable(typeof(EngineReferenceLibrary[]))]
 [JsonSerializable(typeof(JsonElement))]
 // Booleans ride the request dictionaries boxed, and a boxed value serialises only if its own
 // type is registered; leaving it out fails at run time, in the middle of a keystroke.

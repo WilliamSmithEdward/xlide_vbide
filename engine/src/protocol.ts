@@ -113,9 +113,21 @@ export interface ProjectOpenParams {
      * GUIDs, because the GUID is a library's identity and its name is only what it calls itself.
      * They are mapped to hosts by the analyzer's own table, so this engine holds no list of its
      * own to fall behind, and a library the analyzer has no model for maps to nothing and is
-     * silently ignored - which is the honest answer for stdole or a third-party DLL.
+     * the host's type-library snapshot is used when no built-in model exists.
      */
     referenceGuids?: readonly string[];
+    /** Non-Office referenced type libraries read from this machine's registered type metadata. */
+    referenceLibraries?: readonly ReferenceLibraryPayload[];
+}
+
+export interface ReferenceLibraryPayload {
+    name: string;
+    guid: string;
+    types: readonly {
+        name: string;
+        kind: string;
+        members: readonly { name: string; kind: string; signature: string }[];
+    }[];
 }
 
 /** textDocument/diagnostics: analyse one module. */

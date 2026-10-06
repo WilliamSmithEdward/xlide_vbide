@@ -186,6 +186,7 @@ internal sealed class EngineClient : IAsyncDisposable
         EngineModule[] modules,
         string? conditionalConstants,
         string[]? referenceGuids,
+        EngineReferenceLibrary[]? referenceLibraries,
         CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
@@ -217,11 +218,16 @@ internal sealed class EngineClient : IAsyncDisposable
         // code that compiles perfectly (measured 2026-09-21 before this was sent).
         //
         // GUIDs rather than names, because the GUID is the library's identity and the name is
-        // just what it calls itself; the engine maps them through the analyzer's own table, so
-        // this repository holds no list of its own to fall behind.
+        // just what it calls itself. The engine maps known Office libraries through the
+        // analyzer's table and uses the snapshots below for other referenced libraries.
         if (referenceGuids is { Length: > 0 })
         {
             payload["referenceGuids"] = referenceGuids;
+        }
+
+        if (referenceLibraries is { Length: > 0 })
+        {
+            payload["referenceLibraries"] = referenceLibraries;
         }
 
         var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);

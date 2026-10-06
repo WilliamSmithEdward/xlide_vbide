@@ -29,7 +29,8 @@ internal sealed record ProjectSnapshot(
     int Generation,
     EngineModule[] Modules,
     string? ConditionalConstants = null,
-    string[]? ReferenceGuids = null);
+    string[]? ReferenceGuids = null,
+    EngineReferenceLibrary[]? ReferenceLibraries = null);
 
 /// <summary>
 /// One of a project's type library references, as the reference declares itself.
@@ -44,7 +45,7 @@ internal sealed record ProjectSnapshot(
 /// because the compiler cannot use it either, but it is reported here: a project whose Word
 /// reference is broken and one that never had it look identical from the findings alone.
 /// </param>
-internal readonly record struct ProjectReference(string Name, string LibraryId, bool Broken);
+internal readonly record struct ProjectReference(string Name, string LibraryId, bool Broken, string FullPath = "");
 
 /// <summary>
 /// Reads module sources out of the editor.
@@ -508,8 +509,10 @@ internal static class ProjectReader
             var constants = SavedModules.For(SavedPathOf(project))?.ConditionalConstants;
 
             var (id, displayName) = Identity(project);
+            var references = ReferencesOf(project);
             return new ProjectSnapshot(
-                id, displayName, generation, [.. modules], constants, ReferenceGuidsOf(project));
+                id, displayName, generation, [.. modules], constants,
+                ReferenceGuidsOf(references), ReferenceTypeLibraryModels.For(references));
         }
         catch (Exception ex)
         {
@@ -560,10 +563,18 @@ internal static class ProjectReader
                     // its name is all that comes back. Reading GUID off one raises, which is
                     // what the per-entry catch below would otherwise swallow into nothing.
                     var broken = reference.GetBool("IsBroken");
+                    var path = string.Empty;
+                    if (!broken)
+                    {
+                        try { path = reference.GetString("FullPath") ?? string.Empty; }
+                        catch (Exception) { /* A readable GUID remains useful without a path. */ }
+                    }
+
                     found.Add(new ProjectReference(
                         reference.GetString("Name") ?? string.Empty,
                         broken ? string.Empty : reference.GetString("GUID") ?? string.Empty,
-                        broken));
+                        broken,
+                        path));
                 }
                 catch (Exception ex)
                 {
@@ -584,9 +595,9 @@ internal static class ProjectReader
     /// The GUIDs to tell the engine about: the resolvable references, which are the ones the
     /// compiler itself can use. Null when there are none, so the seed carries no empty field.
     /// </summary>
-    private static string[]? ReferenceGuidsOf(DispatchObject project)
+    private static string[]? ReferenceGuidsOf(ProjectReference[] references)
     {
-        var guids = ReferencesOf(project)
+        var guids = references
             .Where(one => !one.Broken && one.LibraryId.Length > 0)
             .Select(one => one.LibraryId)
             .ToArray();

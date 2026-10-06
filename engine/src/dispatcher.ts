@@ -10,7 +10,7 @@ import { hostApp, setHostApp } from './hostApp.js';
 import { analyzerKnowledge, objectModelKnowledge } from './knowledge.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
-import { referencedHostTokens } from '../../../xlide_vscode/src/analyzer/host/hostLibraries';
+import { hostTokenForLibid } from '../../../xlide_vscode/src/analyzer/host/hostLibraries';
 import {
     DIAGNOSTIC_RULES,
     STRUCTURAL_DIAGNOSTIC_RULES,
@@ -25,6 +25,7 @@ import {
     projectProcedureSignatures,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { analyzerInputFor } from './analyzerInput.js';
+import { registerReferenceLibraries } from './referenceLibraries.js';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
@@ -134,25 +135,30 @@ function presentationTagFor(code: string | undefined): 'unnecessary' | undefined
  * The applications a project's references bring in, as host tokens, minus its own host.
  *
  * The add-in sends the GUIDs its references declare, because a GUID is a library's identity and
- * its name is only what it calls itself. Which GUID is Word is the ANALYZER's fact: its table is
- * used here rather than copied, so a library modelled upstream tomorrow needs no change in this
- * repository, and one it has no model for - stdole, a third-party DLL - maps to nothing and is
- * silently ignored, which is the honest answer for it.
+ * its name is only what it calls itself. The analyzer maps known Office GUIDs; for other
+ * referenced libraries, the host sends a snapshot of the actual type library it loaded.
  */
 function referencedHostsFor(
     host: string | undefined,
     guids: readonly string[] | undefined,
+    custom: ReadonlyMap<string, string>,
 ): readonly string[] {
     if (guids === undefined || guids.length === 0) {
         return [];
     }
 
-    // referencedHostTokens takes what a dir stream declares: a name and a libid. A bare GUID is
-    // a libid as far as the mapping is concerned - it reads the braced GUID out of whatever it
-    // is given - and the name is unused by it.
-    return referencedHostTokens(
-        host as Parameters<typeof referencedHostTokens>[0],
-        guids.map((guid) => ({ name: '', libid: guid })));
+    // Keep the reference list's order. A custom typelib and a modelled Office library can share
+    // a bare type name, and the earlier reference is the one VBA resolves.
+    const seen = new Set([host]);
+    const out: string[] = [];
+    for (const guid of guids) {
+        const token = hostTokenForLibid(guid) ?? custom.get(guid.toUpperCase());
+        if (token && !seen.has(token)) {
+            out.push(token);
+            seen.add(token);
+        }
+    }
+    return out;
 }
 
 function liveKey(projectId: string, moduleName: string): string {
@@ -600,9 +606,10 @@ export class Dispatcher {
         // not per project, so they are held here and attached to every request for this project
         // below. Mapped through the analyzer's own table - the GUIDs this repository sends are
         // identities, and which one is Word is upstream's fact to know.
+        const customLibraries = registerReferenceLibraries(params.referenceLibraries, params.referenceGuids);
         this.referencedHosts.set(
             params.projectId,
-            referencedHostsFor(hostApp(), params.referenceGuids));
+            referencedHostsFor(hostApp(), params.referenceGuids, customLibraries));
 
         this.generations.set(params.projectId, params.generation);
         this.seededModules.set(params.projectId, modules.map((module) => ({ ...module })));
