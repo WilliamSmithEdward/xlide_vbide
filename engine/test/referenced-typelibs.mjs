@@ -92,9 +92,13 @@ try {
   const bare = await complete('without-libraries', source.replace('x.Pattern = "A"', 'x.'), 'x.');
   assert.ok(!bare.includes('Pattern') && !bare.includes('Test'));
 
-  await open('untrusted-model', [SCRIPTING], [libraries[1]]);
-  const untrusted = await diagnostics('untrusted-model');
-  assert.ok(untrusted.some((item) => item.code === 'undeclared-variable' && /ForAppending/.test(item.message)));
+  // v11.0.2 ships a pinned Scripting model. A referenced known library remains usable even
+  // when the host's type-library snapshot is unavailable; the GUID still gates its scope.
+  await open('missing-snapshot', [SCRIPTING], [libraries[1]]);
+  const fromBuiltin = await diagnostics('missing-snapshot');
+  assert.ok(!fromBuiltin.some((item) => item.code === 'undeclared-variable' && /ForAppending/.test(item.message)));
+  const builtinMembers = await complete('missing-snapshot', source.replace('y.FileExists("x")', 'y.'), 'y.');
+  assert.ok(builtinMembers.includes('FileExists') && builtinMembers.includes('GetFile'));
 
   console.log('Referenced type-library completion and constants: passed');
 } finally {
