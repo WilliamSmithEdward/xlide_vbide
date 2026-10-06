@@ -1359,27 +1359,34 @@ body.live-resize .minimap {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
-/* Monaco puts the editor context menu in a shadow root. The menu's inline colours use
-   --vscode-menu-* variables, but the shadow host sits outside the themed editor. Give the
-   host those variables so they inherit into the shadow root; document CSS cannot select
-   the menu itself. */
+/* Monaco puts the editor context menu in a shadow root outside the themed editor. Its
+   surface uses menu variables; its border also needs a stroke width, and its focused row
+   uses list-hover variables. Supply them on the host so they inherit into the shadow root;
+   document CSS cannot select the menu itself. */
 .shadow-root-host {
+  --vscode-strokeThickness: 1px;
   --vscode-menu-background: #252526;
   --vscode-menu-foreground: #f0f0f0;
-  --vscode-menu-border: #3c3c3c;
-  --vscode-menu-selectionBackground: #094771;
+  --vscode-menu-border: #6b747d;
+  --vscode-menu-selectionBackground: #176da5;
   --vscode-menu-selectionForeground: #ffffff;
+  --vscode-menu-selectionBorder: #8ac8f5;
   --vscode-menu-separatorBackground: #3c3c3c;
+  --vscode-list-hoverBackground: #176da5;
+  --vscode-list-hoverForeground: #ffffff;
 }
 
 @media (prefers-color-scheme: light) {
   .shadow-root-host {
     --vscode-menu-background: #ffffff;
     --vscode-menu-foreground: #1b1b1f;
-    --vscode-menu-border: #d9d9de;
-    --vscode-menu-selectionBackground: #cce8ff;
+    --vscode-menu-border: #858c96;
+    --vscode-menu-selectionBackground: #91c8f3;
     --vscode-menu-selectionForeground: #1b1b1f;
+    --vscode-menu-selectionBorder: #3178b8;
     --vscode-menu-separatorBackground: #d9d9de;
+    --vscode-list-hoverBackground: #91c8f3;
+    --vscode-list-hoverForeground: #1b1b1f;
   }
 }
 

@@ -40,25 +40,52 @@ const inspect = `(() => {
     clientX: rect.x + 100, clientY: rect.y + 40, button: 2 }));
   const root = document.querySelector('.shadow-root-host')?.shadowRoot;
   const menu = root?.querySelector('.context-view.monaco-menu-container > .monaco-scrollable-element');
+  const frame = root?.querySelector('.monaco-menu');
   const label = root?.querySelector('.monaco-menu .action-menu-item');
+  const labelRect = label?.getBoundingClientRect();
   return { visible: !!menu, background: menu && getComputedStyle(menu).backgroundColor,
-    foreground: label && getComputedStyle(label).color };
+    foreground: label && getComputedStyle(label).color,
+    borderWidth: frame && getComputedStyle(frame).borderTopWidth,
+    borderColor: frame && getComputedStyle(frame).borderTopColor,
+    hoverAt: labelRect && { x: labelRect.x + 20, y: labelRect.y + labelRect.height / 2 } };
+})()`;
+const inspectHover = `(() => {
+  const root = document.querySelector('.shadow-root-host')?.shadowRoot;
+  const item = root?.querySelector('.action-item.focused .action-menu-item');
+  const style = item && getComputedStyle(item);
+  return { selected: !!item, background: style?.backgroundColor, foreground: style?.color,
+    outlineWidth: style?.outlineWidth, outlineColor: style?.outlineColor };
 })()`;
 
 try {
-  for (const [scheme, background, foreground] of [
-    ['dark', 'rgb(37, 37, 38)', 'rgb(240, 240, 240)'],
-    ['light', 'rgb(255, 255, 255)', 'rgb(27, 27, 31)'],
+  for (const [scheme, background, foreground, border, hoverBackground, hoverForeground, hoverOutline] of [
+    ['dark', 'rgb(37, 37, 38)', 'rgb(240, 240, 240)',
+      'rgb(107, 116, 125)', 'rgb(23, 109, 165)', 'rgb(255, 255, 255)', 'rgb(138, 200, 245)'],
+    ['light', 'rgb(255, 255, 255)', 'rgb(27, 27, 31)',
+      'rgb(133, 140, 150)', 'rgb(145, 200, 243)', 'rgb(27, 27, 31)', 'rgb(49, 120, 184)'],
   ]) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
     const found = await api.ask(inspect);
-    if (!found?.visible || found.background !== background || found.foreground !== foreground) {
-      throw new Error(`${scheme} context menu: ${JSON.stringify(found)}; expected ${background} and ${foreground}`);
+    if (!found?.visible || found.background !== background || found.foreground !== foreground
+      || found.borderWidth !== '1px' || found.borderColor !== border) {
+      throw new Error(`${scheme} context menu surface: ${JSON.stringify(found)}`);
     }
-    console.log(`${scheme} context menu: opaque ${found.background}, readable ${found.foreground}`);
+    // Move out first so a previous scheme's pointer position cannot keep the same row hovered.
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 20, button: 'none' });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...found.hoverAt, button: 'none' });
+    const hovered = await api.ask(inspectHover);
+    if (!hovered?.selected || hovered.background !== hoverBackground
+      || hovered.foreground !== hoverForeground || hovered.outlineWidth !== '1px'
+      || hovered.outlineColor !== hoverOutline) {
+      throw new Error(`${scheme} context menu hover: ${JSON.stringify(hovered)}`);
+    }
+    console.log(`${scheme} context menu: opaque ${found.background}, ${found.borderWidth} border,`
+      + ` hover ${hovered.background} with ${hovered.outlineColor} outline`);
   }
-  console.log('RESULT: PASS - live context menu in dark and light themes');
+  console.log('RESULT: PASS - live context menu surface, border, and hover in both themes');
 } finally {
   await cdp('Emulation.setEmulatedMedia', { features: [] });
+  const closed = new Promise((resolve) => { socket.onclose = resolve; });
   socket.close();
+  await closed;
 }
