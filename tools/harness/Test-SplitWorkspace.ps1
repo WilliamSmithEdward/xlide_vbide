@@ -331,12 +331,10 @@ Check 'a drop on a compass zone lands in that zone, and only there' {
     $r -eq 'top,left,stayed'
 }
 
-Check 'the preview shows the section it would join, and a drag ends when focus leaves' {
-    # An edge whose section already stands is a JOIN, and the preview is that section's own
-    # bounds - painting half the editor there described a drop that would not happen. An
-    # edge with no section is a NEW one, dashed, because the shape is a proposal. And a drag
-    # that loses the window - alt-tab, a screenshot tool, the host stealing focus, which
-    # this host does freely - must end, or the dim and compass outlive it (2026-08-06).
+Check 'the preview shows a separate editor-adjacent group, and a drag ends when focus leaves' {
+    # An editor-edge drop creates a separate group, even when the dock already stands.
+    # At the bottom it previews the upper half of that dock, beside the editor. A drag
+    # that loses focus must still remove its dim, compass and preview.
     $r = Page @'
 (() => {
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: x, clientY: y, button: 0, buttons: type === "pointerup" ? 0 : 1, bubbles: true, cancelable: true }));
@@ -360,7 +358,8 @@ Check 'the preview shows the section it would join, and a drag ends when focus l
     const kind = ov.className.includes("drop-overlay-join") ? "join" : "new";
     if (dock.hidden) return zone + ":" + kind;
     const a = ov.getBoundingClientRect(), b = dock.getBoundingClientRect();
-    const fits = Math.abs(a.y - b.y) < 2 && Math.abs(a.height - b.height) < 2;
+    const fits = Math.abs(a.x - b.x) < 2 && Math.abs(a.width - b.width) < 2
+      && Math.abs(a.y - b.y) < 2 && Math.abs(a.height - b.height / 2) < 2;
     return zone + ":" + kind + (fits ? ":fits" : ":stray");
   };
 
@@ -371,7 +370,7 @@ Check 'the preview shows the section it would join, and a drag ends when focus l
   return bottom + "|" + (cleared ? "cleared" : "stuck");
 })()
 '@
-    $r -eq 'bottom:join:fits|cleared'
+    $r -eq 'bottom:new:fits|cleared'
 }
 
 Check 'a pane tab reorders within its own strip, and the order persists' {
