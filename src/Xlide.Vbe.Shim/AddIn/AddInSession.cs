@@ -6079,6 +6079,8 @@ internal sealed partial class AddInSession : IDisposable
         // heartbeat means blocked only while something should be watching (see doctor).
         PerfCounters.Beat();
 
+        WatchNativeUnlockPrompt();
+
         /*
          * THE IDLE TIER IS A WORKSPACE WATCH, NOT A DEBUG POLL, and everything below this is
          * the debug poll.
@@ -9385,6 +9387,12 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
     private void RunCommand(string name, string? project)
     {
+        if (string.Equals(name, "unlockProject", StringComparison.Ordinal))
+        {
+            OpenNativeExplorerForUnlock(project);
+            return;
+        }
+
         /*
          * A DIALOG RAISED FROM A WORKBOOK'S ROW IS ABOUT THAT WORKBOOK.
          *
@@ -10259,18 +10267,29 @@ internal sealed partial class AddInSession : IDisposable
 
             var tree = new List<SurfaceProject>(projectCount);
             var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var readable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var locked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var i = 1; i <= projectCount; i++)
             {
                 using var project = projects!.GetItem(i);
-
-                // A LOCKED PROJECT STOPPED THE WHOLE TREE. Its components raise rather than
-                // answer, the raise left this loop, and the catch below published nothing - so
-                // opening Office's own Analysis ToolPak VBA add-in froze the explorer on whatever
-                // it last showed, for as long as the add-in stayed open (2026-09-22). It has
-                // nothing to show here, so it is passed over, as the analysis and the projects
-                // route already pass it over.
-                if (project is null || ProjectReader.IsLocked(project))
+                if (project is null)
                 {
+                    continue;
+                }
+
+                var identity = ProjectReader.Identity(project).Id;
+                var display = numbered[i - 1];
+                _projectNames[identity] = display;
+                live.Add(identity);
+
+                // The protected project's components cannot be read, but its name and Protection
+                // can. Keep the project row so the developer can ask the native VBE to unlock it.
+                // Still avoid VBComponents here: it raises on a locked project and one refusal used
+                // to prevent the entire tree from being published.
+                if (ProjectReader.IsLocked(project))
+                {
+                    locked.Add(identity);
+                    tree.Add(new SurfaceProject(display, [], Locked: true));
                     continue;
                 }
 
@@ -10280,9 +10299,10 @@ internal sealed partial class AddInSession : IDisposable
                     continue;
                 }
 
+                readable.Add(identity);
+
                 // The folder rides each component (#23): from the cache the analysis pass fills,
                 // or a one-time read of the declarations for a module no pass has described.
-                var identity = ProjectReader.Identity(project).Id;
                 var members = new List<SurfaceComponent>();
                 ForEachRealComponent(project, (component, name) =>
                     members.Add(new SurfaceComponent(name, component.GetInt32("Type"), FolderOf(identity, component, name))));
@@ -10295,14 +10315,15 @@ internal sealed partial class AddInSession : IDisposable
                 // The NUMBERED name, from the pass above, so the tree and the title bar call a
                 // workbook the same thing. A name only the tree knew would leave the title bar
                 // saying "VBAProject" for both of two workbooks the tree had told apart.
-                var display = numbered[i - 1];
-                _projectNames[ProjectReader.Identity(project).Id] = display;
-
                 tree.Add(new SurfaceProject(display, [.. members]));
-                live.Add(ProjectReader.Identity(project).Id);
             }
 
             surface.ShowProjects([.. tree]);
+
+            if (_nativeExplorerUnlockProject is { } unlocking && !locked.Contains(unlocking))
+            {
+                CloseNativeExplorerAfterUnlock();
+            }
 
             // What the tree now shows, for the watch to compare against. Every publish writes
             // it, whoever asked, so a change a gesture in here has already republished for is
@@ -10326,11 +10347,128 @@ internal sealed partial class AddInSession : IDisposable
             // The tree is where a file opening or closing is noticed, so it is where the Tests
             // pane hears about either: its own picture is merged per analysis snapshot, and
             // neither event produces one.
-            ReconcileTestFiles(live);
+            ReconcileTestFiles(readable);
         }
         catch (Exception ex)
         {
             Log.Error("explorer: the project tree could not be read", ex);
+        }
+    }
+
+    /// <summary>The project whose password prompt needs the native Project Explorer.</summary>
+    private string? _nativeExplorerUnlockProject;
+    private bool _nativeUnlockPromptSeen;
+
+    /// <summary>
+    /// VBA exposes Protection as read-only. Its password prompt belongs to the native Project
+    /// Explorer, so a locked XLIDE row temporarily exposes the native editor. The Project
+    /// Explorer is normally behind XLIDE's canvas; hiding the canvas lets the developer expand
+    /// the project and enter the password in VBE's own dialog.
+    /// </summary>
+    private void OpenNativeExplorerForUnlock(string? display)
+    {
+        using var project = FindProjectByDisplayName(display);
+        if (project is null)
+        {
+            _editorSurface?.Notify("That VBA project is no longer open.");
+            return;
+        }
+
+        if (!ProjectReader.IsLocked(project))
+        {
+            PublishProjects();
+            return;
+        }
+
+        if (display is null || !ActivateProject(display))
+        {
+            _editorSurface?.Notify("The locked VBA project could not be selected.");
+            return;
+        }
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is null || window.GetInt32("Type") != 6)
+                {
+                    continue;
+                }
+
+                _nativeExplorerUnlockProject = ProjectReader.Identity(project).Id;
+                _nativeUnlockPromptSeen = false;
+                window.SetBool("Visible", true);
+                SetNativeChromeBands(visible: true);
+                _editorSurface?.Follow(default, visible: false);
+                if (_frame != 0)
+                {
+                    Win32.SetForegroundWindow(_frame);
+                }
+                return;
+            }
+
+            _nativeExplorerUnlockProject = null;
+            _editorSurface?.Notify("The VBE Project Explorer is unavailable in this host.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("unlock: native Project Explorer could not be opened", ex);
+            CloseNativeExplorerAfterUnlock();
+            _editorSurface?.Notify("The VBE Project Explorer could not be opened.");
+        }
+    }
+
+    private void CloseNativeExplorerAfterUnlock()
+    {
+        _nativeExplorerUnlockProject = null;
+        _nativeUnlockPromptSeen = false;
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is not null && window.GetInt32("Type") == 6 && window.GetBool("Visible"))
+                {
+                    window.SetBool("Visible", false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"unlock: native Project Explorer could not be hidden ({ex.GetType().Name})");
+        }
+
+        RefreshSurfacePlacement();
+    }
+
+    /// <summary>Return to XLIDE after the native password dialog is accepted or cancelled.</summary>
+    private void WatchNativeUnlockPrompt()
+    {
+        if (_nativeExplorerUnlockProject is null)
+        {
+            return;
+        }
+
+        if (CodePaneTracker.FindTopLevelByCaption("VBAProject Password") != 0)
+        {
+            _nativeUnlockPromptSeen = true;
+            return;
+        }
+
+        if (_nativeUnlockPromptSeen)
+        {
+            // Accept changes Protection; Cancel does not. Both dismiss the prompt, and in both
+            // cases the developer should return to XLIDE rather than be stranded in native VBE.
+            PublishProjects();
+            if (_nativeExplorerUnlockProject is not null)
+            {
+                CloseNativeExplorerAfterUnlock();
+            }
         }
     }
 
@@ -11900,7 +12038,7 @@ internal sealed partial class AddInSession : IDisposable
     private void PlaceSurfaceFast()
     {
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0
-            || !Win32.IsWindowVisible(_frame))
+            || !Win32.IsWindowVisible(_frame) || _nativeExplorerUnlockProject is not null)
         {
             return;
         }
@@ -11936,6 +12074,10 @@ internal sealed partial class AddInSession : IDisposable
     {
         if (_frame != 0 && !Win32.IsWindowVisible(_frame))
         {
+            // Closing or minimizing the native editor abandons an unfinished unlock handoff.
+            // The next show must bring XLIDE back even if no password prompt was ever opened.
+            _nativeExplorerUnlockProject = null;
+            _nativeUnlockPromptSeen = false;
             // The full pass takes its hide branch before any object-model call.
             RefreshSurfacePlacement();
             return;
@@ -11951,6 +12093,12 @@ internal sealed partial class AddInSession : IDisposable
         {
             Log.Verbose($"placement: skipped (surface {(_editorSurface is null ? "none" : "up")}, " +
                         $"shown {_surfaceShown}, frame {_frame:X}, documents {_documentArea:X})");
+            return;
+        }
+
+        if (_nativeExplorerUnlockProject is not null)
+        {
+            _editorSurface.Follow(default, visible: false);
             return;
         }
 
@@ -12093,6 +12241,11 @@ internal sealed partial class AddInSession : IDisposable
                 using var window = windows!.GetItem(i);
                 var type = window?.GetInt32("Type") ?? -1;
                 if (window is null || type is not (2 or 3 or 4 or 6 or 7))
+                {
+                    continue;
+                }
+
+                if (type == 6 && _nativeExplorerUnlockProject is not null)
                 {
                     continue;
                 }

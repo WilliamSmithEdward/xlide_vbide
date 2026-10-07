@@ -59,6 +59,8 @@ export type ExplorerView = EditorSettings["explorerView"];
 export interface ExplorerProject {
   name: string;
   components: ExplorerComponent[];
+  /** The VBE will not expose components until its own password prompt unlocks this project. */
+  locked?: boolean;
 }
 
 /** One procedure of a module: the kind as the tree spells it, and its 1-based line. */
@@ -82,6 +84,7 @@ export interface ExplorerSnapshot {
   currentProcedure: { module: string; project: string | null; name: string; line: number } | null;
   projects: {
     name: string;
+    locked: boolean;
     expanded: boolean;
     /** Every folder the project's annotations make, parents first, whether the folder view is showing or not. */
     folders: { path: string; expanded: boolean; modules: number }[];
@@ -133,6 +136,8 @@ export interface ExplorerHandlers {
   projectContext(project: string, x: number, y: number): void;
   /** The developer pressed a project's plus: what can be added to it, under the button. */
   projectAdd(project: string, x: number, y: number): void;
+  /** Open the native VBE Project Explorer for its password prompt. */
+  unlockProject(project: string): void;
   /** A module's procedures, for its unfolded node; null when no answer came. */
   outline(module: string, project?: string): Promise<ExplorerProcedure[] | null>;
   /** A procedure was picked: go to its line in its module, in its project. */
@@ -364,6 +369,10 @@ export class Explorer {
 
       const project = this.projectAt(event);
       if (project) {
+        if (this.isProjectLocked(project)) {
+          this.handlers.unlockProject(project);
+          return;
+        }
         this.expandedProjects.set(project, !(this.expandedProjects.get(project) ?? false));
         this.render();
       }
@@ -398,6 +407,10 @@ export class Explorer {
       if (row.classList?.contains("tree-project") && row.dataset.project) {
         event.preventDefault();
         const project = row.dataset.project;
+        if (this.isProjectLocked(project)) {
+          this.handlers.unlockProject(project);
+          return;
+        }
         this.expandedProjects.set(project, !(this.expandedProjects.get(project) ?? false));
         this.render();
 
@@ -780,7 +793,8 @@ export class Explorer {
       currentProcedure: this.currentProcedure === null ? null : { ...this.currentProcedure },
       projects: this.projects.map((project) => ({
         name: project.name,
-        expanded: this.expandedProjects.get(project.name) ?? false,
+        locked: project.locked === true,
+        expanded: !project.locked && (this.expandedProjects.get(project.name) ?? false),
         folders: allFolders(this.folderTreeOf(project)).map((folder) => ({
           path: folder.path,
           expanded: this.isFolderExpanded(project.name, folder.path),
@@ -877,13 +891,17 @@ export class Explorer {
 
   /** Opens or shuts a project the way its row does, for a script that would otherwise click. */
   setProjectExpanded(named: string, open: boolean): boolean {
-    if (!this.projects.some((project) => project.name === named)) {
+    if (!this.projects.some((project) => project.name === named && !project.locked)) {
       return false;
     }
 
     this.expandedProjects.set(named, open);
     this.render();
     return true;
+  }
+
+  isProjectLocked(named: string): boolean {
+    return this.projects.find((project) => project.name === named)?.locked === true;
   }
 
   /** Unfolds a module's procedures the way its chevron does. */
@@ -997,8 +1015,8 @@ export class Explorer {
     this.drawnView = view;
 
     for (const project of this.projects) {
-      const isOpen = this.expandedProjects.get(project.name) ?? false;
-      this.root.appendChild(this.projectRow(project.name, isOpen));
+      const isOpen = !project.locked && (this.expandedProjects.get(project.name) ?? false);
+      this.root.appendChild(this.projectRow(project, isOpen));
 
       if (!isOpen) {
         continue;
@@ -1119,17 +1137,20 @@ export class Explorer {
    * plus off the edge of a narrow pane, because a control that is only sometimes reachable is worse
    * than a name that is only sometimes complete, and the full name is on the row's tooltip.
    */
-  private projectRow(name: string, isOpen: boolean): HTMLElement {
+  private projectRow(project: ExplorerProject, isOpen: boolean): HTMLElement {
+    const { name } = project;
+    const locked = project.locked === true;
     const row = document.createElement("div");
-    row.className = "tree-project";
+    row.className = `tree-project${locked ? " locked" : ""}`;
     row.dataset.project = name;
     row.tabIndex = 0;
-    row.title = name;
+    row.title = locked ? `${name} is locked. Open the VBE Project Explorer to enter its password.` : name;
     row.setAttribute("role", "treeitem");
     row.setAttribute("aria-expanded", String(isOpen));
+    if (locked) row.setAttribute("aria-label", `${name}, locked. Press Enter to unlock in the VBE.`);
 
     const chevron = document.createElement("span");
-    chevron.className = `codicon codicon-chevron-${isOpen ? "down" : "right"}`;
+    chevron.className = `codicon codicon-${locked ? "lock" : `chevron-${isOpen ? "down" : "right"}`}`;
     chevron.setAttribute("aria-hidden", "true");
 
     const icon = document.createElement("span");
@@ -1154,7 +1175,14 @@ export class Explorer {
     plus.setAttribute("aria-hidden", "true");
     add.appendChild(plus);
 
-    row.append(chevron, icon, label, add);
+    if (locked) {
+      const badge = document.createElement("span");
+      badge.className = "tree-kind";
+      badge.textContent = "locked";
+      row.append(chevron, icon, label, badge);
+    } else {
+      row.append(chevron, icon, label, add);
+    }
     return row;
   }
 

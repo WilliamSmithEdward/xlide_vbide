@@ -295,6 +295,7 @@ export class Shell {
       context: (name, kind, x, y, project) => this.componentMenu(name, kind, x, y, project),
       projectContext: (project, x, y) => this.projectMenu(project, x, y),
       projectAdd: (project, x, y) => showContextMenu(x, y, this.newComponentItems(project)),
+      unlockProject: (project) => this.hostCommand("unlockProject", project),
       outline: (module, project) => handlers.requestOutline(module, project),
       openProcedure: (module, line, project) => handlers.navigate(module, line, 1, true, project),
       openDesigner: (module, project) => handlers.openDesigner(module, project),
@@ -1736,6 +1737,12 @@ export class Shell {
    * nothing else on the row can reach them.
    */
   private projectMenu(project: string, x: number, y: number): void {
+    if (this.explorer.isProjectLocked(project)) {
+      showContextMenu(x, y, [
+        { label: "Unlock in VBE...", run: () => this.hostCommand("unlockProject", project) },
+      ]);
+      return;
+    }
     showContextMenu(x, y, [
       { label: "References...", run: () => this.hostCommand("references", project) },
       { label: "Project Properties...", run: () => this.hostCommand("projectProperties", project) },
