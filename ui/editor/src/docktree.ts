@@ -164,6 +164,19 @@ export function splitBeside<T>(
   return replace(root);
 }
 
+/** Put a separate group along an entire tree's edge, preserving existing groups and ratios. */
+export function splitAtEdge<T>(root: TreeNode<T>, side: SplitSide, newcomer: TreeGroup<T>): TreeSplit<T> {
+  const direction = side === "left" || side === "right" ? "row" : "column";
+  const first = side === "left" || side === "top";
+  const children = root.kind === "split" && root.direction === direction ? root.children : [root];
+  const sizes = root.kind === "split" && root.direction === direction ? root.sizes.map(size => size / 2) : [0.5];
+  return {
+    kind: "split", direction,
+    children: first ? [newcomer, ...children] : [...children, newcomer],
+    sizes: first ? [0.5, ...sizes] : [...sizes, 0.5],
+  };
+}
+
 /**
  * Moves a divider inside a split: the pair it sits between trade space, and neither may go
  * below a minimum expressed as a fraction of the whole. Only the pair changes, so everything
