@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
@@ -2565,9 +2566,9 @@ internal sealed partial class AddInSession : IDisposable
     /// Null means it was written. Anything else is what went wrong, in words, for the caller to
     /// show and for the door to answer with.
     ///
-    /// Writing resets the project, which discards any running state. That is what the host's own
-    /// editor does when a module is edited, so it is parity rather than a regression, and it is
-    /// why this is debounced rather than done per keystroke.
+    /// Some writes reset a stopped project, so break-mode writes are limited below to a single
+    /// statement line after the current stop. Ordinary writes are debounced rather than sent per
+    /// keystroke.
     /// </summary>
     /// <param name="keepEveryCharacter">
     /// Refuse the write, and put back what the module held, if the host converts a character on
@@ -2597,33 +2598,14 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
-            // A STOPPED PROJECT CANNOT BE EDITED, and asking anyway is not a harmless failure.
-            //
-            // The editor answers an edit made in break mode by asking "This action will reset
-            // your project, proceed anyway?" - a real question, which anything answering dialogs
-            // on our behalf declines, so the write comes back as a bare COM error naming nothing
-            // that happened. And it keeps being asked: a random walk that wrote while stopped
-            // raised and cancelled that dialog over and over, and the editor eventually faulted
-            // in VBE7.DLL with 0xc0000005 and took Excel with it (issue #6, chaos.mjs).
-            //
-            // Refusing is also the only answer here that cannot lose anything. Proceeding means
-            // agreeing to reset the developer's debugging session - their call stack, their
-            // locals, the run they stopped on purpose - and that is theirs to decide.
-            //
-            // Read fresh rather than taken from _inBreak, which is as old as the last poll. The
-            // evaluator learned the same lesson: acting on the cached flag put work into a
-            // stopped project "in ways that have nothing to do with what the developer typed".
-            if (ProjectModeNow() != DesignMode)
+            // Read fresh rather than trusting _inBreak, which is as old as the last poll. Running
+            // code still cannot be edited. A stopped project can accept some edits without losing
+            // its stack; the narrow, proven case is checked against the actual stop below.
+            var mode = ProjectModeNow();
+            if (mode != DesignMode && mode != BreakMode)
             {
-                Log.Warn($"write: {component} not written - the project is stopped in the debugger");
-
-                // NAMES THE WAY OUT, and names it for both kinds of caller. A developer presses
-                // Reset; a caller driving the door has no hands, and a message that only says
-                // "press Reset" leaves it wedged with no move to make. The route exists, so it
-                // is said here rather than left to be discovered.
-                return $"{component} was not written: the project is stopped in the debugger. "
-                    + "Editing now would reset it and lose the run, so it was not attempted. "
-                    + "Press Reset in the editor, or POST command?name=reset, and write again.";
+                return $"{component} was not written while the project is running. "
+                    + "Break or Reset the run, then write again.";
             }
 
             // A write is normally about the module on the surface, so it goes to the shown
@@ -2703,9 +2685,11 @@ internal sealed partial class AddInSession : IDisposable
             // So the module is asked what it holds instead: one read, about 40ms at that size,
             // against seconds of reparse. The import path has already read it for its
             // all-or-nothing check, and that copy is used rather than read again.
-            var baseline = _writtenModules.TryGetValue(writtenKey, out var known)
-                ? known
-                : wasHoldingBefore ?? ProjectReader.ReadSource(found);
+            var baseline = mode == BreakMode
+                ? ProjectReader.ReadSource(found)
+                : _writtenModules.TryGetValue(writtenKey, out var known)
+                    ? known
+                    : wasHoldingBefore ?? ProjectReader.ReadSource(found);
 
             // Declared out here because the call below is short-circuited: with no baseline there
             // is no diff to attempt and no window to hear about.
@@ -2716,8 +2700,20 @@ internal sealed partial class AddInSession : IDisposable
             // texts and deciding what to write - and `took` is the editor's, taking it. A write
             // that is slow in the first is a bug here; one slow in the second is what the editor
             // charges for the module's size.
+            Core.Editor.LineDiff breakChange = default;
+            if (mode == BreakMode && (baseline is null
+                || !BreakModeLineEdit(baseline, text, component, foundOwner ?? owner, out breakChange)))
+            {
+                Log.Warn($"write: {component} not written - this break-mode change is not a single statement below the stop");
+                return $"{component} was not written while stopped: only a single statement line "
+                    + "below the current stop can be changed without risking a debugger reset. "
+                    + "Press Reset in the editor, or POST command?name=reset, and write again.";
+            }
+
             var diffing = System.Diagnostics.Stopwatch.StartNew();
-            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text, out windows);
+            var wroteDiff = mode == BreakMode
+                ? TryWriteBreakModeLine(module, breakChange, out windows)
+                : baseline is not null && TryWriteLineDiff(module, baseline, text, out windows);
             diffing.Stop();
 
             if (!wroteDiff)
@@ -3008,6 +3004,49 @@ internal sealed partial class AddInSession : IDisposable
     /// <see cref="WriteModule"/>. Null when nothing was written at all.
     /// </summary>
     private sealed record LineWindow(int At, int Count, int TotalLines, string Text);
+
+    /// <summary>
+    /// A paused VBA procedure can take an ordinary statement replacement after its current line
+    /// without losing the run. Structural edits can instead prompt to reset the project, and a
+    /// COM caller cannot answer that prompt safely. Keep this path deliberately narrow.
+    /// </summary>
+    private bool BreakModeLineEdit(string baseline, string text, string component, string? owner,
+        out Core.Editor.LineDiff change)
+    {
+        change = Core.Editor.LineDiff.Between(baseline, text, 1);
+        if (change.Change == Core.Editor.LineChange.Identical) return true;
+        if (change.Change != Core.Editor.LineChange.Window
+            || change.Removing != 1 || change.Inserting != 1
+            || change.Text.Contains('\n') || change.Removed.Contains('\n')
+            || !string.Equals(owner, _shownProject, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var stop = _lastStopFollowed;
+        var colon = stop?.LastIndexOf(':') ?? -1;
+        if (colon < 0 || !string.Equals(stop![..colon], component, StringComparison.OrdinalIgnoreCase)
+            || !int.TryParse(stop[(colon + 1)..], out var stopLine) || change.At <= stopLine)
+            return false;
+
+        // Declarations and block boundaries may change the compiled frame. Let the developer
+        // Reset explicitly for those rather than triggering VBE's modal reset question.
+        const string structural = @"^(?:#|Attribute\b|Option\b|Public\b|Private\b|Friend\b|Static\b|Dim\b|Const\b|Declare\b|Event\b|ReDim\b|Sub\b|Function\b|Property\b|End\b|Else\b|ElseIf\b|Case\b|If\b|For\b|Do\b|While\b|With\b|Select\b|Next\b|Loop\b|Wend\b|Type\b|Enum\b|Implements\b|On\s+Error\b|Exit\b|GoTo\b|Stop\b|Resume\b)";
+        return !Regex.IsMatch(change.Removed.TrimStart(), structural, RegexOptions.IgnoreCase)
+            && !Regex.IsMatch(change.Text.TrimStart(), structural, RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryWriteBreakModeLine(DispatchObject module, Core.Editor.LineDiff change,
+        out IReadOnlyList<LineWindow>? wrote)
+    {
+        if (change.Change == Core.Editor.LineChange.Identical)
+        {
+            wrote = [];
+            return true;
+        }
+
+        module.Invoke("ReplaceLine", change.At, change.Text);
+        wrote = [new LineWindow(change.At, 1, change.TotalLines, change.Text)];
+        return true;
+    }
 
     private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out IReadOnlyList<LineWindow>? wrote)
     {
