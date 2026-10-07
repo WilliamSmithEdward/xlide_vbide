@@ -9,6 +9,17 @@ namespace Xlide.Vbe.Core.Tests;
 /// </summary>
 public sealed class SyncSettingsTests
 {
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("{\"Projects\":null}")]
+    public void AFirstRunOrAbsentProjectMapIsUsable(string json)
+    {
+        var settings = SyncSettings.Parse(json);
+        Assert.Empty(settings.Projects);
+        Assert.Equal(string.Empty, settings.For("fresh").Repository);
+        Assert.Equal("folder", settings.With("fresh", new SyncChoice { Folder = "folder" }).For("fresh").Folder);
+    }
     private const string ThreeKeyFile = """
         {
           "Projects": {
