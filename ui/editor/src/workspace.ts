@@ -30,6 +30,7 @@ import { docKeyOf, historyShortOf, isDesignFace, isHistoryFace, knownFace, type 
 import { groupHolding, prune, resizeAt, splitBeside, type TreeGroup, type TreeNode, type TreeSplit } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { installSplitterDrag } from "./livedrag.js";
+import { readUiPreference, watchUiPreference, writeUiPreference } from "./preferences.js";
 
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
@@ -89,6 +90,9 @@ const MIN_GROUP_SIZE = 120;
  * splitters directly, which is what the old element field actually was.
  */
 type LayoutNode = TreeNode<EditorGroup>;
+type StoredGroupGeometry = { kind: "group" } | {
+  kind: "split"; direction: "row" | "column"; children: StoredGroupGeometry[]; sizes: number[];
+};
 
 /** The leaf shape: one editor group riding docktree's group node. */
 function leafOf(group: EditorGroup): TreeGroup<EditorGroup> {
@@ -140,6 +144,8 @@ class EditorGroup {
   readonly editor: monaco.editor.IStandaloneCodeEditor;
 
   tabs: Tab[] = [];
+  /** A restored, unused split remains available for the next document opened in it. */
+  reserved = false;
   active: DocumentId | null = null;
 
   /**
@@ -573,6 +579,66 @@ export class Workspace {
     // Empty until the host says otherwise: the first publish decides.
     this.setEmpty(true);
     this.announceActive();
+    readUiPreference("editorGroups");
+    watchUiPreference("editorGroups", raw => this.restoreGeometry(raw));
+  }
+
+  private rememberGeometry(): void {
+    let active = 0, index = 0;
+    const shape = (node: LayoutNode): StoredGroupGeometry => {
+      if (node.kind === "group") {
+        if (node.tabs[0] === this.activeGroup) active = index;
+        index++;
+        return { kind: "group" };
+      }
+      return { kind: "split", direction: node.direction, sizes: node.sizes, children: node.children.map(shape) };
+    };
+    const tree = shape(this.layout);
+    writeUiPreference("editorGroups", JSON.stringify({ tree, active }));
+  }
+
+  private restoreGeometry(raw: string): void {
+    try {
+      const saved = JSON.parse(raw) as { tree: StoredGroupGeometry; active: number };
+      let leaves = 0;
+      const valid = (node: StoredGroupGeometry, depth: number): boolean => {
+        if (!node || depth > 16) return false;
+        if (node.kind === "group") return ++leaves <= 32;
+        return node.kind === "split" && (node.direction === "row" || node.direction === "column")
+          && Array.isArray(node.children) && node.children.length >= 2 && node.children.length <= 8
+          && Array.isArray(node.sizes) && node.sizes.length === node.children.length
+          && node.sizes.every(size => Number.isFinite(size) && size > 0)
+          && Number.isFinite(node.sizes.reduce((total, size) => total + size, 0))
+          && node.children.every(child => valid(child, depth + 1));
+      };
+      if (!valid(saved.tree, 0) || leaves === 0) return;
+      const active = Number.isInteger(saved.active) ? Math.max(0, Math.min(leaves - 1, saved.active)) : 0;
+      const original = this.activeGroup;
+      const oldGroups = this.groups;
+      const tabs = oldGroups.flatMap(group => group.tabs);
+      original.tabs = tabs;
+      const groups: EditorGroup[] = [];
+      let index = 0;
+      const build = (node: StoredGroupGeometry): LayoutNode => {
+        if (node.kind === "group") {
+          const group = index++ === active ? original : new EditorGroup(this);
+          group.reserved = group !== original;
+          groups.push(group);
+          return leafOf(group);
+        }
+        const sum = node.sizes.reduce((total, size) => total + size, 0);
+        return { kind: "split", direction: node.direction, sizes: node.sizes.map(size => size / sum), children: node.children.map(build) };
+      };
+      this.layout = build(saved.tree);
+      this.groups = groups;
+      for (const group of oldGroups) if (group !== original) group.dispose();
+      this.activeGroup = original;
+      this.render();
+      this.markActiveGroup();
+      this.handlers.layoutChanged();
+      this.announceActive();
+      this.rememberGeometry();
+    } catch (error) { console.warn("[xlide] editor group geometry could not be restored", error); }
   }
 
   /** The editor of the active group - what "the editor" means for every editor-wide feature. */
@@ -694,6 +760,7 @@ export class Workspace {
     });
 
     // Groups emptied by the diff dissolve; the last one stays as the empty workspace.
+    for (const group of this.groups) if (group.tabs.length > 0) group.reserved = false;
     this.dissolveEmptyGroups();
 
     // A group whose active tab closed goes back to what it was showing before it: only the
@@ -870,6 +937,7 @@ export class Workspace {
     }
 
     this.announceActive();
+    this.rememberGeometry();
   }
 
   private markActiveGroup(): void {
@@ -1027,12 +1095,11 @@ export class Workspace {
       });
     };
 
-    // No persist: a group splitter's size is not remembered across sessions, which is the one
-    // way this drag differs from the dock's.
     installSplitterDrag(splitter, {
       positionOf: (event) => (node.direction === "row" ? event.clientX : event.clientY),
       apply,
       settle: () => this.handlers.layoutChanged(),
+      persist: () => this.rememberGeometry(),
     });
 
     splitter.addEventListener("keydown", (event) => {
@@ -1043,6 +1110,7 @@ export class Workspace {
         event.preventDefault();
         apply(step);
         this.handlers.layoutChanged();
+        this.rememberGeometry();
       }
     });
 
@@ -1064,6 +1132,7 @@ export class Workspace {
     }
 
     this.render();
+    this.rememberGeometry();
     return fresh;
   }
 
@@ -1074,7 +1143,7 @@ export class Workspace {
     // between would dissolve it and strand the hint. Same for a group whose pending document
     // is still on its way.
     const spared = (group: EditorGroup): boolean =>
-      group === this.placement?.group || group.pending !== null;
+      group.reserved || group === this.placement?.group || group.pending !== null;
 
     const empty = this.groups.filter((group) => group.tabs.length === 0 && !spared(group));
     if (empty.length === 0 || this.groups.length === 1) {
@@ -1183,6 +1252,7 @@ export class Workspace {
     this.handlers.activate(id);
     this.announceActive();
     target.editor.focus();
+    this.rememberGeometry();
   }
 
   /* ------------------------------------------------------------------ drop targeting */

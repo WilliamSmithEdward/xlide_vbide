@@ -24,18 +24,22 @@ internal sealed unsafe class FrameSubclass : IDisposable
     private static FrameSubclass? _current;
 
     private readonly Action _sized;
+    private readonly Action? _settled;
+    private bool _wasMaximized;
     private nint _frame;
 
-    private FrameSubclass(nint frame, Action sized)
+    private FrameSubclass(nint frame, Action sized, Action? settled)
     {
         _frame = frame;
         _sized = sized;
+        _settled = settled;
+        _wasMaximized = Win32.IsZoomed(frame);
     }
 
     /// <summary>
     /// Installs over the frame, or returns null and lets the event route carry on alone.
     /// </summary>
-    public static FrameSubclass? Install(nint frame, Action sized)
+    public static FrameSubclass? Install(nint frame, Action sized, Action? settled = null)
     {
         ArgumentNullException.ThrowIfNull(sized);
 
@@ -51,7 +55,7 @@ internal sealed unsafe class FrameSubclass : IDisposable
             return null;
         }
 
-        var subclass = new FrameSubclass(frame, sized);
+        var subclass = new FrameSubclass(frame, sized, settled);
         _current = subclass;
 
         if (!Win32.SetWindowSubclass(
@@ -93,7 +97,22 @@ internal sealed unsafe class FrameSubclass : IDisposable
             Log.Error("frame subclass: the resize callback failed", ex);
         }
 
-        return Win32.DefSubclassProc(window, message, wParam, lParam);
+        var result = Win32.DefSubclassProc(window, message, wParam, lParam);
+        try
+        {
+            if (_current is { } current && window == current._frame)
+            {
+                if (message == Win32.WmExitSizeMove) current._settled?.Invoke();
+                else if (message == WmSize && wParam is 0 or 2)
+                {
+                    var maximized = wParam == 2;
+                    if (current._wasMaximized != maximized) current._settled?.Invoke();
+                    current._wasMaximized = maximized;
+                }
+            }
+        }
+        catch (Exception ex) { Log.Error("frame subclass: saving window preferences failed", ex); }
+        return result;
     }
 
     public void Dispose()

@@ -42,7 +42,8 @@ public sealed record SyncChoice
 /// </summary>
 public sealed record SyncSettings
 {
-    public Dictionary<string, SyncChoice> Projects { get; init; } = [];
+    // A missing JSON key must keep the initializer, including the unified store's {} first run.
+    public Dictionary<string, SyncChoice> Projects { get; set; } = [];
 
     public static SyncSettings Empty { get; } = new();
 
@@ -70,7 +71,8 @@ public sealed record SyncSettings
 
         try
         {
-            return JsonSerializer.Deserialize(json, SyncSettingsContext.Default.SyncSettings) ?? Empty;
+            var parsed = JsonSerializer.Deserialize(json, SyncSettingsContext.Default.SyncSettings);
+            return parsed is { Projects: not null } ? parsed : Empty;
         }
         catch (JsonException)
         {
