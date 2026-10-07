@@ -2345,6 +2345,13 @@ body.live-resize .minimap {
   padding: 16px;
 }
 
+/* The break-mode choice appends its heading, explanation and buttons directly to the card. */
+#break-edit-card {
+  box-sizing: border-box;
+  width: 560px;
+  padding: 16px;
+}
+
 /* The tab-order card is the same shape of thing: a heading, a line of prose, a list and a button
    row appended straight to the card, with no inner layout to pad its parts. So it went the same
    way `#close-confirm-card` did - the list ran into the card's edge and the buttons sat in the

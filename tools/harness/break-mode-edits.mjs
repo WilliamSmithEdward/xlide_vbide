@@ -20,6 +20,14 @@ if (phase === 'reset') {
   if (!pending?.includes('Static extra As Long')) throw new Error(`Structural edit missing: ${pending}`);
   await waitFor('the reset choice to appear', async () =>
     await api.ask(`!!document.getElementById('break-edit-backdrop')`), { budgetMs: 10000 });
+  const spacing = await api.ask(`(() => {
+    const card = document.getElementById('break-edit-card');
+    const buttons = card?.querySelector('.modal-buttons');
+    return { padding: parseFloat(getComputedStyle(card).paddingLeft),
+      buttonGap: parseFloat(getComputedStyle(buttons).marginTop) };
+  })()`);
+  if (spacing.padding < 16 || spacing.buttonGap < 12)
+    throw new Error(`Reset dialog content is crowded: ${JSON.stringify(spacing)}`);
   if ((await api.state()).debugMode !== 'break') throw new Error('Structural edit reset VBA without consent');
   if ((await api.native({ text: true })).nativeText?.includes('Static extra As Long'))
     throw new Error('Structural edit reached VBA before Reset');
