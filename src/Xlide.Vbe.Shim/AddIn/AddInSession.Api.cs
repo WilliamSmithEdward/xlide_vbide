@@ -2987,6 +2987,13 @@ internal sealed partial class AddInSession
 
         foreach (var dialog in DialogWatch.Dialogs())
         {
+            // The locked-project row opens this prompt from the page, not from an API call.
+            // A concurrent diagnostic request can overlap its arrival and falsely claim it.
+            if (_nativeExplorerUnlockProject is not null && dialog.Caption == _nativeUnlockPromptCaption)
+            {
+                continue;
+            }
+
             if (_dialogsToKeep.Contains(dialog.Window))
             {
                 continue;
@@ -3122,6 +3129,11 @@ internal sealed partial class AddInSession
 
                     foreach (var dialog in DialogWatch.Dialogs())
                     {
+                        if (_nativeExplorerUnlockProject is not null && dialog.Caption == _nativeUnlockPromptCaption)
+                        {
+                            continue;
+                        }
+
                         if (standingBefore.Contains(dialog.Window))
                         {
                             continue;

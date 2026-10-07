@@ -1144,10 +1144,10 @@ export class Explorer {
     row.className = `tree-project${locked ? " locked" : ""}`;
     row.dataset.project = name;
     row.tabIndex = 0;
-    row.title = locked ? `${name} is locked. Open the VBE Project Explorer to enter its password.` : name;
+    row.title = locked ? `${name} is locked. Activate to enter its password.` : name;
     row.setAttribute("role", "treeitem");
     row.setAttribute("aria-expanded", String(isOpen));
-    if (locked) row.setAttribute("aria-label", `${name}, locked. Press Enter to unlock in the VBE.`);
+    if (locked) row.setAttribute("aria-label", `${name}, locked. Press Enter to unlock.`);
 
     const chevron = document.createElement("span");
     chevron.className = `codicon codicon-${locked ? "lock" : `chevron-${isOpen ? "down" : "right"}`}`;
