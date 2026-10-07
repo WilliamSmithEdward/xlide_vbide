@@ -1321,6 +1321,17 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
+            _editorSurface?.RetainRefusedEdit(component, project);
+
+            // A developer may dismiss this choice to keep debugging, then make another edit.
+            // The reason string is unchanged, but the choice must be available again.
+            if (refused.StartsWith($"{component} was not written while stopped:", StringComparison.Ordinal))
+            {
+                _editorSurface?.ConfirmBreakEdit(component, project);
+                _saidAboutWrite[key] = refused;
+                return;
+            }
+
             if (_saidAboutWrite.TryGetValue(key, out var already) && already == refused)
             {
                 return;
@@ -2190,6 +2201,15 @@ internal sealed partial class AddInSession : IDisposable
         // typing is worse than a short pause before it starts. A toolbar button also takes focus
         // off the surface, which is when the two carets are furthest apart.
         _editorSurface?.FlushEdits();
+        if (_editorSurface?.HasRefusedEdits == true && command is
+            VbeCommands.Command.Run or VbeCommands.Command.StepInto or VbeCommands.Command.StepOver
+            or VbeCommands.Command.StepOut or VbeCommands.Command.RunToCursor
+            or VbeCommands.Command.Compile or VbeCommands.Command.Save)
+        {
+            const string pending = "Code changes have not reached VBA. Reset to apply them before running, stepping, compiling or saving.";
+            _editorSurface.Notify(pending);
+            return VbeCommands.CommandRun.No(pending);
+        }
         SyncCaretToPane();
 
         // Run with a designer tab holding the active slot runs THE FORM - the editor's own F5
@@ -2700,19 +2720,18 @@ internal sealed partial class AddInSession : IDisposable
             // texts and deciding what to write - and `took` is the editor's, taking it. A write
             // that is slow in the first is a bug here; one slow in the second is what the editor
             // charges for the module's size.
-            Core.Editor.LineDiff breakChange = default;
+            IReadOnlyList<Core.Editor.LineDiff>? breakChanges = null;
             if (mode == BreakMode && (baseline is null
-                || !BreakModeLineEdit(baseline, text, component, foundOwner ?? owner, out breakChange)))
+                || !BreakModeLineEdits(baseline, text, component, foundOwner ?? owner, out breakChanges)))
             {
-                Log.Warn($"write: {component} not written - this break-mode change is not a single statement below the stop");
-                return $"{component} was not written while stopped: only a single statement line "
-                    + "below the current stop can be changed without risking a debugger reset. "
-                    + "Press Reset in the editor, or POST command?name=reset, and write again.";
+                Log.Warn($"write: {component} not written - this break-mode change may reset the debugger");
+                return $"{component} was not written while stopped: this edit may reset the debugger. "
+                    + "Keep debugging with the edit held in XLIDE, or Reset and apply it.";
             }
 
             var diffing = System.Diagnostics.Stopwatch.StartNew();
             var wroteDiff = mode == BreakMode
-                ? TryWriteBreakModeLine(module, breakChange, out windows)
+                ? TryWriteBreakModeLines(module, breakChanges!, out windows)
                 : baseline is not null && TryWriteLineDiff(module, baseline, text, out windows);
             diffing.Stop();
 
@@ -3006,45 +3025,103 @@ internal sealed partial class AddInSession : IDisposable
     private sealed record LineWindow(int At, int Count, int TotalLines, string Text);
 
     /// <summary>
-    /// A paused VBA procedure can take an ordinary statement replacement after its current line
-    /// without losing the run. Structural edits can instead prompt to reset the project, and a
-    /// COM caller cannot answer that prompt safely. Keep this path deliberately narrow.
+    /// Ordinary statements can be changed in the native VBE while stopped, including statements
+    /// before the stop. Lines may be added or removed below it. Never hand a structural edit to
+    /// COM here: the VBE can open a modal reset prompt that this caller cannot answer safely.
     /// </summary>
-    private bool BreakModeLineEdit(string baseline, string text, string component, string? owner,
-        out Core.Editor.LineDiff change)
+    private bool BreakModeLineEdits(string baseline, string text, string component, string? owner,
+        out IReadOnlyList<Core.Editor.LineDiff>? changes)
     {
-        change = Core.Editor.LineDiff.Between(baseline, text, 1);
-        if (change.Change == Core.Editor.LineChange.Identical) return true;
-        if (change.Change != Core.Editor.LineChange.Window
-            || change.Removing != 1 || change.Inserting != 1
-            || change.Text.Contains('\n') || change.Removed.Contains('\n')
-            || !string.Equals(owner, _shownProject, StringComparison.OrdinalIgnoreCase))
-            return false;
+        changes = null;
+        if (!string.Equals(owner, _shownProject, StringComparison.OrdinalIgnoreCase)) return false;
 
         var stop = _lastStopFollowed;
         var colon = stop?.LastIndexOf(':') ?? -1;
         if (colon < 0 || !string.Equals(stop![..colon], component, StringComparison.OrdinalIgnoreCase)
-            || !int.TryParse(stop[(colon + 1)..], out var stopLine) || change.At <= stopLine)
+            || !int.TryParse(stop[(colon + 1)..], out var stopLine))
             return false;
 
-        // Declarations and block boundaries may change the compiled frame. Let the developer
-        // Reset explicitly for those rather than triggering VBE's modal reset question.
-        const string structural = @"^(?:#|Attribute\b|Option\b|Public\b|Private\b|Friend\b|Static\b|Dim\b|Const\b|Declare\b|Event\b|ReDim\b|Sub\b|Function\b|Property\b|End\b|Else\b|ElseIf\b|Case\b|If\b|For\b|Do\b|While\b|With\b|Select\b|Next\b|Loop\b|Wend\b|Type\b|Enum\b|Implements\b|On\s+Error\b|Exit\b|GoTo\b|Stop\b|Resume\b)";
-        return !Regex.IsMatch(change.Removed.TrimStart(), structural, RegexOptions.IgnoreCase)
-            && !Regex.IsMatch(change.Text.TrimStart(), structural, RegexOptions.IgnoreCase);
-    }
-
-    private static bool TryWriteBreakModeLine(DispatchObject module, Core.Editor.LineDiff change,
-        out IReadOnlyList<LineWindow>? wrote)
-    {
-        if (change.Change == Core.Editor.LineChange.Identical)
+        var oldLines = baseline.Replace("\r\n", "\n").Split('\n');
+        var newLines = text.Replace("\r\n", "\n").Split('\n');
+        var edits = new List<Core.Editor.LineDiff>();
+        if (oldLines.Length == newLines.Length)
         {
-            wrote = [];
-            return true;
+            for (var i = 0; i < oldLines.Length; i++)
+            {
+                if (oldLines[i] == newLines[i]) continue;
+                if (i + 1 == stopLine || !BreakStatement(oldLines[i]) || !BreakStatement(newLines[i])) return false;
+                edits.Add(new Core.Editor.LineDiff(Core.Editor.LineChange.Window, i + 1, 1, 1,
+                    newLines[i], oldLines[i], newLines.Length));
+            }
+        }
+        else
+        {
+            // Shifting the current instruction or its preceding lines would invalidate the
+            // stopped frame. A small window below it is safe in the live VBE harness.
+            var windows = Core.Editor.LineDiff.Windows(baseline, text, 32, 32);
+            if (windows is null) return false;
+            foreach (var window in windows)
+            {
+                if (window.At <= stopLine || window.At + window.Removing > oldLines.Length
+                    || window.Removed.Split('\n').Any(line => !BreakStatement(line.TrimEnd('\r'))))
+                    return false;
+                if (window.Inserting > 0 && window.Text.Split('\n').Any(line => !BreakStatement(line.TrimEnd('\r'))))
+                    return false;
+                edits.Add(window);
+            }
         }
 
-        module.Invoke("ReplaceLine", change.At, change.Text);
-        wrote = [new LineWindow(change.At, 1, change.TotalLines, change.Text)];
+        changes = edits;
+        return true;
+    }
+
+    private static bool BreakStatement(string line)
+    {
+        // A blank or comment is harmless, but declarations and control-flow boundaries can
+        // invalidate compiled state even when the edit looks like one physical line.
+        const string structural = @"^(?:#|Attribute\b|Option\b|Public\b|Private\b|Friend\b|Static\b|Dim\b|Const\b|Declare\b|Event\b|ReDim\b|Sub\b|Function\b|Property\b|End\b|Else\b|ElseIf\b|Case\b|If\b|For\b|Do\b|While\b|With\b|Select\b|Next\b|Loop\b|Wend\b|Type\b|Enum\b|Implements\b|On\s+Error\b|Exit\b|GoTo\b|Stop\b|Resume\b)";
+        return !Regex.IsMatch(line.TrimStart(), structural, RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryWriteBreakModeLines(DispatchObject module, IReadOnlyList<Core.Editor.LineDiff> changes,
+        out IReadOnlyList<LineWindow>? wrote)
+    {
+        var placed = new List<LineWindow>(changes.Count);
+        var shift = 0;
+        foreach (var change in changes)
+        {
+            placed.Add(new LineWindow(change.At + shift, change.Inserting, change.TotalLines, change.Text));
+            shift += change.Inserting - change.Removing;
+        }
+
+        for (var i = changes.Count - 1; i >= 0; i--)
+        {
+            var change = changes[i];
+            try
+            {
+                if (change.Removing == 1 && change.Inserting == 1)
+                    module.Invoke("ReplaceLine", change.At, change.Text);
+                else
+                {
+                    if (change.Removing > 0) module.Invoke("DeleteLines", change.At, change.Removing);
+                    if (change.Inserting > 0) module.Invoke("InsertLines", change.At, change.Text);
+                }
+            }
+            catch
+            {
+                // A refused insertion follows a deletion; put those lines back without a
+                // whole-module rewrite, which can itself reset the paused project.
+                try
+                {
+                    if (change.Removing > 0 && change.Inserting > 0)
+                        module.Invoke("InsertLines", change.At, change.Removed);
+                }
+                catch (Exception restore) { Log.Error("write: break-mode lines could not be restored", restore); }
+                throw;
+            }
+        }
+
+        wrote = placed;
         return true;
     }
 
@@ -5567,6 +5644,11 @@ internal sealed partial class AddInSession : IDisposable
                     // stale enough to mislead.
                     _ghostReaders?.ClearReadings();
                     ClearClassLocalExpansions();
+
+                    // Reset ended the stopped run. A refused edit kept its only copy in the
+                    // surface, so write it now that VBA accepts it again.
+                    if (mode == DesignMode && _editorSurface?.HasRefusedEdits == true)
+                        _editorSurface.FlushEdits();
 
                     PublishLocals(stopped: false);
                     PublishWatches(stopped: false);

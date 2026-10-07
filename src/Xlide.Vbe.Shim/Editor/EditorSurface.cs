@@ -48,6 +48,7 @@ internal sealed class EditorSurface : IDisposable
         public string? Project { get; init; }
         public required string Text { get; set; }
         public bool Unwritten { get; set; }
+        public bool WriteRefused { get; set; }
     }
 
     /// <summary>
@@ -1374,6 +1375,10 @@ internal sealed class EditorSurface : IDisposable
             return;
         }
 
+        // A refused break-mode edit lives only in this model until Reset applies it. An
+        // unrelated native refresh must not replace the developer's only copy.
+        if (doc.WriteRefused) return;
+
         doc.Text = text;
         PostSyncDocument(moduleName, project, text);
     }
@@ -1730,6 +1735,15 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.ConfirmCloseMessage));
     }
 
+    /// <summary>Offers Reset when a structural edit cannot be applied to the paused frame.</summary>
+    public void ConfirmBreakEdit(string module, string? project)
+    {
+        if (!_loaded) return;
+        Post(JsonSerializer.Serialize(
+            new ConfirmBreakEditMessage("confirmBreakEdit", module, project),
+            EditorMessageContext.Default.ConfirmBreakEditMessage));
+    }
+
     /// <summary>Replaces the breakpoints shown on the module currently displayed.</summary>
     public void ShowBreakpoints(int[] lines)
     {
@@ -1867,6 +1881,7 @@ internal sealed class EditorSurface : IDisposable
             if (doc.Unwritten)
             {
                 doc.Unwritten = false;
+                doc.WriteRefused = false;
                 (unwritten ??= []).Add(doc);
             }
         }
@@ -1876,6 +1891,19 @@ internal sealed class EditorSurface : IDisposable
             TextChanged?.Invoke(doc.Module, doc.Project, doc.Text);
         }
     }
+
+    /// <summary>A host refusal leaves the page ahead of the native module; retain its text for
+    /// tab switches and retry after an explicit Reset.</summary>
+    public void RetainRefusedEdit(string moduleName, string? project)
+    {
+        if (_docs.TryGetValue(DocKey(moduleName, project), out var doc))
+        {
+            doc.Unwritten = true;
+            doc.WriteRefused = true;
+        }
+    }
+
+    public bool HasRefusedEdits => _docs.Values.Any(doc => doc.WriteRefused);
 
     /// <summary>
     /// Forgets one document's unwritten edits instead of writing them. For the moment the
@@ -1888,6 +1916,7 @@ internal sealed class EditorSurface : IDisposable
         if (_docs.TryGetValue(DocKey(moduleName, project), out var doc))
         {
             doc.Unwritten = false;
+            doc.WriteRefused = false;
         }
 
         // The write timer stays armed if some other document still owes a write.

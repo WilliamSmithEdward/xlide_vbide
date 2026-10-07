@@ -76,6 +76,7 @@ export type HostMessage =
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "confirmClose"; name: string; project?: string | null }
+  | { type: "confirmBreakEdit"; name: string; project?: string | null }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
@@ -2167,6 +2168,10 @@ export class EditorBridge {
         return;
       case "confirmClose":
         this.shell?.confirmClose(message.name, message.project ?? null);
+        return;
+      case "confirmBreakEdit":
+        this.shell?.confirmBreakEdit(message.name,
+          () => this.runCommand({ id: "reset", target: "host", icon: "debug-stop", label: "Reset" }));
         return;
       case "formMarkup":
         // Keyed by the FORM, not the tab: the answer describes the module, and whoever draws

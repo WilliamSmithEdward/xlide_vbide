@@ -1527,6 +1527,43 @@ export class Shell {
     this.showNextCloseConfirm();
   }
 
+  /** Keep the changed code visible while VBA is paused, or let the developer reset and apply it. */
+  confirmBreakEdit(name: string, resetAndApply: () => void): void {
+    if (document.getElementById("break-edit-backdrop")) return;
+    let reset = false;
+    const { card, dismiss } = openModal({
+      backdropId: "break-edit-backdrop",
+      cardId: "break-edit-card",
+      label: "Code edit requires Reset",
+      role: "alertdialog",
+      closed: () => {
+        this.handlers.menuClosed();
+        if (reset) resetAndApply();
+      },
+    });
+    const title = document.createElement("div");
+    title.className = "modal-title";
+    title.textContent = `Reset VBA to apply changes to ${name}?`;
+    const detail = document.createElement("div");
+    detail.className = "modal-detail";
+    detail.textContent = "This edit cannot be applied to the paused run. Reset ends the run and applies your code. Keep debugging leaves the edit in XLIDE until you reset or undo it.";
+    const buttons = document.createElement("div");
+    buttons.className = "modal-buttons";
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "modal-button primary";
+    keep.textContent = "Keep debugging";
+    keep.addEventListener("click", dismiss);
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "modal-button";
+    apply.textContent = "Reset and apply";
+    apply.addEventListener("click", () => { reset = true; dismiss(); });
+    buttons.append(keep, apply);
+    card.append(title, detail, buttons);
+    keep.focus();
+  }
+
   private showNextCloseConfirm(): void {
     if (document.getElementById("close-confirm-backdrop")) {
       return;
