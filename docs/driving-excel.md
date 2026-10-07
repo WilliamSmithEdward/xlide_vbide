@@ -91,6 +91,11 @@ VS Build Tools 2026 (C++ workload), Node 24, Excel 365 x64 16.0.20228, VBA 7.1, 
 tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm -Fresh
 ```
 
+For a repeatable password-locked VBA project test, use the checked-in
+[`LockedProjectFixture.xlsm`](../tools/harness/fixtures/LockedProjectFixture.xlsm) and its
+[`README`](../tools/harness/fixtures/README.md). It covers the locked Explorer row, the native
+VBE password prompt, and the modules shown after unlock.
+
 **Always with `-Fresh`.** Excel reuses one process for several workbooks, so launching while an
 older instance is still shutting down attaches to that one and the script dies on "Could not reach
 Excel NNNN through its window". It is not a real failure and it costs a minute every time. The
