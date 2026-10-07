@@ -1168,6 +1168,10 @@ function boot(): void {
         }
         return;
       }
+      if (command.id === "restorePaneDefaults") {
+        shell?.confirmRestorePaneDefaults();
+        return;
+      }
 
       bridge.runCommand(command);
     },
@@ -1178,6 +1182,7 @@ function boot(): void {
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
       || command.id === "openSponsor" || command.id === "openSync" || command.id === "openAgent"
+      || command.id === "restorePaneDefaults"
       || command.id === "openAnalysisRules"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),

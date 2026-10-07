@@ -1,4 +1,5 @@
 # Isolated two-process live pane docking regression. Only closes its own Excel processes.
+param([switch] $RestoreDefaults)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $previousRoot = $env:XLIDE_TEST_PREFERENCES_ROOT
@@ -25,14 +26,16 @@ try {
         $hostPid = [int]$line.Matches[0].Groups[1].Value
         $owned[$hostPid] = (Get-Process -Id $hostPid).StartTime
         [XlidePaneSplitHarness.Windows]::Size($hostPid)
-        & node (Join-Path $PSScriptRoot 'editor-pane-split.mjs') $hostPid $phase
+        $probe = if ($RestoreDefaults) { 'restore-pane-defaults.mjs' } else { 'editor-pane-split.mjs' }
+        & node (Join-Path $PSScriptRoot $probe) $hostPid $phase
         if ($LASTEXITCODE) { throw "Pane split check failed: $phase" }
         $process = Get-Process -Id $hostPid -ErrorAction SilentlyContinue
         if ($process -and $process.StartTime -eq $owned[$hostPid]) { Stop-Process -Id $hostPid -Force }
         Wait-Process -Id $hostPid -Timeout 10 -ErrorAction SilentlyContinue
         $owned.Remove($hostPid)
     }
-    Write-Host 'RESULT: PASS - editor-adjacent pane split and restart restoration.'
+    if ($RestoreDefaults) { Write-Host 'RESULT: PASS - pane defaults confirmation and restart restoration.' }
+    else { Write-Host 'RESULT: PASS - editor-adjacent pane split and restart restoration.' }
 } finally {
     foreach ($hostPid in @($owned.Keys)) {
         $process = Get-Process -Id $hostPid -ErrorAction SilentlyContinue

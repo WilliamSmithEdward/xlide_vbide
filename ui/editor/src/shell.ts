@@ -1528,6 +1528,42 @@ export class Shell {
   }
 
   /** Keep the changed code visible while VBA is paused, or let the developer reset and apply it. */
+  confirmRestorePaneDefaults(): void {
+    if (document.getElementById("restore-panes-backdrop")) { return; }
+    let restore = false;
+    const { card, dismiss } = openModal({
+      backdropId: "restore-panes-backdrop",
+      cardId: "restore-panes-card",
+      label: "Restore default pane layout?",
+      role: "alertdialog",
+      closed: () => {
+        if (restore) this.docks.restoreDefaults();
+        this.handlers.menuClosed();
+      },
+    });
+    const title = document.createElement("div");
+    title.className = "modal-title";
+    title.textContent = "Are you sure you want to restore the default pane layout?";
+    const detail = document.createElement("div");
+    detail.className = "modal-detail";
+    detail.textContent = "This resets pane positions, sizes, active tabs, and closed panes. The default layout will be saved for future Office sessions. Your code and editor settings are unchanged.";
+    const buttons = document.createElement("div");
+    buttons.className = "modal-buttons";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "modal-button primary";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", dismiss);
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "modal-button";
+    apply.textContent = "Restore defaults";
+    apply.addEventListener("click", () => { restore = true; dismiss(); });
+    buttons.append(cancel, apply);
+    card.append(title, detail, buttons);
+    cancel.focus();
+  }
+
   confirmBreakEdit(name: string, resetAndApply: () => void): void {
     if (document.getElementById("break-edit-backdrop")) return;
     let reset = false;
