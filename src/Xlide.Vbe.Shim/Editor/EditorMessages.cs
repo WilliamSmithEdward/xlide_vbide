@@ -367,6 +367,12 @@ public sealed record ConfirmCloseMessage(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("project")] string? Project);
 
+/// <summary>A code edit cannot be applied without ending the paused VBA run.</summary>
+public sealed record ConfirmBreakEditMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("project")] string? Project);
+
 /// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
 public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("expression")] string Expression,
@@ -1054,6 +1060,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetLocalsMessage))]
 [JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(ConfirmCloseMessage))]
+[JsonSerializable(typeof(ConfirmBreakEditMessage))]
 [JsonSerializable(typeof(SetWatchesMessage))]
 [JsonSerializable(typeof(SurfaceWatchRow))]
 [JsonSerializable(typeof(SetDebugStateMessage))]

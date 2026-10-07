@@ -26,8 +26,11 @@ Public Sub DebugStopTest()
 End Sub
 '@)
     $app.OnTime([datetime]::Now.AddSeconds(3), 'Issue71Probe.DebugStopTest')
-    & node (Join-Path $PSScriptRoot 'break-mode-edits.mjs') $excel[0].Id
-    if ($LASTEXITCODE -ne 0) { throw 'The live break-mode edit check failed.' }
+    & node (Join-Path $PSScriptRoot 'break-mode-edits.mjs') $excel[0].Id safe
+    if ($LASTEXITCODE -ne 0) { throw 'The live statement edit check failed.' }
+    $app.OnTime([datetime]::Now.AddSeconds(3), 'Issue71Probe.DebugStopTest')
+    & node (Join-Path $PSScriptRoot 'break-mode-edits.mjs') $excel[0].Id reset
+    if ($LASTEXITCODE -ne 0) { throw 'The live reset-required edit check failed.' }
 }
 finally {
     $reset = $app.VBE.CommandBars.FindControl(1, 228)
