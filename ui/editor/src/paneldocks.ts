@@ -8,7 +8,7 @@
  *
  * Every pane is a SEAT: its tab button and its body elements move together, wherever the
  * developer puts them. WHICH panes exist is the shell's; WHERE they sit is the developer's,
- * and survives the session in localStorage like the splitter positions do.
+ * and survives Office restarts through the shared per-user preference store.
  *
  * A section exists while it has panes: the last tab leaving a section removes it and the
  * editor takes the room back. There is no collapse chevron - a pane the developer does not
@@ -28,6 +28,7 @@ import {
 } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { installSplitterDrag } from "./livedrag.js";
+import { readUiPreference, watchUiPreference, writeUiPreference } from "./preferences.js";
 
 export type DockSide = "left" | "right" | "top" | "bottom";
 
@@ -66,8 +67,6 @@ interface StoredLayout {
   sizes?: Partial<Record<DockSide, number>>;
   closed?: string[];
 }
-
-const STORAGE_KEY = "xlide.docks.v1";
 
 /** The arrangement a first run gets: explorer over properties on the left, the four tool
  * panes tabbed along the bottom - today's layout, said in the new vocabulary. */
@@ -181,6 +180,19 @@ export class PanelDocks {
       this.installDockSplitter(side);
     }
     this.render();
+    watchUiPreference("paneLayout", raw => {
+      this.closed = new Set();
+      this.sizes = { ...DEFAULT_SIZES };
+      this.layout = this.load(raw) ?? defaultLayout();
+      try { this.pruneUnknown(); }
+      catch {
+        this.closed = new Set();
+        this.sizes = { ...DEFAULT_SIZES };
+        this.layout = defaultLayout();
+        this.pruneUnknown();
+      }
+      this.render();
+    });
   }
 
   /* ------------------------------------------------------------------ public surface */
@@ -344,9 +356,8 @@ export class PanelDocks {
     }
   }
 
-  private load(): Record<DockSide, Node | null> | null {
+  private load(raw = readUiPreference("paneLayout")): Record<DockSide, Node | null> | null {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
         return null;
       }
@@ -372,7 +383,7 @@ export class PanelDocks {
 
   private persist(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      writeUiPreference("paneLayout", JSON.stringify({
         sides: this.layout,
         sizes: this.sizes,
         closed: [...this.closed],

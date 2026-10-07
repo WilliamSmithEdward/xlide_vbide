@@ -141,12 +141,13 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>The developer's settings, loaded once per session and written on every change.</summary>
     private ProductSettings _settings = ProductSettings.Default;
+    private string _savedSettingsJson = ProductSettings.Default.ToJson();
+    private string _savedSyncJson = SyncSettings.Empty.ToJson();
+    private static readonly UserStateStore UserPreferences = new(
+        PreferencesDataRoot());
 
     /// <summary>Where the settings live: beside the logs, hand-editable, growable.</summary>
-    private static string SettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "xlide_vbide",
-        "settings.json");
+    private static string SettingsPath => UserPreferences.PathFor(UserStateStore.SettingsFile);
 
     /// <summary>
     /// Import and export, for whoever is asking.
@@ -865,18 +866,13 @@ internal sealed partial class AddInSession : IDisposable
     private static int? Number(JsonElement holder, string name) =>
         holder.TryGetProperty(name, out var value) && value.TryGetInt32(out var read) ? read : null;
 
-    /// <summary>Where each project's import/export folder is remembered, beside the settings.</summary>
-    private static string SyncSettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "xlide_vbide",
-        "sync.json");
-
-    private static SyncSettings LoadSyncSettings()
+    private SyncSettings LoadSyncSettings()
     {
         try
         {
-            var path = SyncSettingsPath;
-            return File.Exists(path) ? SyncSettings.Parse(File.ReadAllText(path)) : SyncSettings.Empty;
+            var settings = SyncSettings.Parse(UserPreferences.Read(UserStateStore.SyncFile));
+            _savedSyncJson = settings.ToJson();
+            return settings;
         }
         catch (Exception ex)
         {
@@ -885,13 +881,12 @@ internal sealed partial class AddInSession : IDisposable
         }
     }
 
-    private static void SaveSyncSettings(SyncSettings settings)
+    private void SaveSyncSettings(SyncSettings settings)
     {
         try
         {
-            var path = SyncSettingsPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, settings.ToJson());
+            var merged = UserPreferences.ApplyChanges(UserStateStore.SyncFile, _savedSyncJson, settings.ToJson());
+            _savedSyncJson = SyncSettings.Parse(merged).ToJson();
         }
         catch (Exception ex)
         {
@@ -937,12 +932,13 @@ internal sealed partial class AddInSession : IDisposable
     private static SyncDiffRow SyncDiffRowFor(SyncDiffLine line) =>
         new(line.LeftNumber, line.RightNumber, line.Left, line.Right, ModuleSync.NameOf(line.Kind));
 
-    private static ProductSettings LoadSettings()
+    private ProductSettings LoadSettings()
     {
         try
         {
-            var path = SettingsPath;
-            return File.Exists(path) ? ProductSettings.Parse(File.ReadAllText(path)) : ProductSettings.Default;
+            var settings = ProductSettings.Parse(UserPreferences.Read(UserStateStore.SettingsFile));
+            _savedSettingsJson = settings.ToJson();
+            return settings;
         }
         catch (Exception ex)
         {
@@ -1265,7 +1261,8 @@ internal sealed partial class AddInSession : IDisposable
         // In the frame's message chain, so a resize re-places the surface synchronously -
         // before the native layout paints - instead of a posted event later. The event route
         // stays as the correcting pass.
-        _frameSubclass ??= FrameSubclass.Install(host, PlaceSurfaceFast);
+        _framePreferences = new WindowPreferences(UserPreferences, "editorWindow");
+        _frameSubclass ??= FrameSubclass.Install(host, PlaceSurfaceFast, () => _framePreferences?.Capture(host));
 
         _editorSurface.KeyPressed = OnSurfaceKey;
         // The page asked for a module that is gone: say so on the surface rather than leaving the
@@ -1528,10 +1525,13 @@ internal sealed partial class AddInSession : IDisposable
         // moment: the page's typing behaviour starts from what the developer chose last time.
         _settings = LoadSettings();
         _editorSurface.SettingsChangeRequested = OnSettingsChanged;
+        _editorSurface.UiStateChangeRequested = SaveUiState;
         _editorSurface.Ready = () =>
         {
+            _framePreferences?.Restore(host);
             RefreshSurfacePlacement();
             _editorSurface?.ShowSettings(_settings);
+            _editorSurface?.ShowUiState(LoadUiState());
 
             // A ready can be a RELOADED page, not only the first boot. The surface just
             // re-opened every live document from its own table; everything else the page
@@ -3665,7 +3665,7 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        var palette = BrowserPalette.Open(_frame, _editorSurface?.Browser);
+        var palette = BrowserPalette.Open(_frame, _editorSurface?.Browser, UserPreferences);
         if (palette is null)
         {
             _editorSurface?.Notify("The Object Browser window could not be opened.");
@@ -12566,6 +12566,7 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         _stopped = true;
+        _framePreferences?.Capture(_frame);
         Log.Info("session stopping");
 
         // First out: no debug request may land on a session mid-teardown. The inside door goes

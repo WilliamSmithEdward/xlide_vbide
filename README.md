@@ -49,7 +49,9 @@ native code, so Excel never loads a .NET runtime on its account.
   modules at once.
 - Nine tool panes that dock where you put them: Explorer, Properties, Problems, Immediate,
   Locals, Watch, Tests, Changes and Source Control. Drag one by its title and a five-zone compass
-  appears over the region under the pointer. The arrangement persists.
+  appears over the region under the pointer. Pane activation, placement, sizes, editor splits,
+  and window bounds persist across Office restarts and are shared across hosts through the
+  [per-user preference store](docs/user-preferences.md).
 - Search as one floating widget, scoped to the module, the workbook, or every open workbook. Find
   All lists every match with a preview, and Replace All applies as a single edit that one undo
   reverts.

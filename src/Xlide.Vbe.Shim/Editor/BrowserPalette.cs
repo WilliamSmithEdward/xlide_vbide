@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Xlide.Vbe.Core.Hosting;
+using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Interop;
 using Xlide.Vbe.Shim.WebView;
@@ -27,6 +28,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
     private GCHandle _self;
     private nint _handle;
     private WebView2Surface? _browser;
+    private WindowPreferences? _preferences;
 
     /// <summary>The palette's page, for the xlide api's eval route.</summary>
     internal WebView2Surface? Browser => _browser;
@@ -61,7 +63,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
             || Win32.SendMessage(_handle, Win32.WmGetIcon, Win32.IconBig, 0) != 0);
 
     /// <summary>Creates the palette over <paramref name="owner"/> and starts its page.</summary>
-    public static BrowserPalette? Open(nint owner, WebView2Surface? editorBrowser)
+    public static BrowserPalette? Open(nint owner, WebView2Surface? editorBrowser, UserStateStore preferences)
     {
         if (owner == 0 || editorBrowser is null || !EnsureClassRegistered())
         {
@@ -118,6 +120,8 @@ internal sealed unsafe class BrowserPalette : IDisposable
         palette._browser.DebugName = "palette";
 
         palette._browser.MessageReceived = palette.OnMessage;
+        palette._preferences = new WindowPreferences(preferences, "objectBrowserWindow");
+        palette._preferences.Restore(handle);
         AdoptOwnerIcon(handle, owner);
         Win32.ShowWindow(handle, Win32.SwShow);
         Win32.SetForegroundWindow(handle);
@@ -359,9 +363,15 @@ internal sealed unsafe class BrowserPalette : IDisposable
 
                 case Win32.WmSize:
                     FromHandle(window)?.FitBrowser();
+                    FromHandle(window)?._preferences?.CaptureStateChange(window);
                     return 0;
 
+                case Win32.WmExitSizeMove:
+                    FromHandle(window)?._preferences?.Capture(window);
+                    break;
+
                 case Win32.WmClose:
+                    FromHandle(window)?._preferences?.Capture(window);
                     // Ours alone - nothing native sends this window anything. Closing hides,
                     // so the next summons presents the same page, state intact.
                     Win32.ShowWindow(window, Win32.SwHide);
@@ -378,6 +388,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
 
     public void Dispose()
     {
+        _preferences?.Capture(_handle);
         _browser?.Dispose();
         _browser = null;
 

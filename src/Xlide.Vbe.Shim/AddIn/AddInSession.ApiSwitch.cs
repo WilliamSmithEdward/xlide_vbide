@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Xlide.Vbe.Core.Editor;
 using System.Text.Json.Serialization;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.Diagnostics;
@@ -105,9 +106,9 @@ internal sealed partial class AddInSession
     {
         try
         {
-            var path = SettingsPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, _settings.ToJson());
+            var merged = UserPreferences.ApplyChanges(UserStateStore.SettingsFile, _savedSettingsJson, _settings.ToJson());
+            _settings = ProductSettings.Parse(merged);
+            _savedSettingsJson = _settings.ToJson();
         }
         catch (Exception ex)
         {

@@ -47,7 +47,7 @@ async function problemsFor(module, expected) {
 }
 
 const codes = (rows) => rows.map((one) => one.code).sort().join(",") || "(none)";
-const settingsFile = () => join(process.env.LOCALAPPDATA, "xlide_vbide", "settings.json");
+const settingsFile = () => join(process.env.XLIDE_TEST_PREFERENCES_ROOT ?? process.env.LOCALAPPDATA, "xlide_vbide", "settings.json");
 const settingsText = () => {
   try { return readFileSync(settingsFile(), "utf8"); } catch { return ""; }
 };

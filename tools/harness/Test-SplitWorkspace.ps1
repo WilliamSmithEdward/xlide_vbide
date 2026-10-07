@@ -456,8 +456,7 @@ Check 'the layout is put back the way it was found' {
     # layout in memory and writes it back on the next render, so the developer opens the
     # editor to find Problems docked on the left with no explanation (2026-08-06). Clearing
     # AND reloading is what actually restores the default.
-    Page 'localStorage.removeItem("xlide.docks.v1"); "cleared"' | Out-Null
-    Page 'location.reload()' | Out-Null
+    Invoke-RestMethod "$api/layout?reset=1" -Method Post -TimeoutSec 25 | Out-Null
 
     WaitFor 'the default arrangement to come back' {
         try {

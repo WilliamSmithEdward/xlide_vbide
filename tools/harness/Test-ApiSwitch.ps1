@@ -29,7 +29,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$dataFolder = Join-Path $env:LOCALAPPDATA 'xlide_vbide'
+$preferenceRoot = if ($env:XLIDE_TEST_PREFERENCES_ROOT) { $env:XLIDE_TEST_PREFERENCES_ROOT } else { $env:LOCALAPPDATA }
+$dataFolder = Join-Path $preferenceRoot 'xlide_vbide'
 $settingsPath = Join-Path $dataFolder 'settings.json'
 
 $passed = 0

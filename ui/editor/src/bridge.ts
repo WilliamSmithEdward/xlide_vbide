@@ -14,6 +14,7 @@ import { procedureAt, scanProcedures, type ProcedureRange } from "./procedureat.
 import { widenIfEmpty } from "./markerspan.js";
 import { type XlideTheme } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
+import { restoreUiPreferences } from "./preferences.js";
 
 /*
  * Position convention
@@ -77,6 +78,7 @@ export type HostMessage =
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "confirmBreakEdit"; name: string; project?: string | null }
+  | { type: "setUiState"; values: Record<string, string> }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
@@ -633,6 +635,7 @@ export type ClientMessage =
   // setting that could not be changed but a setting that got RESET: every other change posted a
   // payload with no syncEngine in it, and the host read the absence as the default.
   | ({ type: "updateSettings" } & EditorSettings)
+  | { type: "uiStateChanged"; key: string; value: string }
   | { type: "analysisRules"; id: number }
   | { type: "setRuleSeverity"; code: string; severity: string }
   | { type: "suppressFinding"; module: string; project: string | null; line: number; code: string }
@@ -2438,6 +2441,10 @@ export class EditorBridge {
         // Handed over whole. Coercing here as well as in applySettings meant two normalisations
         // of the same six values, and the second one silently decided what a missing field meant.
         applySettings(message);
+        return;
+      case "setUiState":
+        restoreUiPreferences(message.values, (key, value) =>
+          this.transport.post({ type: "uiStateChanged", key, value }));
         return;
       default: {
         const unknown: never = message;

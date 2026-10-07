@@ -16,6 +16,7 @@
 import type { OpenFiles } from "./changespane.js";
 import { drawDiffRows, type SyncDiffLine } from "./diffview.js";
 import { installSplitterDrag } from "./livedrag.js";
+import { readUiPreference, watchUiPreference, writeUiPreference } from "./preferences.js";
 import { openModal } from "./modal.js";
 import { shortenPath } from "./pathlabel.js";
 
@@ -317,7 +318,6 @@ type Showing =
 const LOG_LIMIT = 50;
 
 /** Where the rows' width is kept across reloads, once the divider has been dragged. */
-const LIST_STORAGE_KEY = "xlide.scm.v1";
 /** The narrowest the rows go: a module name and its status word still read. */
 const LIST_FLOOR = 180;
 /** What the other half keeps whatever the drag: the message box and a comparison worth reading. */
@@ -825,6 +825,10 @@ export class ScmPane {
   private dragList(): void {
     this.splitter.setAttribute("aria-valuemin", String(LIST_FLOOR));
     this.loadListWidth();
+    watchUiPreference("sourceControl", raw => {
+      writeUiPreference("sourceControl", raw);
+      this.loadListWidth();
+    });
 
     // The width the drag is asking for, accumulated from the press rather than read back off the
     // list on each move: a list pinned at its ceiling would otherwise start shrinking the moment
@@ -873,7 +877,7 @@ export class ScmPane {
 
   private loadListWidth(): void {
     try {
-      const raw = localStorage.getItem(LIST_STORAGE_KEY);
+      const raw = readUiPreference("sourceControl");
       const stored = raw ? (JSON.parse(raw) as { listWidth?: unknown }).listWidth : undefined;
       if (typeof stored !== "number" || !Number.isFinite(stored)) {
         return;
@@ -898,7 +902,7 @@ export class ScmPane {
     }
 
     try {
-      localStorage.setItem(LIST_STORAGE_KEY, JSON.stringify({ listWidth: this.listWidth }));
+      writeUiPreference("sourceControl", JSON.stringify({ listWidth: this.listWidth }));
     } catch (error) {
       // Storage can be full or off. The width will not survive the reload, which is survivable -
       // but silently, "the divider keeps resetting" is a mystery with nothing behind it. Said

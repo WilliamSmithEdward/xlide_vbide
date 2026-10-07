@@ -568,6 +568,12 @@ if (-not $Quick) {
     }
 }
 
+$priorPreferenceRoot = $env:XLIDE_TEST_PREFERENCES_ROOT
+$script:preferenceHosts = [Collections.Generic.List[object]]::new()
+function New-TestPreferenceRoot {
+    $env:XLIDE_TEST_PREFERENCES_ROOT = Join-Path $repoRoot ("artifacts\verification-preferences\" + [guid]::NewGuid().ToString('N'))
+}
+try {
 if ($Live) {
     <#
         EACH SUITE GETS THE FIXTURE IT WAS WRITTEN FOR.
@@ -582,6 +588,7 @@ if ($Live) {
         per suite: two launches, not six.
     #>
     function Use-Fixture([string] $fixture) {
+        New-TestPreferenceRoot
         # A name may join several workbooks with ' + ': they open on one command line into ONE
         # Excel, which is what makes them one session and one door - the state the
         # cross-workbook defect class lives in, and the state no gate session had until
@@ -597,6 +604,7 @@ if ($Live) {
         $started = $said | ForEach-Object { "$_" } | Select-String 'pid=(\d+)' | Select-Object -Last 1
         $excel = if ($started) { Get-Process -Id ([int]$started.Matches[0].Groups[1].Value) -ErrorAction SilentlyContinue }
         if (-not $excel) { throw "Excel did not start on $fixture" }
+        $script:preferenceHosts.Add([pscustomobject]@{Id=$excel.Id; Started=$excel.StartTime})
 
         return $excel
     }
@@ -636,11 +644,13 @@ if ($Live) {
     # The Access database a group asks for, opened the way its own launcher opens one. Access is
     # not a workbook: one database per process, no ' + ' joining, and its own -Fresh guard.
     function Use-AccessFixture([string] $fixture) {
+        New-TestPreferenceRoot
         $database = Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())
         & (Join-Path $repoRoot 'tools\harness\Start-Access.ps1') -Database $database -Fresh | Out-Host
 
         $access = Get-Process MSACCESS -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $access) { throw "Access did not start on $fixture" }
+        $script:preferenceHosts.Add([pscustomobject]@{Id=$access.Id; Started=$access.StartTime})
 
         return $access
     }
@@ -651,12 +661,14 @@ if ($Live) {
     # process of its own (`/w`), so the census is the only thing that knows which one is the
     # gate's.
     function Use-WordFixture([string] $fixture) {
+        New-TestPreferenceRoot
         $document = Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture.Trim())
         $said = @(& (Join-Path $repoRoot 'tools\harness\Start-Word.ps1') -Document $document -Fresh *>&1)
         $said | Out-Host
         $started = $said | ForEach-Object { "$_" } | Select-String 'pid=(\d+)' | Select-Object -Last 1
         $word = if ($started) { Get-Process -Id ([int]$started.Matches[0].Groups[1].Value) -ErrorAction SilentlyContinue }
         if (-not $word) { throw "Word did not start on $fixture" }
+        $script:preferenceHosts.Add([pscustomobject]@{Id=$word.Id; Started=$word.StartTime})
 
         return $word
     }
@@ -1210,6 +1222,34 @@ if ($Deep) {
         (Invoke-SuiteGroup 'RenameFixture.xlsm + TwinFixture.xlsm' @(
             'language-live-probe.mjs', 'surface-walk.mjs --steps 80')) -join '; '
     }
+}
+
+if ($Live) {
+    Step 'shared user preferences across Office restarts' {
+        foreach ($owned in $script:preferenceHosts) {
+            $process = Get-Process -Id $owned.Id -ErrorAction SilentlyContinue
+            if ($process -and $process.StartTime -eq $owned.Started) {
+                Stop-Process -Id $owned.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        New-TestPreferenceRoot
+        $answer = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'tools\harness\Test-UserPreferences.ps1') 2>&1
+        $answer | Out-Host
+        if ($LASTEXITCODE -ne 0 -or "$answer" -notmatch 'RESULT: PASS') { throw 'Cross-host preferences did not restore' }
+        'pane state, code groups, splitters, settings, and native window geometry across Excel, Word, Access and PowerPoint'
+    }
+}
+} finally {
+    # The live gate leaves no host able to rewrite its isolated state after the environment
+    # is restored, and never carries a harness's layout into the developer's next session.
+    foreach ($owned in $script:preferenceHosts) {
+        $process = Get-Process -Id $owned.Id -ErrorAction SilentlyContinue
+        if ($process -and $process.StartTime -eq $owned.Started) {
+            Stop-Process -Id $owned.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($null -eq $priorPreferenceRoot) { Remove-Item Env:XLIDE_TEST_PREFERENCES_ROOT -ErrorAction SilentlyContinue }
+    else { $env:XLIDE_TEST_PREFERENCES_ROOT = $priorPreferenceRoot }
 }
 
 Write-Host ''

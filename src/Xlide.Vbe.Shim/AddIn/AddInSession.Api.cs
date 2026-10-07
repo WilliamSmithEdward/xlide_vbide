@@ -2422,6 +2422,7 @@ internal sealed partial class AddInSession
 
             case "layout" when Flag(request, "reset"):
             {
+                ResetUiLayout();
                 // Putting the arrangement back. A probe that drags panes about is testing
                 // the right thing and leaving the wrong thing behind: the layout is
                 // persistent state, and clearing its storage key does not undo what the
@@ -2430,6 +2431,8 @@ internal sealed partial class AddInSession
                 var reset = $$"""
                     (function () {
                       try { localStorage.removeItem("xlide.docks.v1"); } catch (blocked) { }
+                      try { localStorage.removeItem("xlide.scm.v1"); } catch (blocked) { }
+                      try { localStorage.removeItem("xlide.workspace.v1"); } catch (blocked) { }
                       location.reload();
                       return "reset";
                     })()

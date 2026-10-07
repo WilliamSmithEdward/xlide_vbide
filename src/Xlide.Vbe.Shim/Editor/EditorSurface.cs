@@ -224,6 +224,7 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised when the developer changed a setting in the page's dialog.</summary>
     public Action<ProductSettings>? SettingsChangeRequested { get; set; }
+    public Action<string, string>? UiStateChangeRequested { get; set; }
 
     /// <summary>
     /// Raised when the developer asks for a new component: (kind, workbook). Kind is 1 module,
@@ -1625,6 +1626,10 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
+    public void ShowUiState(Dictionary<string, string> values) => Send("setUiState",
+        JsonSerializer.Serialize(new SetUiStateMessage("setUiState", values),
+            EditorMessageContext.Default.SetUiStateMessage));
+
     /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.
     /// Faces runs parallel to modules when any tab is not a code pane (a form's designer tab).</summary>
     public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject, bool[]? dirty = null, string?[]? faces = null, string? activeFace = null)
@@ -2006,6 +2011,19 @@ internal sealed class EditorSurface : IDisposable
 
             switch (type.GetString())
             {
+                case "uiStateChanged":
+                    if (document.RootElement.TryGetProperty("key", out var stateKey)
+                        && stateKey.ValueKind == JsonValueKind.String
+                        && stateKey.GetString() is "paneLayout" or "sourceControl" or "editorGroups"
+                        && document.RootElement.TryGetProperty("value", out var stateValue)
+                        && stateValue.ValueKind == JsonValueKind.String
+                        && stateValue.GetString() is { Length: <= 65536 } jsonState)
+                    {
+                        using var checkedState = JsonDocument.Parse(jsonState);
+                        if (checkedState.RootElement.ValueKind == JsonValueKind.Object)
+                            UiStateChangeRequested?.Invoke(stateKey.GetString()!, jsonState);
+                    }
+                    break;
                 case "ready":
                     _loaded = true;
 

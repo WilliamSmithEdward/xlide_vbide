@@ -373,6 +373,11 @@ public sealed record ConfirmBreakEditMessage(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("project")] string? Project);
 
+/// <summary>Shared per-user UI state for a fresh process's browser profile.</summary>
+public sealed record SetUiStateMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("values")] Dictionary<string, string> Values);
+
 /// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
 public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("expression")] string Expression,
@@ -1061,6 +1066,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(ConfirmCloseMessage))]
 [JsonSerializable(typeof(ConfirmBreakEditMessage))]
+[JsonSerializable(typeof(SetUiStateMessage))]
 [JsonSerializable(typeof(SetWatchesMessage))]
 [JsonSerializable(typeof(SurfaceWatchRow))]
 [JsonSerializable(typeof(SetDebugStateMessage))]
