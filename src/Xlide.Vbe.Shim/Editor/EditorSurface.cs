@@ -1626,8 +1626,8 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
-    public void ShowUiState(Dictionary<string, string> values) => Send("setUiState",
-        JsonSerializer.Serialize(new SetUiStateMessage("setUiState", values),
+    public void ShowUiState(Dictionary<string, string> values, bool preferShared) => Send("setUiState",
+        JsonSerializer.Serialize(new SetUiStateMessage("setUiState", values, preferShared),
             EditorMessageContext.Default.SetUiStateMessage));
 
     /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.

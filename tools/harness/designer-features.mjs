@@ -1445,8 +1445,12 @@ try {
   await api.command("save");
   await waitFor("the form to hold the system colour again", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === -2147483633, { budgetMs: 15000 });
+  const systemColourRow = await waitFor("the Properties pane to display the saved system colour", async () => {
+    const row = (await api.ui()).properties.rows.find((row) => row.name === "BackColor");
+    return row?.value === "Button Face" ? row : null;
+  }, { budgetMs: 15000 });
   check("-2147483633: the row reads Button Face, and the form asks the machine every time it paints",
-    (await api.ui()).properties.rows.find((row) => row.name === "BackColor")?.value === "Button Face");
+    systemColourRow.value === "Button Face");
 
   // A CONTROL's rows read the same way, from that control's own library.
   await api.act("designerSelect", { module: form, control: "RegionPick" });

@@ -376,7 +376,8 @@ public sealed record ConfirmBreakEditMessage(
 /// <summary>Shared per-user UI state for a fresh process's browser profile.</summary>
 public sealed record SetUiStateMessage(
     [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("values")] Dictionary<string, string> Values);
+    [property: JsonPropertyName("values")] Dictionary<string, string> Values,
+    [property: JsonPropertyName("preferShared")] bool PreferShared);
 
 /// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
 public sealed record SurfaceLocalRow(

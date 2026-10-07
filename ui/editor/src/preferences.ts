@@ -37,11 +37,13 @@ export function watchUiPreference(key: PreferenceKey, apply: (value: string) => 
 export function restoreUiPreferences(
   stored: Record<string, string>,
   writer: (key: PreferenceKey, value: string) => void,
+  preferShared = true,
 ): void {
   hydrated = false;
   save = writer;
   for (const [key, apply] of listeners) {
-    const raw = foundOnLoad.has(key) ? values.get(key) : stored[key] ?? values.get(key);
+    const raw = preferShared ? stored[key] ?? values.get(key)
+      : foundOnLoad.has(key) ? values.get(key) : stored[key] ?? values.get(key);
     if (raw) apply(raw);
   }
   hydrated = true;

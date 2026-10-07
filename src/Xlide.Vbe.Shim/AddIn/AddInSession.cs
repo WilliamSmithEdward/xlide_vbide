@@ -1531,7 +1531,8 @@ internal sealed partial class AddInSession : IDisposable
             _framePreferences?.Restore(host);
             RefreshSurfacePlacement();
             _editorSurface?.ShowSettings(_settings);
-            _editorSurface?.ShowUiState(LoadUiState());
+            _editorSurface?.ShowUiState(LoadUiState(), preferShared: !_uiStatePresented);
+            _uiStatePresented = true;
 
             // A ready can be a RELOADED page, not only the first boot. The surface just
             // re-opened every live document from its own table; everything else the page

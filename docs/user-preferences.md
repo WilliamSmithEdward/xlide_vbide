@@ -23,7 +23,9 @@ failure is logged; a failed pane-layout save also displays a notice in the edito
 
 Browser profiles remain isolated by process. Their local storage is a reload cache and
 a migration source for older builds; the per-user files carry preferences across
-processes. A browser-profile cleanup does not remove these files.
+processes. A fresh session prefers the shared file over an old profile, including when
+Windows reuses a process ID; a reload within the session retains its current cache.
+A browser-profile cleanup does not remove these files.
 
 The focused live check is `tools\harness\Test-UserPreferences.ps1`. It customizes the
 visible layout and verifies it in fresh Excel, Word, Access, and PowerPoint processes,

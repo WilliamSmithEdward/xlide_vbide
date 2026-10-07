@@ -7,6 +7,7 @@ namespace Xlide.Vbe.Shim.AddIn;
 internal sealed partial class AddInSession
 {
     private WindowPreferences? _framePreferences;
+    private bool _uiStatePresented;
     private static string PreferencesDataRoot()
     {
 #if DEBUG

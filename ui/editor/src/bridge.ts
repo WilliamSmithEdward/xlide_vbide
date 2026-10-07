@@ -78,7 +78,7 @@ export type HostMessage =
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "confirmBreakEdit"; name: string; project?: string | null }
-  | { type: "setUiState"; values: Record<string, string> }
+  | { type: "setUiState"; values: Record<string, string>; preferShared: boolean }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
@@ -2444,7 +2444,7 @@ export class EditorBridge {
         return;
       case "setUiState":
         restoreUiPreferences(message.values, (key, value) =>
-          this.transport.post({ type: "uiStateChanged", key, value }));
+          this.transport.post({ type: "uiStateChanged", key, value }), message.preferShared);
         return;
       default: {
         const unknown: never = message;

@@ -28,7 +28,7 @@ try {
   reload.writeUiPreference("paneLayout", "new drag");
   reload.watchUiPreference("paneLayout", value => reload.writeUiPreference("paneLayout", value));
   const migrated = [];
-  reload.restoreUiPreferences({ paneLayout: "older host snapshot" }, (key, value) => migrated.push([key, value]));
+  reload.restoreUiPreferences({ paneLayout: "older host snapshot" }, (key, value) => migrated.push([key, value]), false);
   assert.deepEqual(migrated, [["paneLayout", "new drag"]]);
   console.log("ok   a page reload and legacy cache preserve the latest in-session arrangement");
 
@@ -36,6 +36,14 @@ try {
   assert.deepEqual(migrated.at(-1), ["sourceControl", "divider"]);
   assert.equal(reload.readUiPreference("paneLayout"), "new drag");
   console.log("ok   later geometry updates travel separately from the pane layout");
+
+  const reused = await import(pathToFileURL(compiled).href + "?reused-process");
+  reused.readUiPreference("paneLayout");
+  reused.watchUiPreference("paneLayout", value => reused.writeUiPreference("paneLayout", value));
+  const shared = [];
+  reused.restoreUiPreferences({ paneLayout: "newer shared value from Word" }, (key, value) => shared.push([key, value]));
+  assert.deepEqual(shared, [["paneLayout", "newer shared value from Word"]]);
+  console.log("ok   a reused process profile cannot overwrite a newer shared preference");
 } finally {
   if (previousStorage === undefined) delete globalThis.localStorage;
   else globalThis.localStorage = previousStorage;
