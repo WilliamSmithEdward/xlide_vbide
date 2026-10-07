@@ -43,8 +43,8 @@ jobs:
           persist-credentials: false
 
       # First, so a mistyped tag fails before anything is built. CI tests the
-      # engine against the analyzer's moving main; a release builds it from one
-      # commit, named in .github/analyzer.json. No updater follows that pin: to
+      # engine against the same pinned analyzer commit that a release builds,
+      # named in .github/analyzer.json. No updater follows that pin: to
       # move it, set ref to an xlide_vscode release tag and commit to the
       # commit it names (gh api repos/WilliamSmithEdward/xlide_vscode/git/ref/tags/<tag>).
       - name: Read the version and the analyzer pin
