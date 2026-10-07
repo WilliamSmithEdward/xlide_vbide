@@ -1,5 +1,13 @@
 # Notes for agents
 
+## Modal presentation
+
+Every modal must keep its title, explanation, fields, and action buttons comfortably inset
+from the card border. Use the shared modal scaffold and consistent spacing; plain confirmation
+cards receive 16px padding through `.modal-card[role="alertdialog"]`. Do not assume that a
+new dialog ID inherits another dialog's padding. Check computed spacing and the actual live
+appearance, including narrow windows and light/dark themes when relevant.
+
 <!-- repo-standards:begin. Copied from WilliamSmithEdward/repo-standards, templates/agents/AGENTS-block.md. Change it there; the weekly rescan fails a copy that differs. -->
 ## Releases, CI and security
 
