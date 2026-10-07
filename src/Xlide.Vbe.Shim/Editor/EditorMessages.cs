@@ -412,7 +412,8 @@ public sealed record SurfaceComponent(
 /// <summary>One project and everything in it.</summary>
 public sealed record SurfaceProject(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("components")] SurfaceComponent[] Components);
+    [property: JsonPropertyName("components")] SurfaceComponent[] Components,
+    [property: JsonPropertyName("locked")] bool Locked = false);
 
 /// <summary>
 /// The whole project tree, for the explorer - and WHICH APPLICATION the tree belongs to, so the
