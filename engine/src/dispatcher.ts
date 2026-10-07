@@ -1478,6 +1478,12 @@ export class Dispatcher {
             throw new RpcError(ErrorCode.InternalError, response.message);
         }
 
+        if (response.kind === 'cancelled') {
+            // This synchronous engine request supplies no cancellation signal. If the shared
+            // analyzer cancels anyway, returning an empty Problems list would hide findings.
+            throw new RpcError(ErrorCode.InternalError, 'The analyzer cancelled an active diagnostics request.');
+        }
+
         const answer = this.positioned(response.diagnostics, source, response.incrementalMode);
 
         // Kept whole for quick fixes, which need the parts of a finding that do not travel below,
