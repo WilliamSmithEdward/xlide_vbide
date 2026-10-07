@@ -115,7 +115,7 @@ export type HostMessage =
   | { type: "scmStamp"; stamp: number }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | ({ type: "setTests" } & SetTestsState)
-  | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
+  | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string; depth: number; expandable: boolean; expanded: boolean; nativeIndex: number }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "setDebugState"; mode: string }
   | { type: "obLibrariesResult"; id: number; libraries: ObLibrary[] }

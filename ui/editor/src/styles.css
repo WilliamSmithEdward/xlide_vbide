@@ -2688,6 +2688,37 @@ body.live-resize .minimap {
   white-space: nowrap;
 }
 
+.locals-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.locals-name > span:last-child {
+  min-width: 0;
+}
+
+.locals-toggle,
+.locals-toggle-spacer {
+  flex: 0 0 16px;
+  width: 16px;
+}
+
+.locals-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.locals-toggle:hover,
+.locals-toggle:focus-visible {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.18));
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
 .locals-row:not(.locals-header):hover {
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
 }

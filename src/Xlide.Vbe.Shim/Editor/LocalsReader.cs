@@ -1,3 +1,4 @@
+using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Interop;
 
 namespace Xlide.Vbe.Shim.Editor;
@@ -23,7 +24,9 @@ namespace Xlide.Vbe.Shim.Editor;
 internal sealed class LocalsReader : GhostWindowReader
 {
     /// <summary>One row of the Locals window, its three columns separated.</summary>
-    public readonly record struct LocalRow(string Expression, string Value, string Type);
+    public readonly record struct LocalRow(
+        string Expression, string Value, string Type,
+        int Depth = 0, bool Expandable = false, bool Expanded = false);
 
     /// <summary>A reading: which procedure is broken, and the variables in scope.</summary>
     public sealed record LocalsSnapshot(string? Context, IReadOnlyList<LocalRow> Rows);
@@ -59,18 +62,28 @@ internal sealed class LocalsReader : GhostWindowReader
     {
         string? context = null;
         List<LocalRow>? rows = null;
+        HashSet<string> seen = new(StringComparer.Ordinal);
 
+        using var walker = RawWalker();
         var walked = TryWalk(
             type => type is UiAutomationIds.ListItemControl
                 or UiAutomationIds.EditControl
                 or UiAutomationIds.PaneControl,
-            (type, text) =>
+            (type, text, element) =>
             {
                 if (type == UiAutomationIds.ListItemControl)
                 {
                     if (ParseRow(text) is { } row)
                     {
-                        (rows ??= []).Add(row);
+                        var depth = RowDepth(element, walker?.Target);
+                        using var item = ComHandle<IUIAutomationElement>.Borrow(element);
+                        var bounds = item is null ? null : ReadBounds(item.Target);
+                        // VBE's provider can return the same child twice at the same rectangle
+                        // after an object is expanded. It is one visible row, not two variables.
+                        if (bounds is null || seen.Add(RowKey(text, depth, bounds.Value)))
+                        {
+                            (rows ??= []).Add(row with { Depth = depth });
+                        }
                     }
                 }
                 else if (type == UiAutomationIds.EditControl && text.Length > 0)
@@ -89,7 +102,113 @@ internal sealed class LocalsReader : GhostWindowReader
                 }
             });
 
-        return walked ? new LocalsSnapshot(context, rows is null ? [] : rows) : null;
+        if (!walked)
+        {
+            return null;
+        }
+
+        if (rows is not null)
+        {
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                var expanded = i + 1 < rows.Count && rows[i + 1].Depth > row.Depth;
+                rows[i] = row with { Expanded = expanded, Expandable = expanded || row.Value.Length == 0 };
+            }
+        }
+
+        return new LocalsSnapshot(context, rows is null ? [] : rows);
+    }
+
+    private ComHandle<IUIAutomationTreeWalker>? RawWalker()
+    {
+        try
+        {
+            return Automation is { } automation && automation.GetRawViewWalker(out var pointer) >= 0 && pointer != 0
+                ? ComHandle<IUIAutomationTreeWalker>.Own(pointer) : null;
+        }
+        catch
+        {
+            // The flat reading still works when an accessibility provider refuses a walker.
+            return null;
+        }
+    }
+
+    private static int RowDepth(nint element, IUIAutomationTreeWalker? walker)
+    {
+        if (walker is null) return 0;
+        var depth = 0;
+        var current = ComHandle<IUIAutomationElement>.Borrow(element);
+        try
+        {
+            for (var i = 0; i < 16; i++)
+            {
+                if (current is null || walker.GetParentElement(current.Pointer, out var parentPointer) < 0 || parentPointer == 0) break;
+                var parent = ComHandle<IUIAutomationElement>.Own(parentPointer);
+                if (parent is null || parent.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0
+                    || kind.AsInt32() != UiAutomationIds.ListItemControl)
+                {
+                    parent?.Dispose();
+                    break;
+                }
+                depth++;
+                current.Dispose();
+                current = parent;
+            }
+        }
+        finally
+        {
+            current?.Dispose();
+        }
+        return depth;
+    }
+
+    private static (double X, double Y, double Width, double Height)? ReadBounds(IUIAutomationElement item) =>
+        item.GetCurrentPropertyValue(UiAutomationIds.BoundingRectangleProperty, out var bounds) >= 0
+            ? bounds.TakeRectangle() : null;
+
+    private static string RowKey(string text, int depth, (double X, double Y, double Width, double Height) bounds) =>
+        $"{depth}\u001f{bounds.X}\u001f{bounds.Y}\u001f{bounds.Width}\u001f{bounds.Height}\u001f{text}";
+
+    /// <summary>Ask VBE's own Locals control to expand/collapse a row at the break.</summary>
+    public void Toggle(int rowIndex, string expression, int depth)
+    {
+        if (rowIndex < 0 || rowIndex > 10000) return;
+        var current = -1;
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        using var walker = RawWalker();
+        nint listWindow = 0;
+        (double X, double Y, double Width, double Height)? listRect = null;
+        (double X, double Y, double Width, double Height)? rowRect = null;
+        _ = TryWalk(type => type is UiAutomationIds.ListControl or UiAutomationIds.ListItemControl,
+            (type, text, element) =>
+            {
+                using var item = ComHandle<IUIAutomationElement>.Borrow(element);
+                if (item is null) return;
+                if (type == UiAutomationIds.ListControl)
+                {
+                    if (item.Target.GetCurrentPropertyValue(UiAutomationIds.NativeWindowHandleProperty, out var handle) >= 0)
+                        listWindow = handle.AsInt32();
+                    listRect = ReadBounds(item.Target);
+                }
+                else if (ParseRow(text) is { } row)
+                {
+                    var bounds = ReadBounds(item.Target);
+                    var rowDepth = RowDepth(element, walker?.Target);
+                    if (bounds is not null && !seen.Add(RowKey(text, rowDepth, bounds.Value))) return;
+                    if (++current == rowIndex && rowDepth == depth
+                        && string.Equals(row.Expression, expression, StringComparison.Ordinal))
+                        rowRect = bounds;
+                }
+            });
+
+        if (listWindow == 0 || listRect is null || rowRect is null) return;
+        var x = (int)(rowRect.Value.X - listRect.Value.X) + 6 + Math.Clamp(depth, 0, 10) * 14;
+        var y = (int)(rowRect.Value.Y - listRect.Value.Y + rowRect.Value.Height / 2);
+        if (x < 0 || y < 0 || x >= listRect.Value.Width || y >= listRect.Value.Height) return;
+        var point = (nint)((y << 16) | (x & 0xffff));
+        Win32.PostMessage(listWindow, 0x0201, 1, point);
+        Win32.PostMessage(listWindow, 0x0202, 0, point);
     }
 
     /// <summary>
@@ -103,8 +222,8 @@ internal sealed class LocalsReader : GhostWindowReader
     /// One row's columns, split back apart.
     ///
     /// The row's accessible name is its columns run together with the header words in between:
-    /// "Expression counter Value 42 Type Long". The expression is a single token - an identifier
-    /// or an indexed path, never containing a space - while the value can be anything, including
+    /// "Expression counter Value 42 Type Long". The expression can also be a native member label
+    /// such as "Item 1"; the value can be anything, including
     /// the words Value or Type inside a string literal, so the value takes everything between
     /// the first " Value " and the LAST " Type ". The placeholder the idle window shows has no
     /// expression token and parses as nothing.
@@ -127,7 +246,7 @@ internal sealed class LocalsReader : GhostWindowReader
         }
 
         var expression = text[expressionHeader.Length..valueAt];
-        if (expression.Length == 0 || expression.Contains(' '))
+        if (expression.Length == 0)
         {
             return null;
         }

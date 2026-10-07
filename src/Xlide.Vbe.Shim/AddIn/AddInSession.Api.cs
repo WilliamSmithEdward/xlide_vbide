@@ -1688,12 +1688,7 @@ internal sealed partial class AddInSession
                 // renders. The first landing kept mirror fields; the thread made them
                 // unnecessary.
                 var snapshot = _ghostReaders?.Locals;
-                var rows = snapshot is null ? [] : new SurfaceLocalRow[snapshot.Rows.Count];
-                for (var i = 0; i < rows.Length; i++)
-                {
-                    var row = snapshot!.Rows[i];
-                    rows[i] = new SurfaceLocalRow(row.Expression, row.Value, row.Type);
-                }
+                var rows = snapshot is null ? [] : SurfaceLocals(snapshot);
 
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugLocalsReply(snapshot?.Context, rows),

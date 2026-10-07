@@ -5324,14 +5324,8 @@ internal sealed partial class AddInSession : IDisposable
         _ghostReaders?.RequestRead();
         var snapshot = _ghostReaders?.Locals ?? new LocalsReader.LocalsSnapshot(null, []);
 
-        var rows = new SurfaceLocalRow[snapshot.Rows.Count];
-        for (var i = 0; i < rows.Length; i++)
-        {
-            var row = snapshot.Rows[i];
-            rows[i] = new SurfaceLocalRow(row.Expression, row.Value, row.Type);
-        }
-
-        var key = $"{snapshot.Context}\u0001{string.Join('\u0001', rows.Select(r => $"{r.Expression}={r.Value}:{r.Kind}"))}";
+        var rows = SurfaceLocals(snapshot);
+        var key = $"{snapshot.Context}\u0001{string.Join('\u0001', rows.Select(r => $"{r.Depth}:{r.Expression}={r.Value}:{r.Kind}:{r.Expandable}:{r.Expanded}"))}";
         if (key == _lastLocalsKey)
         {
             return;
@@ -5533,6 +5527,7 @@ internal sealed partial class AddInSession : IDisposable
                     // the break otherwise, and the previous break's variables are exactly
                     // stale enough to mislead.
                     _ghostReaders?.ClearReadings();
+                    ClearClassLocalExpansions();
 
                     PublishLocals(stopped: false);
                     PublishWatches(stopped: false);
@@ -5820,6 +5815,7 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Starts watching the execution state, for a while.</summary>
     private void WatchDebugState()
     {
+        ClearClassLocalExpansions();
         // Twenty seconds of watching. Long enough for a procedure that does some work before it
         // reaches a breakpoint, short enough that a run which never stops does not poll all day.
         _pollsRemaining = (int)(20_000 / DebugPollMilliseconds);
@@ -6303,7 +6299,8 @@ internal sealed partial class AddInSession : IDisposable
                 // Logged as well as shown, because whether capture is working at all is the
                 // question a support log has to be able to answer.
                 Log.Info($"immediate: captured '{(trimmed.Length > 80 ? trimmed[..80] : trimmed)}'");
-                _editorSurface?.ShowImmediateResult(trimmed, failed: false);
+                if (Volatile.Read(ref _silentImmediateReads) == 0)
+                    _editorSurface?.ShowImmediateResult(trimmed, failed: false);
             }
         }
     }
@@ -6988,7 +6985,7 @@ internal sealed partial class AddInSession : IDisposable
     /// it had run. So the debug route could report that an evaluation had been asked for and never
     /// what it came to, and the Immediate window ended up with a route nothing could assert on.
     /// </summary>
-    private ImmediateEvaluator.Result EvaluateImmediate(string line, ImmediateTicket ticket)
+    private ImmediateEvaluator.Result EvaluateImmediate(string line, ImmediateTicket ticket, bool silent)
     {
         /*
          * A LINE UNDER A LINE STILL RUNNING is taken, in the stopped scope only.
@@ -7028,12 +7025,12 @@ internal sealed partial class AddInSession : IDisposable
             // Withheld when the line's outcome is said from outside: a compile error's own words
             // go in the panel, and what comes back here once the stopped call is unwound is only
             // the error of being reset (#30).
-            if ((result.Failed || result.Text.Length > 0 || result.HasOutput) && !ticket.Answered)
+            if (!silent && (result.Failed || result.Text.Length > 0 || result.HasOutput) && !ticket.Answered)
             {
                 _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
             }
 
-            _editorSurface?.Focus();
+            if (!silent) _editorSurface?.Focus();
             return result;
         }
         finally
@@ -10828,14 +10825,14 @@ internal sealed partial class AddInSession : IDisposable
                     Log.Verbose($"{name}: the palette would not undock ({ex.GetType().Name}); it may already be floating");
                 }
 
-                // Small: the reader reads the store, not the viewport, and the store does not
-                // shrink with the window.
+                // Give expanded Locals a useful invisible viewport. The native palette may
+                // clip rows below its window even though the overlay has room to show them.
                 try
                 {
                     window.SetInt32("Left", 300);
                     window.SetInt32("Top", 300);
-                    window.SetInt32("Width", 240);
-                    window.SetInt32("Height", 150);
+                    window.SetInt32("Width", 450);
+                    window.SetInt32("Height", 900);
                 }
                 catch (Exception ex)
                 {
