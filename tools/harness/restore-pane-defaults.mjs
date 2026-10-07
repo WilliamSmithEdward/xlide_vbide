@@ -35,6 +35,16 @@ if (process.argv[3] === 'restore') {
   assert.equal(modal.role,'alertdialog');
   assert.equal(modal.focus,'Cancel');
   assert.ok(modal.text.includes('Are you sure'));
+  const spacing = await api.ask(`(() => {
+    const card=document.getElementById('restore-panes-card'), style=getComputedStyle(card), box=card.getBoundingClientRect();
+    const title=card.querySelector('.modal-title').getBoundingClientRect(), buttons=card.querySelector('.modal-buttons').getBoundingClientRect();
+    return { padding:[style.paddingTop,style.paddingRight,style.paddingBottom,style.paddingLeft].map(parseFloat),
+      titleInset:title.left-box.left, topInset:title.top-box.top, buttonInset:box.right-buttons.right, bottomInset:box.bottom-buttons.bottom,
+      withinViewport:box.width<=innerWidth && box.height<=innerHeight };
+  })()`);
+  assert.ok(spacing.padding.every(p=>p>=16),JSON.stringify(spacing));
+  assert.ok(spacing.titleInset>=16 && spacing.topInset>=16 && spacing.buttonInset>=16 && spacing.bottomInset>=16,JSON.stringify(spacing));
+  assert.ok(spacing.withinViewport);
   assert.deepEqual(await snapshot(),custom,'opening confirmation does not reset');
   await choose('Cancel');
   assert.deepEqual(await snapshot(),custom,'Cancel preserves the layout');

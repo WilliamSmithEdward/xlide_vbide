@@ -2330,6 +2330,17 @@ body.live-resize .minimap {
   background: var(--vscode-editorWidget-background, #252526);
 }
 
+/* Confirmation cards contain plain text and buttons. Pad them by default so new questions
+   cannot accidentally put their content against the border. */
+.modal-card[role="alertdialog"] {
+  box-sizing: border-box;
+  padding: 16px;
+}
+
+#restore-panes-card {
+  width: 560px;
+}
+
 /* The two QUESTION cards are plain content in a card - no header, no body, no scroll box - so
    the card itself is what holds them off its edges. Every other dialog has an inner layout that
    pads its own parts, which is why the shared .modal-card carries none and why this one went
