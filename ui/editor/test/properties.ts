@@ -9,6 +9,7 @@
 // joined by one end-of-line sequence and contain no other carriage return or line feed.
 
 import fc from "fast-check";
+import { isWsc } from "xlide-spec/analyzer/lexer/tokenKinds";
 import { formatVba, type FormatOptions } from "../src/format.js";
 import { procedureAt, scanProcedures } from "../src/procedureat.js";
 import { buildVbaMonarch } from "../src/vba.js";
@@ -49,6 +50,14 @@ const options: fc.Arbitrary<FormatOptions> = fc.record({
 
 const splitLines = (text: string): string[] => text.split(/\r?\n/);
 
+const trimVbaWsc = (text: string): string => {
+  let start = 0;
+  let end = text.length;
+  while (start < end && isWsc(text.charAt(start))) start += 1;
+  while (end > start && isWsc(text.charAt(end - 1))) end -= 1;
+  return text.slice(start, end);
+};
+
 export function properties(numRuns: number, seed?: number): Property[] {
   const settings = { numRuns, includeErrorInReport: true, ...(seed === undefined ? {} : { seed }) };
   const tokenizer = new MonarchTokenizer(
@@ -72,8 +81,8 @@ export function properties(numRuns: number, seed?: number): Property[] {
             return;
           }
           const kept = chosen.canonicalKeywords
-            ? formatted.trim().toLowerCase() === original.trim().toLowerCase()
-            : formatted.trim() === original.trim();
+            ? trimVbaWsc(formatted).toLowerCase() === trimVbaWsc(original).toLowerCase()
+            : trimVbaWsc(formatted) === trimVbaWsc(original);
           if (!kept) {
             throw new Error(`line ${index + 1} changed: ${JSON.stringify(original)} -> ${JSON.stringify(formatted)}`);
           }
