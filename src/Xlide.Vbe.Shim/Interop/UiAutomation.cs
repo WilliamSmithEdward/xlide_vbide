@@ -128,6 +128,14 @@ internal partial interface IUIAutomationElementArray
     [PreserveSig] int GetElement(int index, out nint element);
 }
 
+/// <summary>The raw tree walker lets Locals retain VBE's parent/child row structure.</summary>
+[GeneratedComInterface]
+[Guid("4042c624-389c-4afc-a630-9df854a541fc")]
+internal partial interface IUIAutomationTreeWalker
+{
+    [PreserveSig] int GetParentElement(nint element, out nint parent);
+}
+
 /// <summary>
 /// A variant sized for the vtable, never read.
 ///
@@ -161,6 +169,7 @@ internal struct UiVariant
 
     public const ushort TypeBstr = 8;
     public const ushort TypeInt32 = 3;
+    public const ushort TypeDoubleArray = 0x2005;
 
     /// <summary>The integer inside, or zero when the variant holds something else.</summary>
     public readonly int AsInt32() => Type == TypeInt32 ? (int)Value : 0;
@@ -178,6 +187,40 @@ internal struct UiVariant
         Value = 0;
         return text;
     }
+
+    /// <summary>UIA_BoundingRectanglePropertyId is a SAFEARRAY of four doubles.</summary>
+    public (double X, double Y, double Width, double Height)? TakeRectangle()
+    {
+        if (Type != TypeDoubleArray || Value == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var values = new double[4];
+            for (var index = 0; index < values.Length; index++)
+            {
+                if (SafeArrayGetElement(Value, in index, out values[index]) < 0)
+                {
+                    return null;
+                }
+            }
+
+            return (values[0], values[1], values[2], values[3]);
+        }
+        finally
+        {
+            _ = SafeArrayDestroy(Value);
+            Value = 0;
+        }
+    }
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SafeArrayGetElement(nint array, in int index, out double value);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SafeArrayDestroy(nint array);
 }
 
 /// <summary>Identifiers used with the interfaces above.</summary>
@@ -203,12 +246,15 @@ internal static class UiAutomationIds
 
     /// <summary>UIA_NamePropertyId.</summary>
     public const int NameProperty = 30005;
+    public const int BoundingRectangleProperty = 30001;
+    public const int NativeWindowHandleProperty = 30020;
 
     /// <summary>UIA_ControlTypePropertyId.</summary>
     public const int ControlTypeProperty = 30003;
 
     /// <summary>UIA_ListItemControlTypeId: the rows of the Locals window.</summary>
     public const int ListItemControl = 50007;
+    public const int ListControl = 50008;
 
     /// <summary>UIA_EditControlTypeId: the context strip naming the broken procedure.</summary>
     public const int EditControl = 50004;

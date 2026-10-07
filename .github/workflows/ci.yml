@@ -18,9 +18,8 @@ jobs:
   # every rename and navigation fix from the adversarial pass.
   #
   # It is its own job because it needs the companion repo checked out beside this one: the
-  # analyzer is not vendored here, it is imported straight out of ../xlide_vscode/src, which is
-  # what keeps the two products analysing VBA identically. A job that cannot see it cannot build
-  # the engine, which is why the engine was never built here.
+  # analyzer is not vendored here, it is imported straight out of ../xlide_vscode/src. Check out
+  # the same commit recorded for the shipped engine so CI validates the code this repo packages.
   #
   # Ubuntu as well as Windows, deliberately. The engine is plain Node and the language matrix is
   # about text, so a difference in the runner's ICU build is exactly the kind of thing that shows
@@ -40,11 +39,20 @@ jobs:
           path: xlide_vbide
           persist-credentials: false
 
-      # The analyzer. Pinned to nothing: the two move together on purpose, and a green run here
-      # against yesterday's analyzer would be the opposite of what this job is for.
+      - name: Verify analyzer pin
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
+          if ($pin.commit -ne '1854476f8545ad49e772baec5eaff93da0f72131') {
+            throw 'Update the CI analyzer checkout when .github/analyzer.json changes.'
+          }
+
+      # Typecheck and exercise the analyzer commit used by Publish and the live release gate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/xlide_vscode
+          ref: 1854476f8545ad49e772baec5eaff93da0f72131 # xlide_vscode v11.0.3
           path: xlide_vscode
           persist-credentials: false
 
@@ -92,8 +100,7 @@ jobs:
       # A form's controls are declared by the DESIGNER, not the text: the host seeds them and
       # the analyzer treats them as declared (xlide_vscode#17..#20). The call-colouring table
       # is exact - a resolved method call paints `function`, a property or an unresolved member
-      # paints nothing - and because the checkout beside this one is unpinned, this is the job
-      # that notices the analyzer's main moving under that table.
+      # paints nothing. This job notices changes when the analyzer pin advances.
       - name: Forms
         working-directory: xlide_vbide/engine
         run: node test/forms.mjs
@@ -140,7 +147,7 @@ jobs:
       # known:false rather than Excel's types wearing its name. The SECOND suite found written
       # and then run by nothing (Freshness above was the first): 21 green checks nobody was
       # collecting until the 2026-08-28 hunt. It also runs in verify.ps1; here too because the
-      # host registry is the analyzer's and the checkout beside this one is unpinned.
+      # host registry is the analyzer's and the checkout beside this one follows the pin.
       - name: Knowledge
         working-directory: xlide_vbide/engine
         run: node test/knowledge.mjs

@@ -41,6 +41,9 @@ internal sealed partial class AddInSession
         /// as the line does.
         /// </summary>
         Panel,
+
+        /// <summary>A Locals class-member read. Its value belongs in Locals, not the log.</summary>
+        Locals,
     }
 
     /// <summary>
@@ -73,6 +76,7 @@ internal sealed partial class AddInSession
     /// answering the same dialogs and clearing the same stop.
     /// </summary>
     private readonly SemaphoreSlim _immediateAwayGate = new(1, 1);
+    private int _silentImmediateReads;
 
     /// <summary>The panel's lines, each waiting for the one typed before it.</summary>
     private Task _panelLines = Task.CompletedTask;
@@ -214,7 +218,8 @@ internal sealed partial class AddInSession
                     + "cleared. Press Reset in the editor, or POST command?name=reset.";
 
                 Log.Warn($"immediate: {stuck}");
-                surface.RunOnHostThread(() => surface.ShowImmediateResult(stuck, true));
+                if (caller != ImmediateCaller.Locals)
+                    surface.RunOnHostThread(() => surface.ShowImmediateResult(stuck, true));
                 return new ImmediateAnswer(false, stuck, true);
             }
 
@@ -241,7 +246,7 @@ internal sealed partial class AddInSession
                 // After the mode, so a watcher that sees the line started also sees whether it
                 // started paused at the developer's own stop.
                 Volatile.Write(ref started, true);
-                var result = EvaluateImmediate(text, ticket);
+                var result = EvaluateImmediate(text, ticket, silent: caller == ImmediateCaller.Locals);
                 outcome = result.Text;
                 failed = result.Failed;
             }
@@ -402,7 +407,7 @@ internal sealed partial class AddInSession
             _immediateLeftItStopped = false;
         }
 
-        if (ticket.Answered)
+        if (ticket.Answered && caller != ImmediateCaller.Locals)
         {
             var said = outcome;
             surface.RunOnHostThread(() => surface.ShowImmediateResult(said, failed));

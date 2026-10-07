@@ -94,6 +94,8 @@ export interface ShellHandlers {
   openAnalysisRules(focusCode?: string): void;
   /** The developer entered a line in the Immediate panel. */
   evaluate(text: string): void;
+  /** The developer expands or collapses an object in the Locals panel. */
+  toggleLocal(index: number, expression: string, depth: number, context: string | null): void;
   /** Which panel is showing, and whether the panel is open at all. */
   panelChanged(name: string, open: boolean): void;
   /** The developer selected a component in the explorer without opening it. */
@@ -1165,7 +1167,7 @@ export class Shell {
    * rows is a break with nothing readable in scope - the panel must not claim "not stopped"
    * while the editor sits at a breakpoint, whatever the reader managed to see.
    */
-  setLocals(stopped: boolean, context: string | null, rows: { expression: string; value: string; kind: string }[]): void {
+  setLocals(stopped: boolean, context: string | null, rows: { expression: string; value: string; kind: string; depth?: number; expandable?: boolean; expanded?: boolean; nativeIndex?: number }[]): void {
     this.localsContext.textContent = context ?? "";
     this.localsContext.hidden = context === null;
     this.localsTable.replaceChildren();
@@ -1191,12 +1193,36 @@ export class Shell {
     }
     this.localsTable.appendChild(header);
 
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       const line = document.createElement("div");
       line.className = "locals-row";
       line.setAttribute("role", "row");
 
-      for (const text of [row.expression, row.value, row.kind]) {
+      const nameCell = document.createElement("span");
+      nameCell.className = "locals-name";
+      nameCell.setAttribute("role", "cell");
+      nameCell.style.paddingLeft = `${Math.min(row.depth ?? 0, 12) * 14}px`;
+      if (row.expandable) {
+        const toggle = document.createElement("button");
+        toggle.className = "locals-toggle";
+        toggle.type = "button";
+        toggle.textContent = row.expanded ? "▾" : "▸";
+        toggle.setAttribute("aria-label", `${row.expanded ? "Collapse" : "Expand"} ${row.expression}`);
+        toggle.setAttribute("aria-expanded", String(!!row.expanded));
+        toggle.addEventListener("click", () => this.handlers.toggleLocal(row.nativeIndex ?? index, row.expression, row.depth ?? 0, context));
+        nameCell.appendChild(toggle);
+      } else {
+        const spacer = document.createElement("span");
+        spacer.className = "locals-toggle-spacer";
+        nameCell.appendChild(spacer);
+      }
+      const name = document.createElement("span");
+      name.textContent = row.expression;
+      name.title = row.expression;
+      nameCell.appendChild(name);
+      line.appendChild(nameCell);
+
+      for (const text of [row.value, row.kind]) {
         const cell = document.createElement("span");
         cell.setAttribute("role", "cell");
         cell.textContent = text;

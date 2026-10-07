@@ -1181,6 +1181,8 @@ function boot(): void {
       || command.id === "openAnalysisRules"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
+    toggleLocal: (index, expression, depth, context) =>
+      bridge.hostAction("toggleLocal", [String(index), expression, String(depth), context]),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
     menuRequest: (path) => bridge.requestMenu(path),
     menuExecute: (path) => bridge.executeMenu(path),

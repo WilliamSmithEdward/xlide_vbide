@@ -419,6 +419,16 @@ internal sealed partial class AddInSession
 
         switch (command)
         {
+            case "toggleLocal":
+            {
+                if (_inBreak && int.TryParse(Arg(0), out var index)
+                    && Arg(1) is { Length: > 0 } expression
+                    && int.TryParse(Arg(2), out var depth))
+                {
+                    ToggleLocalFromPanel(index, expression, depth, Arg(3));
+                }
+                break;
+            }
             case "applyAttributes":
             {
                 var refused = ApplyAttributes(Arg(0) ?? string.Empty, Arg(1), out var changes, out var skipped);

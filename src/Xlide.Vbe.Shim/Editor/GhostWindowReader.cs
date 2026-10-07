@@ -50,6 +50,8 @@ internal abstract class GhostWindowReader : IDisposable
         _who = who;
     }
 
+    protected IUIAutomation? Automation => _automation?.Target;
+
     protected bool Connect()
     {
         var hr = Win32.CoCreateInstance(
@@ -96,6 +98,7 @@ internal abstract class GhostWindowReader : IDisposable
 
     /// <summary>An element the walk offers: its control type, and its accessible name.</summary>
     protected delegate void TakeElement(int controlType, string text);
+    protected delegate void TakeElementWithHandle(int controlType, string text, nint element);
 
     /// <summary>
     /// One guarded walk over the window's accessible descendants: control types the reader does
@@ -104,6 +107,9 @@ internal abstract class GhostWindowReader : IDisposable
     /// which is the caller's cue to answer null rather than empty.
     /// </summary>
     protected bool TryWalk(Func<int, bool> wants, TakeElement take)
+        => TryWalk(wants, (type, text, _) => take(type, text));
+
+    protected bool TryWalk(Func<int, bool> wants, TakeElementWithHandle take)
     {
         if (_element is null || _condition == 0 || Environment.TickCount64 < _retryAt)
         {
@@ -174,7 +180,7 @@ internal abstract class GhostWindowReader : IDisposable
                         continue;
                     }
 
-                    take(controlType, text);
+                    take(controlType, text, childPointer);
                 }
                 catch
                 {

@@ -35,6 +35,8 @@ internal sealed class GhostReaderThread : IDisposable
 
     private LocalsReader.LocalsSnapshot? _locals;
     private IReadOnlyList<WatchReader.WatchRow>? _watches;
+    private sealed record ToggleRequest(int Index, string Expression, int Depth, string? Context);
+    private ToggleRequest? _pendingToggle;
 
     private GhostReaderThread(nint localsWindow, nint watchWindow)
     {
@@ -69,6 +71,12 @@ internal sealed class GhostReaderThread : IDisposable
     /// <summary>Asks for a fresh read soon. Free to call every poll tick; wakes coalesce.</summary>
     public void RequestRead() => _wake.Set();
 
+    public void ToggleLocal(int index, string expression, int depth, string? context)
+    {
+        Interlocked.Exchange(ref _pendingToggle, new ToggleRequest(index, expression, depth, context));
+        _wake.Set();
+    }
+
     /// <summary>
     /// Forgets both readings. Called at break exit: the next break must start with nothing
     /// rather than with the previous break's variables, which are exactly stale enough to
@@ -78,6 +86,7 @@ internal sealed class GhostReaderThread : IDisposable
     {
         Volatile.Write(ref _locals, null);
         Volatile.Write(ref _watches, null);
+        Interlocked.Exchange(ref _pendingToggle, null);
     }
 
     private void Run()
@@ -114,6 +123,16 @@ internal sealed class GhostReaderThread : IDisposable
                 if (_stopping)
                 {
                     break;
+                }
+
+                if (Interlocked.Exchange(ref _pendingToggle, null) is { } toggle
+                    && Volatile.Read(ref _locals) is { } previous
+                    && string.Equals(previous.Context, toggle.Context, StringComparison.Ordinal)
+                    && toggle.Index >= 0 && toggle.Index < previous.Rows.Count
+                    && previous.Rows[toggle.Index] is { } row
+                    && row.Expression == toggle.Expression && row.Depth == toggle.Depth)
+                {
+                    locals?.Toggle(toggle.Index, toggle.Expression, toggle.Depth);
                 }
 
                 if (locals?.Read() is { } snapshot)

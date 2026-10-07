@@ -371,7 +371,11 @@ public sealed record ConfirmCloseMessage(
 public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("expression")] string Expression,
     [property: JsonPropertyName("value")] string Value,
-    [property: JsonPropertyName("kind")] string Kind);
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("depth")] int Depth = 0,
+    [property: JsonPropertyName("expandable")] bool Expandable = false,
+    [property: JsonPropertyName("expanded")] bool Expanded = false,
+    [property: JsonPropertyName("nativeIndex")] int NativeIndex = -1);
 
 /// <summary>
 /// What the debugger has in scope. Context names the broken procedure. Stopped false is the
