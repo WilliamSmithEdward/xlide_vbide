@@ -39,20 +39,20 @@ jobs:
           path: xlide_vbide
           persist-credentials: false
 
-      - name: Read analyzer pin
-        id: analyzer-pin
+      - name: Verify analyzer pin
         shell: pwsh
         working-directory: xlide_vbide
         run: |
           $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
-          if ($pin.commit -notmatch '^[0-9a-f]{40}$') { throw '.github/analyzer.json names no full commit SHA.' }
-          "commit=$($pin.commit)" >> $env:GITHUB_OUTPUT
+          if ($pin.commit -ne '1854476f8545ad49e772baec5eaff93da0f72131') {
+            throw 'Update the CI analyzer checkout when .github/analyzer.json changes.'
+          }
 
       # Typecheck and exercise the analyzer commit used by Publish and the live release gate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/xlide_vscode
-          ref: ${{ steps.analyzer-pin.outputs.commit }}
+          ref: 1854476f8545ad49e772baec5eaff93da0f72131 # xlide_vscode v11.0.3
           path: xlide_vscode
           persist-credentials: false
 
