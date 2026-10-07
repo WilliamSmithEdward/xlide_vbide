@@ -10357,13 +10357,14 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>The project whose password prompt needs the native Project Explorer.</summary>
     private string? _nativeExplorerUnlockProject;
+    private string? _nativeUnlockPromptCaption;
+    private nint _nativeExplorerUnlockPalette;
     private bool _nativeUnlockPromptSeen;
 
     /// <summary>
     /// VBA exposes Protection as read-only. Its password prompt belongs to the native Project
-    /// Explorer, so a locked XLIDE row temporarily exposes the native editor. The Project
-    /// Explorer is normally behind XLIDE's canvas; hiding the canvas lets the developer expand
-    /// the project and enter the password in VBE's own dialog.
+    /// Explorer. Expand the matching native tree item behind XLIDE's canvas so the VBE presents
+    /// its password dialog without replacing the XLIDE editor.
     /// </summary>
     private void OpenNativeExplorerForUnlock(string? display)
     {
@@ -10399,13 +10400,16 @@ internal sealed partial class AddInSession : IDisposable
                 }
 
                 _nativeExplorerUnlockProject = ProjectReader.Identity(project).Id;
+                _nativeUnlockPromptCaption = $"{project.GetString("Name") ?? "VBAProject"} Password";
                 _nativeUnlockPromptSeen = false;
                 window.SetBool("Visible", true);
-                SetNativeChromeBands(visible: true);
-                _editorSurface?.Follow(default, visible: false);
-                if (_frame != 0)
+                var caption = window.GetString("Caption") ?? string.Empty;
+                _nativeExplorerUnlockPalette = CodePaneTracker.FindTopLevelByCaption(caption);
+                if (!NativeProjectUnlock.Expand(_frame, caption,
+                        WorkbookDisplayName(project)))
                 {
-                    Win32.SetForegroundWindow(_frame);
+                    CloseNativeExplorerAfterUnlock();
+                    _editorSurface?.Notify("The locked project could not be opened in the VBE Project Explorer.");
                 }
                 return;
             }
@@ -10424,6 +10428,8 @@ internal sealed partial class AddInSession : IDisposable
     private void CloseNativeExplorerAfterUnlock()
     {
         _nativeExplorerUnlockProject = null;
+        _nativeUnlockPromptCaption = null;
+        _nativeExplorerUnlockPalette = 0;
         _nativeUnlockPromptSeen = false;
         try
         {
@@ -10454,9 +10460,26 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        if (CodePaneTracker.FindTopLevelByCaption("VBAProject Password") != 0)
+        var prompt = CodePaneTracker.FindTopLevelByCaption(_nativeUnlockPromptCaption ?? string.Empty);
+        if (prompt != 0)
         {
-            _nativeUnlockPromptSeen = true;
+            if (!_nativeUnlockPromptSeen)
+            {
+                _nativeUnlockPromptSeen = true;
+                if (_nativeExplorerUnlockPalette != 0)
+                {
+                    Win32.ShowWindow(_nativeExplorerUnlockPalette, Win32.SwHide);
+                }
+
+                // Hiding the palette can move activation back to the frame. Return it to the
+                // password dialog and its edit control, so the next keystroke goes there.
+                Win32.SetForegroundWindow(prompt);
+                var password = Win32.FindWindowEx(prompt, 0, "Edit", null);
+                if (password != 0)
+                {
+                    Win32.SendMessage(prompt, 0x0028, password, 1); // WM_NEXTDLGCTL
+                }
+            }
             return;
         }
 
@@ -12038,7 +12061,7 @@ internal sealed partial class AddInSession : IDisposable
     private void PlaceSurfaceFast()
     {
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0
-            || !Win32.IsWindowVisible(_frame) || _nativeExplorerUnlockProject is not null)
+            || !Win32.IsWindowVisible(_frame))
         {
             return;
         }
@@ -12093,12 +12116,6 @@ internal sealed partial class AddInSession : IDisposable
         {
             Log.Verbose($"placement: skipped (surface {(_editorSurface is null ? "none" : "up")}, " +
                         $"shown {_surfaceShown}, frame {_frame:X}, documents {_documentArea:X})");
-            return;
-        }
-
-        if (_nativeExplorerUnlockProject is not null)
-        {
-            _editorSurface.Follow(default, visible: false);
             return;
         }
 
@@ -12409,7 +12426,11 @@ internal sealed partial class AddInSession : IDisposable
                 UpdatePolling();
             };
 
-            _codePanes.SurfaceStirred = CheckDesignerTabsForOutsideEdits;
+            _codePanes.SurfaceStirred = () =>
+            {
+                WatchNativeUnlockPrompt();
+                CheckDesignerTabsForOutsideEdits();
+            };
 
             _codePanes.Start();
         }

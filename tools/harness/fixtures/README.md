@@ -8,6 +8,6 @@ Open the workbook in Excel, then open XLIDE. Or start a fresh Excel harness proc
 tools\harness\Start-Excel.ps1 -Fresh -Workbook tools\harness\fixtures\LockedProjectFixture.xlsm
 ```
 
-XLIDE Explorer should show `LockedProjectFixture.xlsm` with a lock and no child modules. Activate that row; in the native VBE Project Explorer, expand `VBAProject (LockedProjectFixture.xlsm)` and enter `Test66`. XLIDE should return with `ThisWorkbook`, `Sheet1`, `Runner`, and `Helper` visible. Canceling the password prompt should return to the locked row.
+XLIDE Explorer should show `LockedProjectFixture.xlsm` with a lock and no child modules. Activate that row; XLIDE should remain visible while the native `VBAProject Password` dialog opens. Enter `Test66`. XLIDE should then show `ThisWorkbook`, `Sheet1`, `Runner`, and `Helper`. Canceling the password prompt should leave the locked row in XLIDE.
 
 **Close the workbook without saving after an unlock.** Reopening the checked-in file then restores the locked state for the next test. If it was saved while unlocked, restore this fixture from Git before testing again.

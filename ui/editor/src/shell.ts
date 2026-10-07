@@ -1739,7 +1739,7 @@ export class Shell {
   private projectMenu(project: string, x: number, y: number): void {
     if (this.explorer.isProjectLocked(project)) {
       showContextMenu(x, y, [
-        { label: "Unlock in VBE...", run: () => this.hostCommand("unlockProject", project) },
+        { label: "Unlock project...", run: () => this.hostCommand("unlockProject", project) },
       ]);
       return;
     }
