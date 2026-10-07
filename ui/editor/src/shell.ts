@@ -1527,7 +1527,7 @@ export class Shell {
     this.showNextCloseConfirm();
   }
 
-  /** Keep the changed code visible while VBA is paused, or let the developer reset and apply it. */
+  /** Ask before replacing the shared pane arrangement with its first-run defaults. */
   confirmRestorePaneDefaults(): void {
     if (document.getElementById("restore-panes-backdrop")) { return; }
     let restore = false;
@@ -1564,6 +1564,7 @@ export class Shell {
     cancel.focus();
   }
 
+  /** Keep the changed code visible while VBA is paused, or let the developer reset and apply it. */
   confirmBreakEdit(name: string, resetAndApply: () => void): void {
     if (document.getElementById("break-edit-backdrop")) return;
     let reset = false;
