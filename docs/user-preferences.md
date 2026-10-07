@@ -10,6 +10,11 @@ bottom panes, with its own resize divider. For example, Immediate can sit below 
 Problems, Locals, and Watch stay in the lower group. Dropping onto a group's tab strip joins
 that group instead. The same separate-group behavior works at the editor's other edges.
 
+The toolbar's **Restore default pane layout** button asks for confirmation before resetting
+pane positions, sizes, active tabs, and closed panes. Choose **Restore defaults** to save the
+default arrangement for future Office sessions, or **Cancel** to keep your layout. Code,
+editor settings, code-editor splits, and native window geometry are retained.
+
 - `settings.json` holds editor behavior, Explorer choices, analyzer rule overrides, and
   the agent API switch. Existing settings files keep their format and location.
 - `sync.json` holds each project's import/export choices and source-control folder.

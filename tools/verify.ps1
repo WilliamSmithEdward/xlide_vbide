@@ -1244,6 +1244,12 @@ if ($Live) {
         if ($LASTEXITCODE -ne 0 -or "$answer" -notmatch 'RESULT: PASS') { throw 'Editor-adjacent pane split did not pass' }
         'real pointer drop, separate Immediate and Problems rows, independent resize, and fresh-process restoration'
     }
+    Step 'restore pane defaults confirmation' {
+        $answer = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'tools\harness\Test-EditorPaneSplit.ps1') -RestoreDefaults 2>&1
+        $answer | Out-Host
+        if ($LASTEXITCODE -ne 0 -or "$answer" -notmatch 'RESULT: PASS') { throw 'Pane defaults confirmation did not pass' }
+        'confirmation gate, safe cancellation, default layout restoration, and fresh-process persistence'
+    }
 }
 } finally {
     # The live gate leaves no host able to rewrite its isolated state after the environment

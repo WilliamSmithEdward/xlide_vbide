@@ -198,6 +198,16 @@ export class PanelDocks {
 
   /* ------------------------------------------------------------------ public surface */
 
+  /** Restore the first-run pane arrangement and save it through the shared preferences store. */
+  restoreDefaults(): void {
+    this.closed.clear();
+    this.sizes = { ...DEFAULT_SIZES };
+    this.layout = defaultLayout();
+    this.pruneUnknown();
+    this.render();
+    this.handlers.openPanesChanged?.();
+  }
+
   /** Brings a pane forward: its group shows it, wherever the developer left it. A pane
    * that was closed comes back first, so every route to a pane finds one. */
   reveal(name: string): void {
