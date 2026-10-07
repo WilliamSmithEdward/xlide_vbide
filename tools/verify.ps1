@@ -1238,6 +1238,12 @@ if ($Live) {
         if ($LASTEXITCODE -ne 0 -or "$answer" -notmatch 'RESULT: PASS') { throw 'Cross-host preferences did not restore' }
         'pane state, code groups, splitters, settings, and native window geometry across Excel, Word, Access and PowerPoint'
     }
+    Step 'editor-adjacent tool pane split' {
+        $answer = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'tools\harness\Test-EditorPaneSplit.ps1') 2>&1
+        $answer | Out-Host
+        if ($LASTEXITCODE -ne 0 -or "$answer" -notmatch 'RESULT: PASS') { throw 'Editor-adjacent pane split did not pass' }
+        'real pointer drop, separate Immediate and Problems rows, independent resize, and fresh-process restoration'
+    }
 }
 } finally {
     # The live gate leaves no host able to rewrite its isolated state after the environment

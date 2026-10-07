@@ -186,6 +186,27 @@ check("groups are found wherever they are nested", () => {
   assert.equal(tree.firstGroup(null), null);
 });
 
+check("an editor-adjacent group preserves an existing dock's groups and ratios", () => {
+  for (const side of ["left", "right", "top", "bottom"]) {
+    const direction = side === "left" || side === "right" ? "row" : "column";
+    const original = split(direction, [group("problems"), group("locals")], [0.7, 0.3]);
+    const result = tree.splitAtEdge(original, side, group("immediate"));
+    const first = side === "left" || side === "top";
+    assert.deepEqual(tree.allGroups(result).map(g => g.tabs[0]), first
+      ? ["immediate", "problems", "locals"] : ["problems", "locals", "immediate"]);
+    assert.equal(result.children.length, 3);
+    assertSizesPartition(result);
+    const priorSizes = first ? result.sizes.slice(1) : result.sizes.slice(0, -1);
+    assert.equal(priorSizes[0] / priorSizes[1], original.sizes[0] / original.sizes[1]);
+    assert.deepEqual(original.sizes, [0.7, 0.3]);
+    assert.equal(tree.prune({ ...result, children: result.children.map(g => g.tabs.includes("immediate") ? group() : g) }).children.length, 2);
+  }
+  const original = split("row", [group("problems"), group("locals")], [0.7, 0.3]);
+  const result = tree.splitAtEdge(original, "top", group("immediate"));
+  assert.equal(result.children[1], original, "the lower side-by-side group stays intact");
+  assertSizesPartition(result);
+});
+
 let failures = 0;
 for (const { name, fn } of checks) {
   try {

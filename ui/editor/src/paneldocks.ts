@@ -22,6 +22,7 @@ import {
   prune,
   resizeAt,
   splitBeside,
+  splitAtEdge,
   type TreeGroup,
   type TreeNode,
   type TreeSplit,
@@ -98,7 +99,7 @@ type DropTarget =
   | { kind: "group"; side: DockSide; path: number[]; zone: DropZone }
   /** Onto a strip, at a position in it: reorder within a group, or join one at a place. */
   | { kind: "strip"; side: DockSide; path: number[]; index: number }
-  | { kind: "side"; side: DockSide };
+  | { kind: "side"; side: DockSide; separate?: boolean };
 
 export class PanelDocks {
   private readonly seats = new Map<string, PanelSeat>();
@@ -651,14 +652,14 @@ export class PanelDocks {
       const area = this.editorRegion();
       if (area.width > 0 && area.height > 0 && inside(area)) {
         const zone = compass.over(area, during.clientX, during.clientY, EDGE_ZONES);
-        target = zone && zone !== "center" ? { kind: "side", side: zone } : null;
+        target = zone && zone !== "center" ? { kind: "side", side: zone, separate: true } : null;
 
         if (!zone || zone === "center") {
           compass.preview(null);
         } else if (this.layout[zone]) {
-          // That section already stands: the pane joins it, so the preview is the section
-          // itself rather than a half of the editor the drop would not touch.
-          compass.preview(this.dockElements[zone].getBoundingClientRect(), "join");
+          // A second group sits between the editor and the existing dock groups.
+          const innerEdge = { left: "right", right: "left", top: "bottom", bottom: "top" } as const;
+          compass.preview(zoneRect(this.dockElements[zone].getBoundingClientRect(), innerEdge[zone]), "new");
         } else {
           compass.preview(zoneRect(area, zone), "new");
         }
@@ -736,6 +737,16 @@ export class PanelDocks {
   }
 
   private dropPane(name: string, from: Group, target: DropTarget): void {
+    const sourceSide = this.groupHosts.find(host => host.group === from)?.side;
+    const addsGroup = sourceSide !== target.side || from.tabs.length > 1;
+    if (target.kind === "side" && target.separate && sourceSide === target.side && from.tabs.length === 1) {
+      const root = this.layout[target.side];
+      const direction = target.side === "left" || target.side === "right" ? "row" : "column";
+      const first = target.side === "right" || target.side === "bottom";
+      const adjacent = root?.kind === "split" && root.direction === direction
+        ? root.children[first ? 0 : root.children.length - 1] : root;
+      if (adjacent === from) { return; }
+    }
     // Dropping a lone pane onto its own group's compass is the identity, whatever the zone.
     // A strip drop is NOT: that is a reorder, and a single tab reorders to the same place.
     if (target.kind === "group") {
@@ -751,6 +762,13 @@ export class PanelDocks {
       const existing = this.layout[target.side];
       if (!existing) {
         this.layout[target.side] = { kind: "group", tabs: [name], active: name };
+      } else if (target.separate) {
+        const innerEdge = { left: "right", right: "left", top: "bottom", bottom: "top" } as const;
+        this.layout[target.side] = splitAtEdge(existing, innerEdge[target.side], { kind: "group", tabs: [name], active: name });
+        // Keep room for the existing panes as the extra group is introduced.
+        if (addsGroup) {
+          this.sizes[target.side] = Math.min(900, this.sizes[target.side] + MIN_PANE);
+        }
       } else {
         const group = firstGroupOf(existing);
         if (group) {

@@ -4,6 +4,12 @@ XLIDE saves preferences for the current Windows user in `%LOCALAPPDATA%\xlide_vb
 Excel, Word, Access, and PowerPoint load the same preferences. Changes are saved as they
 are made, so closing an Office application is not required to retain a layout.
 
+To give a tool pane its own row below the code editor, drag its title tab over the editor
+and drop on the compass's bottom arrow. This creates a separate group above any existing
+bottom panes, with its own resize divider. For example, Immediate can sit below code while
+Problems, Locals, and Watch stay in the lower group. Dropping onto a group's tab strip joins
+that group instead. The same separate-group behavior works at the editor's other edges.
+
 - `settings.json` holds editor behavior, Explorer choices, analyzer rule overrides, and
   the agent API switch. Existing settings files keep their format and location.
 - `sync.json` holds each project's import/export choices and source-control folder.
