@@ -481,9 +481,14 @@ internal static class VbeCommands
             VirtualKey.F5 when control => Command.Break,
             VirtualKey.F5 when shift => Command.Reset,
             VirtualKey.F5 => Command.Run,
+            // The combined modifiers come first: Ctrl+Shift+F8 matched the Ctrl arm and ran to
+            // the cursor instead of stepping out (issue #83).
+            VirtualKey.F8 when control && shift => Command.StepOut,
             VirtualKey.F8 when control => Command.RunToCursor,
             VirtualKey.F8 when shift => Command.StepOver,
             VirtualKey.F8 => Command.StepInto,
+            VirtualKey.F9 when control && shift => Command.ClearAllBreakpoints,
+            VirtualKey.F9 when control => Command.SetNextStatement,
             VirtualKey.F9 => Command.ToggleBreakpoint,
 
             // Saving belongs to the host: the workbook is what gets written, not the module.

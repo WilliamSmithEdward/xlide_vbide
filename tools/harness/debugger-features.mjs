@@ -141,6 +141,21 @@ try {
     check("Step Over advanced the native caret",
       afterStep.caretLine > stopLine, `${stopLine} -> ${afterStep.caretLine}`);
     await parity("after a step");
+
+    // SET NEXT STATEMENT, the command Ctrl+F9 and a drag of the yellow arrow both run (#82).
+    // The caret is not the witness: placing it is half of the command. The witness is the
+    // line running twice - counter reaches 3, which only a second pass over the increment can do.
+    console.log("\n  set next statement back onto the increment:");
+    await api.caret(stopLine, { module: "Runner", project: project.projectId });
+    await wait(500);
+    const moved = await api.command("setNextStatement");
+    check("Set Next Statement ran", moved.ran === true, JSON.stringify(moved));
+    await api.command("stepOver");
+    await wait(1500);
+    const again = (await api.locals()).rows ?? [];
+    const counterNow = again.find((r) => (r.expression ?? "").toLowerCase() === "counter")?.value;
+    check("and the increment ran a second time", String(counterNow).trim() === "3", counterNow);
+    await parity("after set next statement");
   }
 
   /*

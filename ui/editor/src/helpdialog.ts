@@ -68,7 +68,9 @@ const SHORTCUTS: Shortcut[] = [
   { keys: "F2", what: "Object browser" },
   { keys: "F5", what: "Run" },
   { keys: "F8", what: "Step into" },
+  { keys: "Ctrl+Shift+F8", what: "Step out" },
   { keys: "F9", what: "Toggle a breakpoint" },
+  { keys: "Ctrl+F9", what: "Set next statement" },
 ];
 
 /**

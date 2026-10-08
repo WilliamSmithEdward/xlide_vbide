@@ -3793,6 +3793,11 @@ body.objbrowser-page #objbrowser-card {
   border-left: 8px solid #ffd24a;
 }
 
+/* Where a dragged execution-point arrow would land. */
+.xlide-current-line-drag::after {
+  opacity: 0.5;
+}
+
 /* The breakpoint margin, drawn so it can be found.
    It is a narrow strip with nothing in it, and a target nobody can see is a target nobody hits.
    The right edge is drawn as well as the fill, because the blank space beside it belongs to the
