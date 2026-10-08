@@ -814,6 +814,9 @@ export class EditorBridge {
    * and they survive the model moving between groups.
    */
   private currentLineDecor: { model: monaco.editor.ITextModel; ids: string[] } | null = null;
+
+  /** The line the execution-point arrow was pressed on, while it may be being dragged. */
+  private arrowDragFrom: number | null = null;
   private breakpointDecor: { model: monaco.editor.ITextModel; ids: string[] } | null = null;
 
   /** Lines that already carry a breakpoint, so the hover dot is not drawn over a real one. */
@@ -926,6 +929,11 @@ export class EditorBridge {
       editor.onMouseDown((event) => {
         if (editor === this.ed()) {
           this.onMouseDown(event);
+        }
+      }),
+      editor.onMouseUp((event) => {
+        if (editor === this.ed()) {
+          this.onMouseUp(editor, event, hover);
         }
       }),
       editor.onMouseMove((event) => {
@@ -2852,6 +2860,8 @@ export class EditorBridge {
   }
 
   private onMouseDown(event: monaco.editor.IEditorMouseEvent): void {
+    // A drag released outside the editor never saw its mouse-up; it ends with the next press.
+    this.arrowDragFrom = null;
     if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
       return;
     }
@@ -2859,9 +2869,49 @@ export class EditorBridge {
     if (line === undefined) {
       return;
     }
+
+    // A press on the yellow arrow may be the start of a drag to a new execution point, as in the
+    // native editor (issue #82). Whether it was is known only on release, so the breakpoint
+    // toggle waits for the mouse-up: released on the same line it is a click and toggles.
+    if (line === this.currentLineDrawn() && this.currentLineDecor?.model === this.ed()?.getModel()) {
+      this.arrowDragFrom = line;
+      return;
+    }
+
     // The page never toggles the breakpoint itself; the host owns the set and answers with
     // setBreakpoints.
     this.transport.post({ type: "breakpointToggleRequested", line });
+  }
+
+  /**
+   * Ends a drag of the execution-point arrow. Dropped on another line, the caret goes there and
+   * the host's own Set Next Statement runs, which validates the line exactly as Ctrl+F9 would
+   * (it refuses a line outside the stopped procedure). The caret is announced first on the same
+   * transport, so the host acts on the dropped line.
+   */
+  private onMouseUp(
+    editor: monaco.editor.IStandaloneCodeEditor,
+    event: monaco.editor.IEditorMouseEvent,
+    hover: monaco.editor.IEditorDecorationsCollection,
+  ): void {
+    const from = this.arrowDragFrom;
+    if (from === null) {
+      return;
+    }
+    this.arrowDragFrom = null;
+    hover.clear();
+
+    const to = event.target.position?.lineNumber;
+    if (to === undefined) {
+      return;
+    }
+    if (to === from) {
+      this.transport.post({ type: "breakpointToggleRequested", line: from });
+      return;
+    }
+
+    editor.setPosition({ lineNumber: to, column: editor.getModel()?.getLineFirstNonWhitespaceColumn(to) || 1 });
+    this.runCommand({ id: "setNextStatement", target: "host", icon: "", label: "Set Next Statement" });
   }
 
   private setDiagnostics(moduleName: string, project: string | null, markers: HostMarker[]): void {
@@ -2946,6 +2996,20 @@ export class EditorBridge {
   }
 
   private onMouseMove(event: monaco.editor.IEditorMouseEvent, hover: monaco.editor.IEditorDecorationsCollection): void {
+    // While the arrow is being dragged, the preview is the arrow on the line it would land on.
+    if (this.arrowDragFrom !== null) {
+      const target = event.target.position?.lineNumber;
+      if (target === undefined || target === this.arrowDragFrom) {
+        hover.clear();
+        return;
+      }
+      hover.set([{
+        range: new monaco.Range(target, 1, target, 1),
+        options: { isWholeLine: true, glyphMarginClassName: "xlide-current-line-glyph xlide-current-line-drag" },
+      }]);
+      return;
+    }
+
     const line = event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ? event.target.position?.lineNumber
       : undefined;

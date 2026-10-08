@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "8f64c2ce8d4c7104c7aa3559da0e98b6c178303e",
+  "commit": "77364bfb14df638e45b43db90e520f4405ea4456",
   "entries": [
     "analyzer/lexer/keywordTable",
     "analyzer/lexer/strippedLines",
@@ -21,6 +21,6 @@
     "vbaSmartEnter.ts": "32ae33c3a98f7e1db43749dfa25cd859e35ae64f3dd0c39f9c06452e6d792439",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
     "vbaSourceScan.ts": "22313589a91bb6e52d468954789c36ce78025de11ea7512d3b99156daea82182",
-    "vbaStructuralDiagnostics.ts": "78d223c0dc02fea223e6178663dc3d4675a3d3049bef0c332e495ffae5153d58"
+    "vbaStructuralDiagnostics.ts": "b38ed458525a2123898e4a56941a6062540826d75846f012af55696d322d7636"
   }
 }

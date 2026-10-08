@@ -38,8 +38,11 @@ internal static class VbeMenus
         [VbeCommands.Command.Reset] = "Shift+F5",
         [VbeCommands.Command.StepInto] = "F8",
         [VbeCommands.Command.StepOver] = "Shift+F8",
+        [VbeCommands.Command.StepOut] = "Ctrl+Shift+F8",
         [VbeCommands.Command.RunToCursor] = "Ctrl+F8",
         [VbeCommands.Command.ToggleBreakpoint] = "F9",
+        [VbeCommands.Command.SetNextStatement] = "Ctrl+F9",
+        [VbeCommands.Command.ClearAllBreakpoints] = "Ctrl+Shift+F9",
         [VbeCommands.Command.Save] = "Ctrl+S",
     };
 
