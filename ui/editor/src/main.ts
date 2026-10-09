@@ -2398,6 +2398,22 @@ function boot(): void {
     command: "editor.action.revealDefinition",
   });
 
+  // KEYS THE HOST TAKES BEFORE THE PAGE SEES THEM, unbound here so the menus stop promising them.
+  // F2 is the Object Browser and F8 / Shift+F8 are Step Into and Step Over, claimed in the
+  // browser's accelerator hook as the native editor's; the editor's own defaults put Rename on F2,
+  // Change All Occurrences on Ctrl+F2 (which the hook reads as F2 too) and the next and previous
+  // problem on F8 and Shift+F8, and the context menu and palette drew those keys beside commands
+  // that could never receive them (#90). Rename moves to Ctrl+Shift+R, the key a generation of
+  // VBA developers learned for it, taken off Refactor, whose menu stays one Ctrl+. away.
+  monaco.editor.addKeybindingRules([
+    { keybinding: monaco.KeyCode.F2, command: "-editor.action.rename" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyR, command: "-editor.action.refactor" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyR, command: "editor.action.rename" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.F2, command: "-editor.action.changeAll" },
+    { keybinding: monaco.KeyCode.F8, command: "-editor.action.marker.nextInFiles" },
+    { keybinding: monaco.KeyMod.Shift | monaco.KeyCode.F8, command: "-editor.action.marker.prevInFiles" },
+  ]);
+
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 
   if (!transport) {

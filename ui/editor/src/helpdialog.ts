@@ -66,6 +66,7 @@ const SHORTCUTS: Shortcut[] = [
   { keys: "Ctrl+F", what: "Find in this module" },
   { keys: "Ctrl+Shift+F", what: "Find across the project" },
   { keys: "F2", what: "Object browser" },
+  { keys: "Ctrl+Shift+R", what: "Rename symbol" },
   { keys: "F5", what: "Run" },
   { keys: "F8", what: "Step into" },
   { keys: "Ctrl+Shift+F8", what: "Step out" },

@@ -689,6 +689,8 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
+        ApplyBrowserSettings();
+
         // The later revision is asked for once and kept. A runtime that predates it refuses the
         // query, which is not a failure: the shell document still renders, and the two things that
         // interface carries are the two things the shell document does not use.
@@ -713,6 +715,63 @@ internal sealed class WebView2Surface : IDisposable
     public void Reveal()
     {
         _controller?.Target.PutIsVisible(1);
+    }
+
+    /// <summary>
+    /// Takes the browser's own reflexes off the editor's keys. At their defaults the browser
+    /// answers Ctrl+R with a reload of the page - a VBA developer's Project Explorer key - Ctrl+P
+    /// with a print preview, Ctrl+Shift+I with its DevTools, and Ctrl+wheel or Ctrl+plus with a
+    /// zoom of the whole surface; none of which the native editor does and none of which this
+    /// surface asked for (found auditing the keys behind #90, 2026-10-09). The accelerator event
+    /// this shim listens on is raised regardless; only the browser's own handling stops. DevTools
+    /// stay on in dev builds, where the protocol port exposes them anyway.
+    /// </summary>
+    private void ApplyBrowserSettings()
+    {
+        var view = _webView;
+        if (view is null)
+        {
+            return;
+        }
+
+        if (view.Target.GetSettings(out var settingsPointer) < 0 || settingsPointer == 0)
+        {
+            Log.Warn("webview: the settings would not answer, so the browser keeps its own keys");
+            return;
+        }
+
+        try
+        {
+            if (Marshal.QueryInterface(settingsPointer, in WebViewIid.Settings3, out var settings3Pointer) < 0
+                || settings3Pointer == 0)
+            {
+                Log.Warn("webview: this runtime predates the accelerator switch, so the browser keeps its own keys");
+                return;
+            }
+
+            using var settings = ComHandle<ICoreWebView2Settings3>.Own(settings3Pointer);
+            if (settings is null)
+            {
+                return;
+            }
+
+            settings.Target.PutAreBrowserAcceleratorKeysEnabled(0);
+            settings.Target.PutIsZoomControlEnabled(0);
+#if DEBUG
+            const string devTools = "DevTools stay on for the dev build";
+#else
+            settings.Target.PutAreDevToolsEnabled(0);
+            const string devTools = "DevTools are off";
+#endif
+            settings.Target.GetAreBrowserAcceleratorKeysEnabled(out var accelerators);
+            settings.Target.GetIsZoomControlEnabled(out var zoom);
+            Log.Info($"webview: browser accelerator keys {(accelerators == 0 ? "off" : "STILL ON")}, "
+                + $"zoom control {(zoom == 0 ? "off" : "STILL ON")}, {devTools}");
+        }
+        finally
+        {
+            Marshal.Release(settingsPointer);
+        }
     }
 
     /// <summary>

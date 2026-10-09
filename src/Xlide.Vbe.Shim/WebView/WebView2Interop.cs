@@ -675,9 +675,99 @@ internal partial interface ICoreWebView2EnvironmentOptions
     int PutAllowSingleSignOnUsingOSPrimaryAccount(int allow);
 }
 
+/// <summary>
+/// The browser's settings, three revisions in, which is where the switch that stops the browser
+/// acting on its own accelerator keys lives. Declared flat for the reason
+/// <see cref="ICoreWebView2_3"/> gives: the eighteen slots of ICoreWebView2Settings, then the two
+/// ICoreWebView2Settings2 appends, then the two ICoreWebView2Settings3 appends, in the order the
+/// SDK header lists them. BOOL is a four-byte int on the wire.
+/// </summary>
+[GeneratedComInterface]
+[Guid("fdb5ab74-af33-4854-84f0-0a631deb5eba")]
+internal partial interface ICoreWebView2Settings3
+{
+    // ---- ICoreWebView2Settings, slots 1 to 18 ------------------------------------------------
+
+    // 1
+    [PreserveSig]
+    int GetIsScriptEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutIsScriptEnabled(int enabled);
+
+    [PreserveSig]
+    int GetIsWebMessageEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutIsWebMessageEnabled(int enabled);
+
+    [PreserveSig]
+    int GetAreDefaultScriptDialogsEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutAreDefaultScriptDialogsEnabled(int enabled);
+
+    [PreserveSig]
+    int GetIsStatusBarEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutIsStatusBarEnabled(int enabled);
+
+    [PreserveSig]
+    int GetAreDevToolsEnabled(out int enabled);
+
+    // 10
+    [PreserveSig]
+    int PutAreDevToolsEnabled(int enabled);
+
+    [PreserveSig]
+    int GetAreDefaultContextMenusEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutAreDefaultContextMenusEnabled(int enabled);
+
+    [PreserveSig]
+    int GetAreHostObjectsAllowed(out int allowed);
+
+    [PreserveSig]
+    int PutAreHostObjectsAllowed(int allowed);
+
+    [PreserveSig]
+    int GetIsZoomControlEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutIsZoomControlEnabled(int enabled);
+
+    [PreserveSig]
+    int GetIsBuiltInErrorPageEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutIsBuiltInErrorPageEnabled(int enabled);
+
+    // ---- ICoreWebView2Settings2, slots 19 and 20 ---------------------------------------------
+
+    [PreserveSig]
+    int UnusedGetUserAgent();
+
+    // 20
+    [PreserveSig]
+    int UnusedPutUserAgent();
+
+    // ---- ICoreWebView2Settings3, slots 21 and 22 ---------------------------------------------
+
+    [PreserveSig]
+    int GetAreBrowserAcceleratorKeysEnabled(out int enabled);
+
+    [PreserveSig]
+    int PutAreBrowserAcceleratorKeysEnabled(int enabled);
+}
+
 /// <summary>Identifiers of the interfaces this shim implements for the browser to call back on.</summary>
 internal static class WebViewIid
 {
+    /// <summary>The settings three revisions in, the one carrying the accelerator-key switch.</summary>
+    public static readonly Guid Settings3 = new("fdb5ab74-af33-4854-84f0-0a631deb5eba");
+
     public static readonly Guid EnvironmentOptions = new("2fde08a8-1e9a-4766-8c05-95a9ceb9d1c5");
     public static readonly Guid EnvironmentCompletedHandler = new("4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d");
     public static readonly Guid ControllerCompletedHandler = new("6c4819f3-c9b7-4260-8127-c9f5bde7f68c");
