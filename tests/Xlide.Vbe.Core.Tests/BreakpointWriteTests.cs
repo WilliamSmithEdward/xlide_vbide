@@ -10,8 +10,9 @@ namespace Xlide.Vbe.Core.Tests;
 /// margin draws from has to follow what the write did. Issue #84 is what following the text
 /// instead looks like: a statement deleted under a breakpoint left its dot on the next line, and
 /// F9 there asked the editor to toggle a breakpoint it did not have - which SET one, real and
-/// undrawn. Each case below is one shape of write and where the editor leaves breakpoints after
-/// it, measured on 2026-10-08 against a live Excel.
+/// undrawn. Each case below is one shape of write, measured on 2026-10-08 against a live Excel:
+/// the editor forgets a breakpoint on every line a write touches, ReplaceLine included, and the
+/// product puts back the ones on lines that still exist and still hold a statement.
 /// </summary>
 public class BreakpointWriteTests
 {
@@ -52,8 +53,18 @@ public class BreakpointWriteTests
     [Fact]
     public void ALineReplacedInPlaceKeepsItsBreakpoint()
     {
-        // Typing on the line: the editor replaced it one for one and kept the breakpoint.
+        // Typing on the line: it was replaced one for one and still holds a statement, so the
+        // breakpoint stays in the record - and is put back, because the editor forgot it.
         Assert.Equal([5], Breakpoints.AfterWrite([5], One(5, 1, 1, true), Written));
+        Assert.Empty(Breakpoints.LeftByEditor([5], One(5, 1, 1, true)));
+    }
+
+    [Fact]
+    public void TheEditorKeepsOnlyTheLinesAWriteLeftAlone()
+    {
+        // Lines 4 and 5 became one line: the editor forgot 4 and 5, kept 3, and holds the old
+        // 7 as 6.
+        Assert.Equal([3, 6], Breakpoints.LeftByEditor([3, 4, 5, 7], One(4, 2, 1, false)));
     }
 
     [Fact]

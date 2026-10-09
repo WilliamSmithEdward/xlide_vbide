@@ -1860,8 +1860,12 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetCaretMessage));
     }
 
-    /// <summary>Selects a span, caret at its end, and reveals it: what a compile error points at.</summary>
-    public void Select(int line, int column, int endLine, int endColumn)
+    /// <summary>
+    /// Selects a span in a module, caret at its end, once that module is the one showing: what a
+    /// compile error points at. The page activates documents on its own time, so the landing is
+    /// named with its module and waits for it rather than hitting whichever editor is active.
+    /// </summary>
+    public void Select(string module, string? project, int line, int column, int endLine, int endColumn)
     {
         if (!_loaded || line < 1 || endLine < line)
         {
@@ -1869,7 +1873,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         Post(JsonSerializer.Serialize(
-            new SetCaretMessage("setCaret", line, Math.Max(1, column), endLine, Math.Max(1, endColumn)),
+            new SetCaretMessage("setCaret", line, Math.Max(1, column), endLine, Math.Max(1, endColumn), module, project),
             EditorMessageContext.Default.SetCaretMessage));
     }
 

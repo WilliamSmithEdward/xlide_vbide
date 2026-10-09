@@ -244,7 +244,12 @@ public sealed record SetCaretMessage(
     // token a compile error named, selected the way the native editor selects it. Absent for a
     // plain caret, so the page's reading of the message is unchanged.
     [property: JsonPropertyName("endLine"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndLine = null,
-    [property: JsonPropertyName("endColumn"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndColumn = null);
+    [property: JsonPropertyName("endColumn"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndColumn = null,
+    // The module the caret belongs to, by name and workbook display name. Named, the page waits
+    // for that module to be the one showing rather than placing the caret in whichever editor is
+    // active when the message lands.
+    [property: JsonPropertyName("module"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Module = null,
+    [property: JsonPropertyName("project"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Project = null);
 
 /// <summary>
 /// The modules the editor has open, and which one is showing. Projects runs parallel to

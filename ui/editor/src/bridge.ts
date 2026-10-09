@@ -85,7 +85,7 @@ export type HostMessage =
   | { type: "formMarkupVocabulary"; kinds: FormMarkupKind[] }
   | { type: "designerApplySave"; moduleName: string; project?: string | null; run?: boolean }
   | { type: "revealLine"; line: number }
-  | { type: "setCaret"; line: number; column: number; endLine?: number; endColumn?: number }
+  | { type: "setCaret"; line: number; column: number; endLine?: number; endColumn?: number; module?: string; project?: string }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setInstallPath"; path: string | null }
@@ -1168,8 +1168,14 @@ export class EditorBridge {
     this.applyPendingCaret();
   }
 
-  /** A caret waiting for its module to be shown; applied when the active document matches. */
-  private pendingCaret: { module: string; project: string | null; line: number; column: number; selectLine: boolean } | null = null;
+  /**
+   * A caret waiting for its module to be shown; applied when the active document matches. With
+   * an `end` it lands as a selection from the caret to there.
+   */
+  private pendingCaret: {
+    module: string; project: string | null; line: number; column: number; selectLine: boolean;
+    end?: { line: number; column: number };
+  } | null = null;
 
   /**
    * One stub gesture awaiting its landing: when the host's next setCaret arrives - the stub's
@@ -1209,10 +1215,14 @@ export class EditorBridge {
     }
 
     const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
+    const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
     if (pending.selectLine) {
       editor.setSelection(new monaco.Selection(line, 1, line, model.getLineMaxColumn(line)));
+    } else if (pending.end) {
+      const endLine = Math.min(Math.max(pending.end.line, line), model.getLineCount());
+      const endColumn = Math.min(Math.max(pending.end.column, 1), model.getLineMaxColumn(endLine));
+      editor.setSelection(new monaco.Selection(line, column, endLine, endColumn));
     } else {
-      const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
       editor.setPosition({ lineNumber: line, column });
     }
     editor.revealLineInCenterIfOutsideViewport(line);
@@ -2223,12 +2233,29 @@ export class EditorBridge {
           return;
         }
 
+        // NAMED WITH ITS MODULE, the caret waits for that module to be the one showing: the
+        // host has just asked for it, and the page activates documents on its own time, so a
+        // caret placed at once lands in whichever editor is still active. With an end it is a
+        // SELECTION - the token a compile error named, selected as the native editor selects it
+        // after the error box closes (#86).
+        if (message.module !== undefined) {
+          this.pendingCaret = {
+            module: message.module,
+            project: message.project ?? null,
+            line: message.line,
+            column: message.column,
+            selectLine: false,
+            ...(message.endLine !== undefined && message.endColumn !== undefined
+              ? { end: { line: message.endLine, column: message.endColumn } }
+              : {}),
+          };
+          this.applyPendingCaret();
+          return;
+        }
+
         // The caret decides what an editor command acts on, and the host copies it into the
         // native pane before running one, so this is how anything outside the page aims a
-        // Run or a Step at a particular procedure.
-        //
-        // With an end, it is a SELECTION: the token a compile error named, selected as the
-        // native editor selects it after the error box closes (#86).
+        // Run or a Step at a particular procedure. With an end, it is a selection.
         if (message.endLine !== undefined && message.endColumn !== undefined) {
           const span = new monaco.Range(message.line, message.column, message.endLine, message.endColumn);
           this.ed()?.setSelection(span);
