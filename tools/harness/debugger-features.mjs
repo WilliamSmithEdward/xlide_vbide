@@ -244,6 +244,150 @@ try {
   await api.immediate('ThisWorkbook.Worksheets(1).Range("Z99").ClearContents').catch(() => {});
   await api.component("remove", { name: witnessName, project: project.projectId }).catch(() => {});
 
+  /* ---- breakpoints follow the write, not the text (#84) ------------------------------- */
+
+  /*
+   * THE EDITOR KEEPS THE REAL BREAKPOINTS AND WILL NOT SAY WHERE THEY ARE, so the margin draws
+   * from a record of what went through this product, and that record has to move the way the
+   * editor's do: a line replaced in place keeps its breakpoint, a deleted line loses it. The
+   * record used to follow the TEXT instead. A deleted statement left its dot on the next line,
+   * a run did not stop, and F9 on the dot asked the editor to toggle a breakpoint it did not
+   * have - which SET one that nothing drew (#84). Each shape below is judged by the one witness
+   * that cannot be argued with: a run that stops, or does not, and where.
+   */
+  console.log("\n  breakpoints across edits:");
+  const bpName = `BpWitness${process.pid % 10000}`;
+  await api.component("remove", { name: bpName, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name: bpName, project: project.projectId });
+  await api.writeModule(bpName, [
+    "Option Explicit", "",
+    "Public Sub Walk()",
+    '    ThisWorkbook.Worksheets(1).Range("Z97").Value = 1',
+    '    ThisWorkbook.Worksheets(1).Range("Z97").Value = 2',
+    "End Sub",
+  ].join(CRLF), project.projectId);
+  await until("the breakpoint witness to be there",
+    async () => (await api.readModule(bpName, project.projectId).catch(() => null)) !== null, 15000);
+  await api.pane("open", { module: bpName, project: project.projectId });
+  await until(`${bpName} to be shown`, async () => (await api.state()).shownModule === bpName);
+
+  const dotsDrawn = async () => (await api.ask(`(() => {
+    const model = window.xlideBridge.workspace.activeEditor()?.getModel();
+    return model ? model.getAllDecorations()
+      .filter((d) => (d.options.glyphMarginClassName ?? "").includes("xlide-breakpoint-glyph"))
+      .map((d) => d.range.startLineNumber) : [];
+  })()`)) ?? [];
+  const recordedIn = async () => ((await api.breakpoints()).breakpoints ?? [])
+    .find((r) => r.module.toLowerCase() === bpName.toLowerCase())?.lines ?? [];
+  const editPage = (script) => api.ask(`(() => {
+    const ed = window.xlideBridge.workspace.activeEditor();
+    const m = ed.getModel();
+    ed.focus();
+    ${script};
+    return m.getLineCount();
+  })()`);
+
+  // Where a run of Walk stops, or null when it runs through. Reset either way.
+  const stopsAt = async () => {
+    await api.caret(3, { module: bpName, project: project.projectId });
+    await wait(400);
+    await api.command("run");
+    let at = null;
+    for (let tick = 0; tick < 16 && at === null; tick += 1) {
+      await wait(250);
+      if (await stopped()) { at = (await api.native()).caretLine; }
+    }
+    await api.command("reset").catch(() => {});
+    await wait(900);
+    return at;
+  };
+
+  await api.breakpoint(bpName, 4, { project: project.projectId, state: "on" });
+  await wait(600);
+  check("a breakpoint set on line 4 is drawn there",
+    JSON.stringify(await dotsDrawn()) === "[4]", JSON.stringify(await dotsDrawn()));
+
+  await editPage("ed.setSelection({ startLineNumber: 4, startColumn: m.getLineMaxColumn(4) - 1, endLineNumber: 4, endColumn: m.getLineMaxColumn(4) })");
+  await api.type("7");
+  await wait(1500);
+  const afterTyping = await stopsAt();
+  check("typing on the line keeps the editor's breakpoint on it", afterTyping === 4, `stopped at ${afterTyping}`);
+  check("and the record still holds it",
+    JSON.stringify(await recordedIn()) === "[4]", JSON.stringify(await recordedIn()));
+
+  await editPage("ed.setSelection({ startLineNumber: 4, startColumn: 1, endLineNumber: 5, endColumn: 1 })");
+  await api.act("press", { key: "Delete" });
+  await wait(1500);
+  check("deleting the statement drops its breakpoint from the record",
+    (await recordedIn()).length === 0, JSON.stringify(await recordedIn()));
+  check("and from the margin", (await dotsDrawn()).length === 0, JSON.stringify(await dotsDrawn()));
+  const afterDelete = await stopsAt();
+  check("and the editor holds none either: the run runs through", afterDelete === null, `stopped at ${afterDelete}`);
+
+  // F9 on the statement now on line 4 sets one the editor and the margin agree on.
+  await api.caret(4, { module: bpName, project: project.projectId });
+  await wait(300);
+  await api.command("toggleBreakpoint");
+  await wait(600);
+  check("F9 there sets a breakpoint that is drawn",
+    JSON.stringify(await dotsDrawn()) === "[4]", JSON.stringify(await dotsDrawn()));
+  const afterToggle = await stopsAt();
+  check("and that the run stops at", afterToggle === 4, `stopped at ${afterToggle}`);
+
+  await api.breakpoint(bpName, 4, { project: project.projectId, state: "off" }).catch(() => {});
+  await api.immediate('ThisWorkbook.Worksheets(1).Range("Z97").ClearContents').catch(() => {});
+  await api.component("remove", { name: bpName, project: project.projectId }).catch(() => {});
+
+  /* ---- a compile error is followed to its line (#86) ----------------------------------- */
+
+  /*
+   * THE NATIVE EDITOR TAKES YOU TO THE ERROR: once its "Compile error" box closes, its caret
+   * is on the token it complained about, in whichever module holds it. The surface followed
+   * the module and not the caret, so the developer saw the right module open at wherever its
+   * caret last was and found the line by hand (#86). The witness is the page's own selection.
+   */
+  console.log("\n  a compile error, followed:");
+  const errName = `CompileWitness${process.pid % 10000}`;
+  await api.component("remove", { name: errName, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name: errName, project: project.projectId });
+  await api.writeModule(errName, [
+    "Option Explicit", "",
+    "Public Sub DoWork()",
+    "    Dim n As Long",
+    "    n = Undefined86 + 1",
+    "End Sub",
+  ].join(CRLF), project.projectId);
+  await until("the compile witness to be there",
+    async () => (await api.readModule(errName, project.projectId).catch(() => null)) !== null, 15000);
+
+  // From ANOTHER module, as the reporter compiled.
+  await api.pane("open", { module: "Runner", project: project.projectId });
+  await until("Runner to be shown again", async () => (await api.state()).shownModule === "Runner");
+  const failed = await api.compile();
+  check("a compile error is reported as data",
+    failed.started !== false && failed.compiled === false
+      && (failed.errors ?? []).some((e) => /Variable not defined/i.test(e)),
+    JSON.stringify(failed).slice(0, 200));
+
+  await until("the surface to follow the error", async () => {
+    const focus = (await api.ui()).focus;
+    return focus.model?.toLowerCase().endsWith(`/${errName.toLowerCase()}`) && focus.line === 5 ? focus : null;
+  }, 5000).catch(() => null);
+  const errorNative = await api.native();
+  const errorFocus = (await api.ui()).focus;
+  check("the editor's caret is on the bad token",
+    errorNative.activeModule === errName && errorNative.caretLine === 5 && errorNative.caretColumn === 9,
+    `${errorNative.activeModule} ${errorNative.caretLine}:${errorNative.caretColumn}`);
+  check("and the surface followed it to the module",
+    errorFocus.model?.toLowerCase().endsWith(`/${errName.toLowerCase()}`) === true, errorFocus.model);
+  const selected = await api.ask(`(() => {
+    const s = window.xlideBridge.workspace.activeEditor()?.getSelection();
+    return s ? [s.startLineNumber, s.startColumn, s.endLineNumber, s.endColumn] : null;
+  })()`);
+  check("with the token selected as the native editor selects it",
+    JSON.stringify(selected) === "[5,9,5,20]", JSON.stringify(selected));
+  await api.component("remove", { name: errName, project: project.projectId }).catch(() => {});
+
   /* ---- where the commands live, and the state that greys them --------------------------- */
 
   /*
@@ -308,8 +452,10 @@ try {
   check("and the toggle is up again",
     (await api.bars("designMode")).places.every((one) => one.state === 0), "state");
 } finally {
-  await api.component("remove", { name: `RunWitness${process.pid % 10000}`, project: project.projectId })
-    .catch(() => {});
+  for (const witness of ["RunWitness", "BpWitness", "CompileWitness"]) {
+    await api.component("remove", { name: `${witness}${process.pid % 10000}`, project: project.projectId })
+      .catch(() => {});
+  }
 
   // Design mode is a HOST state and it outlives this process. A suite that leaves it on leaves
   // every suite after it unable to run anything at all, with nothing saying why.

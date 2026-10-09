@@ -166,4 +166,68 @@ public static class Breakpoints
 
         return false;
     }
+
+    /// <summary>
+    /// One window a write put into a module, in the numbering the module had BEFORE the write:
+    /// <paramref name="Removing"/> lines from <paramref name="At"/> became <paramref name="Inserting"/>
+    /// lines. <paramref name="InPlace"/> says they were replaced one for one, line by line, which
+    /// leaves the editor's breakpoints on them; otherwise the lines were deleted and new ones
+    /// inserted, and the editor forgot every breakpoint they carried.
+    /// </summary>
+    public readonly record struct WrittenWindow(int At, int Removing, int Inserting, bool InPlace);
+
+    /// <summary>
+    /// Where a module's breakpoints are after a write, from where they were before it.
+    ///
+    /// The editor keeps its own breakpoints and exposes no way to read them, so the record this
+    /// product draws from has to follow what the write DID rather than what the text looks like:
+    /// a line below a window moves by what the window grew or shrank, a line replaced in place
+    /// keeps its breakpoint while it still holds a statement, and a deleted line - even one
+    /// deleted and inserted again with the same text - takes its breakpoint with it. Issue #84
+    /// was the record following the text instead: a deleted statement left its dot on the next
+    /// line, and a toggle there set a breakpoint the editor held and nothing drew.
+    ///
+    /// <paramref name="windows"/> ascend and do not overlap, as a diff's do. <paramref name="textAfter"/>
+    /// is the module's lines once written, for the statement test.
+    /// </summary>
+    public static SortedSet<int> AfterWrite(
+        IEnumerable<int> lines, IReadOnlyList<WrittenWindow> windows, IReadOnlyList<string> textAfter)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(windows);
+        ArgumentNullException.ThrowIfNull(textAfter);
+
+        var after = new SortedSet<int>();
+        foreach (var line in lines)
+        {
+            if (Landing(line, windows) is { } landed && CanCarry(textAfter, landed))
+            {
+                after.Add(landed);
+            }
+        }
+
+        return after;
+    }
+
+    /// <summary>The line's number after the windows, or null when a window took the line.</summary>
+    private static int? Landing(int line, IReadOnlyList<WrittenWindow> windows)
+    {
+        var shift = 0;
+        foreach (var window in windows)
+        {
+            if (line < window.At)
+            {
+                break;
+            }
+
+            if (line < window.At + window.Removing)
+            {
+                return window.InPlace ? line + shift : null;
+            }
+
+            shift += window.Inserting - window.Removing;
+        }
+
+        return line + shift;
+    }
 }

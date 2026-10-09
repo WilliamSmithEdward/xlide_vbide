@@ -85,7 +85,7 @@ export type HostMessage =
   | { type: "formMarkupVocabulary"; kinds: FormMarkupKind[] }
   | { type: "designerApplySave"; moduleName: string; project?: string | null; run?: boolean }
   | { type: "revealLine"; line: number }
-  | { type: "setCaret"; line: number; column: number }
+  | { type: "setCaret"; line: number; column: number; endLine?: number; endColumn?: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setInstallPath"; path: string | null }
@@ -2226,6 +2226,15 @@ export class EditorBridge {
         // The caret decides what an editor command acts on, and the host copies it into the
         // native pane before running one, so this is how anything outside the page aims a
         // Run or a Step at a particular procedure.
+        //
+        // With an end, it is a SELECTION: the token a compile error named, selected as the
+        // native editor selects it after the error box closes (#86).
+        if (message.endLine !== undefined && message.endColumn !== undefined) {
+          const span = new monaco.Range(message.line, message.column, message.endLine, message.endColumn);
+          this.ed()?.setSelection(span);
+          this.ed()?.revealRangeInCenterIfOutsideViewport(span);
+          return;
+        }
         this.ed()?.setPosition({ lineNumber: message.line, column: message.column });
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);
         return;

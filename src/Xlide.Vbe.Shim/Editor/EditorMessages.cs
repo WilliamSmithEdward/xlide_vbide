@@ -239,7 +239,12 @@ public sealed record RevealLineMessage(
 public sealed record SetCaretMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("line")] int Line,
-    [property: JsonPropertyName("column")] int Column);
+    [property: JsonPropertyName("column")] int Column,
+    // The end of a SELECTION, when the caret is meant to land on a span rather than a point: the
+    // token a compile error named, selected the way the native editor selects it. Absent for a
+    // plain caret, so the page's reading of the message is unchanged.
+    [property: JsonPropertyName("endLine"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndLine = null,
+    [property: JsonPropertyName("endColumn"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EndColumn = null);
 
 /// <summary>
 /// The modules the editor has open, and which one is showing. Projects runs parallel to
