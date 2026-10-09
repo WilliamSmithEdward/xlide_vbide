@@ -969,13 +969,6 @@ internal sealed class EditorSurface : IDisposable
     /// properties reflect it. This is what releases the hold.</summary>
     public Action<int>? CaretLineSettled { get; set; }
 
-    /// <summary>
-    /// Raised when an edit added or removed lines in a module: everything anchored in it below
-    /// afterLine moves by delta. This is how line-anchored bookkeeping - breakpoints - follows
-    /// the text.
-    /// </summary>
-    public Action<string, int, int>? LinesShifted { get; set; }
-
     /// <summary>The page asked to search: id, query, matchCase, wholeWord, scope.</summary>
     public Action<int, string, bool, bool, string>? SearchRequested { get; set; }
 
@@ -1868,6 +1861,23 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
+    /// Selects a span in a module, caret at its end, once that module is the one showing: what a
+    /// compile error points at. The page activates documents on its own time, so the landing is
+    /// named with its module and waits for it rather than hitting whichever editor is active.
+    /// </summary>
+    public void Select(string module, string? project, int line, int column, int endLine, int endColumn)
+    {
+        if (!_loaded || line < 1 || endLine < line)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SetCaretMessage("setCaret", line, Math.Max(1, column), endLine, Math.Max(1, endColumn), module, project),
+            EditorMessageContext.Default.SetCaretMessage));
+    }
+
+    /// <summary>
     /// Writes the developer's edits back to the module now, if there are any.
     ///
     /// Called before anything that reads the module: running, stepping, switching module, or
@@ -2137,43 +2147,14 @@ internal sealed class EditorSurface : IDisposable
                             editedDoc.Unwritten = true;
                             _overlay?.StartWriteTimer(WriteDelayMilliseconds);
 
-                            // Breakpoints are line-anchored bookkeeping, and edits move lines.
-                            // Each change that adds or removes lines shifts every anchor below
-                            // it, so a dot stays on the statement it was set on instead of
-                            // drifting onto whatever scrolled into its number - the ghost dot
-                            // no click could remove (2026-08-04).
-                            if (document.RootElement.TryGetProperty("changes", out var shiftSet)
-                                && shiftSet.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var change in shiftSet.EnumerateArray())
-                                {
-                                    if (!change.TryGetProperty("startLine", out var startElement)
-                                        || !startElement.TryGetInt32(out var startLine)
-                                        || !change.TryGetProperty("endLine", out var endElement)
-                                        || !endElement.TryGetInt32(out var endLine))
-                                    {
-                                        continue;
-                                    }
-
-                                    var newlines = 0;
-                                    var body = change.TryGetProperty("text", out var textElement)
-                                        ? textElement.GetString() ?? string.Empty
-                                        : string.Empty;
-                                    foreach (var character in body)
-                                    {
-                                        if (character == '\n')
-                                        {
-                                            newlines++;
-                                        }
-                                    }
-
-                                    var delta = newlines - (endLine - startLine);
-                                    if (delta != 0)
-                                    {
-                                        LinesShifted?.Invoke(editedDoc.Module, startLine, delta);
-                                    }
-                                }
-                            }
+                            // THE BREAKPOINT RECORD DOES NOT FOLLOW THE TYPING. It used to shift
+                            // with every edit that added or removed lines, and that is the record
+                            // of what the EDITOR holds, which moves only when the text is written
+                            // back - and moves by what the write did, not by what the text looks
+                            // like: a deleted statement takes its breakpoint with it, and the shift
+                            // put the dot on the next line instead (#84). The page's own margin
+                            // decorations ride the edit until the write, and the write-back
+                            // reconciles the record from the windows it put in.
 
                             // The findings shown must describe this text, not the text as of
                             // the last write: a deleted error must go, and it must go soon -

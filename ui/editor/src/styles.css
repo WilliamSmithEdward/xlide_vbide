@@ -3780,7 +3780,13 @@ body.objbrowser-page #objbrowser-card {
   background: rgba(255, 210, 74, 0.16);
 }
 
-.xlide-current-line-glyph::after {
+/* ON ::before, NOT ::after. Monaco draws every glyph decoration of a line in ONE element with
+   the class names joined, so this arrow and the breakpoint dot below share an element - and a
+   pseudo-element is one per element. Both on ::after, the two rules cascaded into one box: a
+   red circle wearing the arrow as a yellow left border, 20px tall from a 5px offset, drawn
+   half a line low (the owner's screenshot, 2026-10-08). The dots keep ::after; the arrow gets
+   ::before and sits over them through its z-index. */
+.xlide-current-line-glyph::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -3794,7 +3800,7 @@ body.objbrowser-page #objbrowser-card {
 }
 
 /* Where a dragged execution-point arrow would land. */
-.xlide-current-line-drag::after {
+.xlide-current-line-drag::before {
   opacity: 0.5;
 }
 
@@ -3854,7 +3860,7 @@ body.objbrowser-page #objbrowser-card {
 }
 
 /* The current-line arrow must sit over the breakpoint dot when both land on one line. */
-.xlide-current-line-glyph::after {
+.xlide-current-line-glyph::before {
   z-index: 1;
 }
 

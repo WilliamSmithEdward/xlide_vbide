@@ -1338,7 +1338,6 @@ internal sealed partial class AddInSession : IDisposable
             _editorSurface?.Notify(refused);
         };
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
-        _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
@@ -2339,6 +2338,18 @@ internal sealed partial class AddInSession : IDisposable
         var outcome = VbeCommands.Execute(_editor, command);
         var ran = outcome.Ran;
 
+        // A COMPILE ERROR IS FOLLOWED TO ITS LINE. The editor answers Compile with a modal and,
+        // once that closes, its own caret on the token it complained about - in whichever module
+        // holds it. The surface used to follow the module and not the caret, so the developer saw
+        // the right module open at wherever its caret last was and had to find the error by hand
+        // (#86). The command is POSTED, like Run: it has returned here before the compile has
+        // run, so the box and the caret both come later, and a watch off this thread waits for
+        // them.
+        if (command == VbeCommands.Command.Compile && ran)
+        {
+            WatchCompileOutcome();
+        }
+
         /*
          * EXCEL'S DESIGN MODE IS A STATE, AND IT USED TO BE AN INVISIBLE ONE.
          *
@@ -2496,6 +2507,157 @@ internal sealed partial class AddInSession : IDisposable
         RefreshSurfacePlacement();
 
         return outcome;
+    }
+
+    /// <summary>The editor's own caret: the active code pane's module, project and selection.</summary>
+    private sealed record PaneSelection(
+        string Module, string? ProjectId, int StartLine, int StartColumn, int EndLine, int EndColumn);
+
+    /// <summary>Where the editor's own caret is right now, or null when no code pane is active.</summary>
+    private PaneSelection? ActivePaneSelection()
+    {
+        try
+        {
+            using var pane = _editor.GetObject("ActiveCodePane");
+            if (pane is null)
+            {
+                return null;
+            }
+
+            Span<int> selection = stackalloc int[4];
+            pane.InvokeInt32s("GetSelection", selection);
+
+            using var module = pane.GetObject("CodeModule");
+            using var component = module?.GetObject("Parent");
+            var name = component?.GetString("Name");
+            if (name is null || selection[0] < 1)
+            {
+                return null;
+            }
+
+            // Named with its workbook, for the same reason the debugger's stop is: two open
+            // workbooks can each hold the module's name.
+            string? projectId = null;
+            try
+            {
+                using var collection = component?.GetObject("Collection");
+                using var owner = collection?.GetObject("Parent");
+                projectId = owner is null ? null : ProjectReader.Identity(owner).Id;
+            }
+            catch (Exception)
+            {
+                // The workbook stays unnamed, and the module resolves shown-project-first.
+            }
+
+            return new PaneSelection(name, projectId, selection[0], selection[1], selection[2], selection[3]);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"pane: the active code pane would not say where it is ({ex.GetType().Name})");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Waits, off the host thread, for what a Compile just started comes to: nothing, or the
+    /// editor's "Compile error" box. The box is modal on the host thread, so what it says can
+    /// only be read from another thread and only while it stands; once it has gone - the
+    /// developer pressed OK, or the api's own compile route answered it - the editor's caret is
+    /// on the token it named, and the surface is taken there on the host thread.
+    ///
+    /// A compile that raises no box within fifteen seconds is taken to have passed. A box that
+    /// has appeared is waited on for as long as it stands, within reason.
+    /// </summary>
+    private void WatchCompileOutcome()
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            string? error = null;
+            var started = Environment.TickCount64;
+            var deadline = started + 15000;
+            while (Environment.TickCount64 < deadline)
+            {
+                await Task.Delay(50).ConfigureAwait(false);
+
+                // A box the api's compile route or the dialog guard answered between two reads
+                // here still counts: the watch keeps what it answered and when.
+                var (answered, answeredAt) = Diagnostics.DialogWatch.LastAnswered;
+                if (answeredAt > started && answered.Contains("Compile error", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = Regex.Replace(answered, @"\s+", " ").Trim();
+                    break;
+                }
+
+                var standing = false;
+                try
+                {
+                    foreach (var dialog in Diagnostics.DialogWatch.Dialogs())
+                    {
+                        if (dialog.Text.Contains("Compile error", StringComparison.OrdinalIgnoreCase))
+                        {
+                            error = Regex.Replace(dialog.Text, @"\s+", " ").Trim();
+                            standing = true;
+
+                            // Seen: from here the wait is for the developer, not for the editor.
+                            deadline = Environment.TickCount64 + 600000;
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // A window that vanished mid-read; the next pass reads again.
+                }
+
+                if (error is not null && !standing)
+                {
+                    break;
+                }
+            }
+
+            if (error is null)
+            {
+                return;
+            }
+
+            var said = error;
+            surface.RunOnHostThread(() => FollowCompileError(said));
+        });
+    }
+
+    /// <summary>
+    /// Takes the surface to where a compile error left the editor's caret: the module the error
+    /// is in, with the token it named selected the way the native editor selects it - and says
+    /// what the error box said, since the box has gone by the time the surface can move.
+    /// </summary>
+    private void FollowCompileError(string error)
+    {
+        var at = ActivePaneSelection();
+        if (at is null)
+        {
+            Log.Info($"compile: {error} - the editor has no code pane to follow");
+            return;
+        }
+
+        if (!string.Equals(at.Module, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(at.ProjectId, _shownProject, StringComparison.OrdinalIgnoreCase))
+        {
+            ShowModuleInSurface(at.Module, at.ProjectId);
+        }
+
+        // Named with its module, so the page places it once that module is showing: the switch
+        // above lands on the page's own time, and an unnamed caret went into the editor that was
+        // still active (the first live run of this, 2026-10-08: the right module, caret at 1:1).
+        _editorSurface?.Select(at.Module, DisplayFromProjectId(at.ProjectId),
+            at.StartLine, at.StartColumn, at.EndLine, at.EndColumn);
+
+        Log.Info($"compile: {error} - {at.Module}({at.StartLine},{at.StartColumn})");
+        _editorSurface?.Notify($"{error} - {at.Module}, line {at.StartLine}.");
     }
 
     /// <summary>
@@ -2716,6 +2878,10 @@ internal sealed partial class AddInSession : IDisposable
             // is no diff to attempt and no window to hear about.
             IReadOnlyList<LineWindow>? windows = null;
 
+            // How many lines the module held when it was replaced whole, for the breakpoint
+            // record: a replacement deletes every line, and the editor's breakpoints with them.
+            int? replacedWhole = null;
+
             // TIMED, because this is the host thread and the numbers were guesses until they were
             // not. The two halves answer different questions: `found` is ours - comparing the
             // texts and deciding what to write - and `took` is the editor's, taking it. A write
@@ -2755,6 +2921,7 @@ internal sealed partial class AddInSession : IDisposable
                 var wasHolding = wasHoldingBefore ?? ProjectReader.ReadSource(found);
 
                 var existing = module.GetInt32("CountOfLines");
+                replacedWhole = existing;
                 if (existing > 0)
                 {
                     module.Invoke("DeleteLines", 1, existing);
@@ -2782,6 +2949,14 @@ internal sealed partial class AddInSession : IDisposable
                     }
                 }
             }
+
+            // THE BREAKPOINT RECORD FOLLOWS THE WRITE, window by window: see
+            // ReconcileBreakpointsAfterWrite for the shapes and the issue behind it.
+            ReconcileBreakpointsAfterWrite(component, DisplayFromProjectId(foundOwner ?? owner),
+                replacedWhole is { } held
+                    ? [new Core.Editor.Breakpoints.WrittenWindow(1, held, 0, InPlace: false)]
+                    : windows is null ? [] : [.. windows.Select(window => window.Written)],
+                text);
 
             // READ BACK ONLY WHAT WAS WRITTEN, when what was written can be checked on its own.
             //
@@ -3022,8 +3197,58 @@ internal sealed partial class AddInSession : IDisposable
     /// many the module should hold afterwards, and the exact text of the window. Enough to check
     /// the write by reading back THAT WINDOW rather than the whole module - see the read-back in
     /// <see cref="WriteModule"/>. Null when nothing was written at all.
+    ///
+    /// And where the window stood BEFORE the write - <paramref name="BaselineAt"/>, the
+    /// <paramref name="Removing"/> lines it replaced, and whether it replaced them
+    /// <paramref name="InPlace"/> - which is what the breakpoint record follows afterwards.
     /// </summary>
-    private sealed record LineWindow(int At, int Count, int TotalLines, string Text);
+    private sealed record LineWindow(
+        int At, int Count, int TotalLines, string Text, int BaselineAt, int Removing, bool InPlace)
+    {
+        public Core.Editor.Breakpoints.WrittenWindow Written => new(BaselineAt, Removing, Count, InPlace);
+    }
+
+    /// <summary>
+    /// The most lines a window may hold and still be written line for line. Past this a paste is
+    /// a rewrite, and one deletion and one insertion are what the editor takes fastest.
+    /// </summary>
+    private const int InPlaceMostLines = 256;
+
+    /// <summary>
+    /// Replaces a window's lines one for one, which is the edit the editor takes without a reset,
+    /// and which says exactly which lines still exist afterwards - the ones whose breakpoints the
+    /// write-back then puts back, since the editor forgets a breakpoint on every line a write
+    /// touches, this call included (#84, measured 2026-10-08). A refusal part way puts the lines
+    /// already replaced back the same way.
+    /// </summary>
+    private static void ReplaceLines(DispatchObject module, int at, string text, string removed)
+    {
+        var lines = text.Split("\r\n", StringSplitOptions.None);
+        var before = removed.Split("\r\n", StringSplitOptions.None);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            try
+            {
+                module.Invoke("ReplaceLine", at + i, lines[i]);
+            }
+            catch
+            {
+                for (var back = i - 1; back >= 0 && back < before.Length; back--)
+                {
+                    try
+                    {
+                        module.Invoke("ReplaceLine", at + back, before[back]);
+                    }
+                    catch (Exception putBack)
+                    {
+                        Log.Error("write: a replaced line could not be put back", putBack);
+                    }
+                }
+
+                throw;
+            }
+        }
+    }
 
     /// <summary>
     /// Ordinary statements can be changed in the native VBE while stopped, including statements
@@ -3091,7 +3316,8 @@ internal sealed partial class AddInSession : IDisposable
         var shift = 0;
         foreach (var change in changes)
         {
-            placed.Add(new LineWindow(change.At + shift, change.Inserting, change.TotalLines, change.Text));
+            placed.Add(new LineWindow(change.At + shift, change.Inserting, change.TotalLines, change.Text,
+                change.At, change.Removing, InPlace: change.Removing == 1 && change.Inserting == 1));
             shift += change.Inserting - change.Removing;
         }
 
@@ -3165,6 +3391,7 @@ internal sealed partial class AddInSession : IDisposable
         // the first module of every fixture built through the door, leaving a workbook that
         // looked right and no longer exercised what it existed for (2026-08-07).
         var present = module.GetInt32("CountOfLines");
+        var inPlaceWindows = new bool[windows.Count];
 
         // FROM THE LAST WINDOW TO THE FIRST. Every window is addressed in the baseline's
         // numbering, and a window only moves the lines below it, so writing them bottom-up keeps
@@ -3180,8 +3407,22 @@ internal sealed partial class AddInSession : IDisposable
                 removing = Math.Max(0, present - (diff.At - 1));
             }
 
+            // LINE FOR LINE where the window neither grows nor shrinks, which is what typing
+            // produces: those lines still exist afterwards, and the breakpoint record puts their
+            // breakpoints back once the write is done, where a deleted line's are gone for good.
+            // Clamped windows and large ones take the two calls below as before.
+            var inPlace = removing == diff.Removing && removing == diff.Inserting
+                && removing > 0 && removing <= InPlaceMostLines;
+            inPlaceWindows[w] = inPlace;
+
             try
             {
+                if (inPlace)
+                {
+                    ReplaceLines(module, diff.At, diff.Text, diff.Removed);
+                    continue;
+                }
+
                 if (removing > 0)
                 {
                     module.Invoke("DeleteLines", diff.At, removing);
@@ -3245,9 +3486,11 @@ internal sealed partial class AddInSession : IDisposable
         // they inserted less what they removed.
         var placed = new List<LineWindow>(windows.Count);
         var shift = 0;
-        foreach (var diff in windows)
+        for (var w = 0; w < windows.Count; w++)
         {
-            placed.Add(new LineWindow(diff.At + shift, diff.Inserting, diff.TotalLines, diff.Text));
+            var diff = windows[w];
+            placed.Add(new LineWindow(diff.At + shift, diff.Inserting, diff.TotalLines, diff.Text,
+                diff.At, diff.Removing, inPlaceWindows[w]));
             shift += diff.Inserting - diff.Removing;
         }
 
@@ -4179,28 +4422,127 @@ internal sealed partial class AddInSession : IDisposable
 
     private static bool IsWordCharacter(char c) => char.IsLetterOrDigit(c) || c == '_';
 
-    /// <summary>Moves line-anchored breakpoints with the text they were set on.</summary>
-    private void OnLinesShifted(string module, int afterLine, int delta)
+    /// <summary>
+    /// Brings a module's breakpoints - the editor's and the record the margin draws from - to
+    /// where they belong after a write.
+    ///
+    /// The record used to follow the TEXT, shifting with every edit that added or removed lines.
+    /// The editor's own breakpoints follow the WRITE: lines below a window move with it, and a
+    /// line the write touched loses its breakpoint, whether it was deleted or replaced in place.
+    /// A replaced line still exists, so its breakpoint is put back; a deleted line's is gone.
+    /// Issue #84 is the gap between the record and the editor: a deleted statement left its dot
+    /// on the next line, a run did not stop, and F9 on the dot asked the editor to toggle a
+    /// breakpoint it did not have, which SET one that nothing drew.
+    /// </summary>
+    private void ReconcileBreakpointsAfterWrite(
+        string component, string? projectDisplay,
+        IReadOnlyList<Core.Editor.Breakpoints.WrittenWindow> windows, string text)
     {
-        var key = BreakpointKey(module);
+        if (windows.Count == 0)
+        {
+            return;
+        }
+
+        var key = WrittenKey(component, projectDisplay);
         if (!_breakpoints.TryGetValue(key, out var record) || record.Lines.Count == 0)
         {
             return;
         }
 
-        var lines = record.Lines;
+        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var wanted = Core.Editor.Breakpoints.AfterWrite(record.Lines, windows, lines);
+        var held = Core.Editor.Breakpoints.LeftByEditor(record.Lines, windows);
+        var shown = string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(projectDisplay, DisplayFromProjectId(_shownProject), StringComparison.OrdinalIgnoreCase);
 
-        var moved = new SortedSet<int>();
-        foreach (var line in lines)
+        // THE EDITOR FORGOT EVERY BREAKPOINT ON A LINE THE WRITE TOUCHED, replaced in place or
+        // not: measured through ReplaceLine from the Immediate window on 2026-10-08, and the run
+        // went straight past it. The ones worth keeping - a statement the developer typed on -
+        // are put back through the editor's own toggle, the one way there is to set one. Only on
+        // the module the surface is showing: the toggle acts on the editor's active pane, and a
+        // module written in the background has no pane this can safely aim at, so its
+        // breakpoints are gone from the record as they are from the editor.
+        foreach (var line in wanted.Where(line => !held.Contains(line)).ToList())
         {
-            moved.Add(line > afterLine ? Math.Max(afterLine, line + delta) : line);
+            if (!(shown && RestoreBreakpoint(component, line)))
+            {
+                wanted.Remove(line);
+            }
         }
 
-        if (!moved.SetEquals(lines))
+        if (wanted.SetEquals(record.Lines))
         {
-            _breakpoints[key] = record with { Lines = moved };
+            return;
+        }
+
+        Log.Info($"breakpoint: {component} written, [{string.Join(",", record.Lines)}] -> [{string.Join(",", wanted)}]");
+        _breakpoints[key] = record with { Lines = wanted };
+
+        if (shown)
+        {
             PublishBreakpoints();
-            Log.Verbose($"breakpoint: shifted with the text, now [{string.Join(",", moved)}]");
+        }
+    }
+
+    /// <summary>
+    /// The pane selection a breakpoint restore moved, to put back on the next poll. Not put back
+    /// at once: the toggle is POSTED by the editor and runs after this code returns, so a
+    /// selection restored on the spot is the one the toggle lands on - the breakpoint came back
+    /// one line down, on the line the caret had been (the first live run, 2026-10-08). While
+    /// stopped, that selection is what the poll reads as the current statement, so it goes back
+    /// as soon as the toggle has run.
+    /// </summary>
+    private (string Component, int StartLine, int StartColumn, int EndLine, int EndColumn)? _selectionToPutBack;
+
+    /// <summary>Sets again a breakpoint the editor forgot, through its own toggle.</summary>
+    private bool RestoreBreakpoint(string component, int line)
+    {
+        try
+        {
+            using var pane = FindCodePane(component, _shownProject);
+            if (pane is null)
+            {
+                return false;
+            }
+
+            // Only while stopped. In design mode the native caret is copied from the page
+            // before every command, so where the toggle leaves it does not matter.
+            Span<int> was = stackalloc int[4];
+            pane.InvokeInt32s("GetSelection", was);
+            if (_inBreak && was[0] >= 1 && _selectionToPutBack is null)
+            {
+                _selectionToPutBack = (component, was[0], was[1], was[2], was[3]);
+            }
+
+            pane.Invoke("SetSelection", line, 1, line, 1);
+            var ran = VbeCommands.Execute(_editor, VbeCommands.Command.ToggleBreakpoint).Ran;
+            Log.Info($"breakpoint: {component}({line}) put back after the write{(ran ? string.Empty : " - the editor refused")}");
+            return ran;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"breakpoint: {component}({line}) could not be put back after the write", ex);
+            return false;
+        }
+    }
+
+    /// <summary>Puts back the selection a breakpoint restore moved, once the posted toggle has run.</summary>
+    private void PutBackMovedSelection()
+    {
+        if (_selectionToPutBack is not { } moved)
+        {
+            return;
+        }
+
+        _selectionToPutBack = null;
+        try
+        {
+            using var pane = FindCodePane(moved.Component, _shownProject);
+            pane?.Invoke("SetSelection", moved.StartLine, moved.StartColumn, moved.EndLine, moved.EndColumn);
+        }
+        catch (Exception)
+        {
+            // The selection was on a line the write took away; the toggle's line stands.
         }
     }
 
@@ -4213,6 +4555,11 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
+        // THE EDITS FIRST, so the record below is reconciled with what the editor holds: a line
+        // deleted under a dot has taken the editor's breakpoint with it by the time this reads
+        // the record, and the lines are numbered as the editor numbers them.
+        _editorSurface?.FlushEdits();
+
         // Clearing is never validity-gated. A recorded dot must always answer a click,
         // whatever its line has since become: gating the clear on the line still being
         // executable left a drifted dot that five clicks could not remove (2026-08-04).
@@ -4223,7 +4570,21 @@ internal sealed partial class AddInSession : IDisposable
         // whether it sits inside a Type or an Enum, which the line itself cannot say - see
         // Core.Editor.Breakpoints, and the margin dots on Enum members that came of asking it
         // one line at a time.
-        if (!clearing && !Core.Editor.Breakpoints.CanCarry(SurfaceLines(), line))
+        var carries = Core.Editor.Breakpoints.CanCarry(SurfaceLines(), line);
+
+        // A RECORDED DOT ON A LINE THAT CANNOT CARRY ONE is a record the editor has already
+        // left: it holds no breakpoint there, so asking it to toggle one would SET one, or put
+        // "Breakpoint not allowed on this line" on screen for a blank. The record is corrected
+        // and the editor is not asked (#84).
+        if (clearing && !carries)
+        {
+            recorded!.Lines.Remove(line);
+            _editorSurface?.ShowBreakpoints([.. recorded.Lines]);
+            Log.Info($"breakpoint: {module}({line}) is no longer a statement; the stale record was dropped");
+            return;
+        }
+
+        if (!clearing && !carries)
         {
             // Refused silently on screen, by design (the developer, 2026-08-04): the hover
             // preview already showed an orange cross where no breakpoint can go, and a click
@@ -4236,9 +4597,8 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             // The command acts on the caret, so the caret is put on the line first. Everything the
-            // developer typed goes with it: a breakpoint is set by line number, and writing the
+            // developer typed went in above: a breakpoint is set by line number, and writing the
             // module afterwards would move it.
-            _editorSurface?.FlushEdits();
 
             // The SHOWN project's copy, not the first module of that name. Without it the
             // command lands in whichever workbook answered first, which is how a breakpoint got
@@ -6198,6 +6558,7 @@ internal sealed partial class AddInSession : IDisposable
         PerfCounters.Beat();
 
         WatchNativeUnlockPrompt();
+        PutBackMovedSelection();
 
         /*
          * THE IDLE TIER IS A WORKSPACE WATCH, NOT A DEBUG POLL, and everything below this is

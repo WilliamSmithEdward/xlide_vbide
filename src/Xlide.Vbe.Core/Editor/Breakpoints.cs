@@ -166,4 +166,94 @@ public static class Breakpoints
 
         return false;
     }
+
+    /// <summary>
+    /// One window a write put into a module, in the numbering the module had BEFORE the write:
+    /// <paramref name="Removing"/> lines from <paramref name="At"/> became <paramref name="Inserting"/>
+    /// lines. <paramref name="InPlace"/> says they were replaced one for one, line by line: the
+    /// lines still exist, so a breakpoint on one is worth putting back. The editor itself forgets
+    /// a breakpoint on EVERY line a write touches, ReplaceLine included - measured through the
+    /// Immediate window on 2026-10-08, the run went straight past it - and keeps only those on
+    /// lines the write left alone, moved by what the windows above them grew or shrank.
+    /// </summary>
+    public readonly record struct WrittenWindow(int At, int Removing, int Inserting, bool InPlace);
+
+    /// <summary>
+    /// Where a module's breakpoints should be after a write, from where they were before it:
+    /// what the margin draws and what the editor is brought to hold.
+    ///
+    /// The editor keeps its own breakpoints and exposes no way to read them, so the record this
+    /// product draws from has to follow what the write DID rather than what the text looks like:
+    /// a line below a window moves by what the window grew or shrank, a line replaced in place
+    /// keeps its breakpoint while it still holds a statement - put back by the caller, since the
+    /// editor forgot it - and a deleted line, even one deleted and inserted again with the same
+    /// text, takes its breakpoint with it. Issue #84 was the record following the text instead:
+    /// a deleted statement left its dot on the next line, and a toggle there set a breakpoint the
+    /// editor held and nothing drew.
+    ///
+    /// <paramref name="windows"/> ascend and do not overlap, as a diff's do. <paramref name="textAfter"/>
+    /// is the module's lines once written, for the statement test.
+    /// </summary>
+    public static SortedSet<int> AfterWrite(
+        IEnumerable<int> lines, IReadOnlyList<WrittenWindow> windows, IReadOnlyList<string> textAfter)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(windows);
+        ArgumentNullException.ThrowIfNull(textAfter);
+
+        var after = new SortedSet<int>();
+        foreach (var line in lines)
+        {
+            if (Landing(line, windows, keepInPlace: true) is { } landed && CanCarry(textAfter, landed))
+            {
+                after.Add(landed);
+            }
+        }
+
+        return after;
+    }
+
+    /// <summary>
+    /// Where the EDITOR's breakpoints are after a write: only the lines the write left alone,
+    /// moved by the windows above them. The difference from <see cref="AfterWrite"/> is what the
+    /// caller has to set again.
+    /// </summary>
+    public static SortedSet<int> LeftByEditor(IEnumerable<int> lines, IReadOnlyList<WrittenWindow> windows)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(windows);
+
+        var left = new SortedSet<int>();
+        foreach (var line in lines)
+        {
+            if (Landing(line, windows, keepInPlace: false) is { } landed)
+            {
+                left.Add(landed);
+            }
+        }
+
+        return left;
+    }
+
+    /// <summary>The line's number after the windows, or null when a window took the line.</summary>
+    private static int? Landing(int line, IReadOnlyList<WrittenWindow> windows, bool keepInPlace)
+    {
+        var shift = 0;
+        foreach (var window in windows)
+        {
+            if (line < window.At)
+            {
+                break;
+            }
+
+            if (line < window.At + window.Removing)
+            {
+                return keepInPlace && window.InPlace ? line + shift : null;
+            }
+
+            shift += window.Inserting - window.Removing;
+        }
+
+        return line + shift;
+    }
 }
