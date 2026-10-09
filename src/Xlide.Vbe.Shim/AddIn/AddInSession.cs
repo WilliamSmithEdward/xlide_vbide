@@ -6134,14 +6134,18 @@ internal sealed partial class AddInSession : IDisposable
                 // misdirection about where a Step acts, found by the first suite that asked the
                 // bar (2026-08-12). Once per stop and not per tick, so the developer's mid-break
                 // clicks are not fought; a step to a NEW line is a new stop and follows again.
+                //
+                // AND ONLY ONCE: the stopped line used to be revealed again on every tick in
+                // between, as a safety net for a caret sent before the page had switched to the
+                // stopped module. That net fought the developer's scrolling - a few lines up to
+                // read the code around the stop, and the view jumped back to it on the next tick
+                // (#88). The caret is named with its module now, so the page lands it once the
+                // module shows, and nothing is sent on the ticks after.
                 if (stopKey != _lastStopFollowed)
                 {
                     _lastStopFollowed = stopKey;
-                    _editorSurface?.SetCaret(line, Math.Max(1, selection[1]));
-                }
-                else
-                {
-                    _editorSurface?.Reveal(line);
+                    var column = Math.Max(1, selection[1]);
+                    _editorSurface?.Select(name!, DisplayFromProjectId(stoppedIn), line, column, line, column);
                 }
             }
 

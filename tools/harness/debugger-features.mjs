@@ -388,6 +388,57 @@ try {
     JSON.stringify(selected) === "[5,9,5,20]", JSON.stringify(selected));
   await api.component("remove", { name: errName, project: project.projectId }).catch(() => {});
 
+  /* ---- scrolling while stopped stays where the developer put it (#88) ----------------- */
+
+  /*
+   * The stopped line was revealed again on every poll tick while stopped - a safety net for a
+   * caret sent before the page had switched modules - and it fought the developer: scroll a
+   * few lines up to read the code around the stop, and the view jumped back on the next tick.
+   * The witness is the viewport, read a few ticks after a scroll to the top of a module long
+   * enough to scroll.
+   */
+  console.log("\n  scrolling while stopped:");
+  const scrollName = `ScrollWitness${process.pid % 10000}`;
+  const filler = [];
+  for (let n = 0; n < 150; n += 1) { filler.push(`' filler ${n}`); }
+  await api.component("remove", { name: scrollName, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name: scrollName, project: project.projectId });
+  await api.writeModule(scrollName, [
+    "Option Explicit", "", ...filler,
+    "Public Sub Deep()", "    Dim n As Long", "    n = 1", "    n = n + 1", "    n = n + 2", "End Sub",
+  ].join(CRLF), project.projectId);
+  await until("the scroll witness to be there",
+    async () => (await api.readModule(scrollName, project.projectId).catch(() => null)) !== null, 15000);
+  await api.pane("open", { module: scrollName, project: project.projectId });
+  await until(`${scrollName} to be shown`, async () => (await api.state()).shownModule === scrollName);
+  const deepStop = filler.length + 2 + 4;
+  await api.breakpoint(scrollName, deepStop, { project: project.projectId, state: "on" });
+  await wait(500);
+  await api.caret(filler.length + 3, { module: scrollName, project: project.projectId });
+  await wait(400);
+  await api.command("run");
+  const deepReached = await until("the deep stop", stopped, 15000).catch(() => false);
+  check("the run stopped deep in the long module", Boolean(deepReached));
+  if (deepReached) {
+    const viewport = async () => await api.ask(`(() => {
+      const ed = window.xlideBridge.workspace.activeEditor();
+      const ranges = ed.getVisibleRanges();
+      return ranges.length ? ranges[0].startLineNumber : null;
+    })()`);
+    await wait(1200);
+    const atStop = await viewport();
+    check("the stop was revealed", atStop !== null && atStop > 50, `first visible line ${atStop}`);
+    await api.ask(`window.xlideBridge.workspace.activeEditor().setScrollTop(0)`);
+    await wait(2000);
+    const afterScroll = await viewport();
+    check("scrolling to the top while stopped stays at the top two seconds later",
+      afterScroll !== null && afterScroll <= 3, `first visible line ${afterScroll}`);
+  }
+  await api.command("reset").catch(() => {});
+  await wait(900);
+  await api.breakpoint(scrollName, deepStop, { project: project.projectId, state: "off" }).catch(() => {});
+  await api.component("remove", { name: scrollName, project: project.projectId }).catch(() => {});
+
   /* ---- where the commands live, and the state that greys them --------------------------- */
 
   /*
@@ -452,7 +503,7 @@ try {
   check("and the toggle is up again",
     (await api.bars("designMode")).places.every((one) => one.state === 0), "state");
 } finally {
-  for (const witness of ["RunWitness", "BpWitness", "CompileWitness"]) {
+  for (const witness of ["RunWitness", "BpWitness", "CompileWitness", "ScrollWitness"]) {
     await api.component("remove", { name: `${witness}${process.pid % 10000}`, project: project.projectId })
       .catch(() => {});
   }
