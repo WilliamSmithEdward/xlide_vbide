@@ -794,6 +794,7 @@ function boot(): void {
         },
         selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),
         zorder: (control, front) => bridge.designerZOrder(id.module, id.project ?? null, control, front),
+        viewCode: () => bridge.activateModule(id.module, id.project ?? undefined),
         setProperty: (control, property, value) =>
           bridge.designerSetProperty(id.module, id.project ?? null, control, property, value),
         // The whole settings object with one field replaced, which is the call every control
@@ -2412,6 +2413,23 @@ function boot(): void {
     { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.F2, command: "-editor.action.changeAll" },
     { keybinding: monaco.KeyCode.F8, command: "-editor.action.marker.nextInFiles" },
     { keybinding: monaco.KeyMod.Shift | monaco.KeyCode.F8, command: "-editor.action.marker.prevInFiles" },
+
+    // THE NATIVE EDITOR'S OTHER KEYS, where the editor's own defaults did something else (the
+    // owner, 2026-10-09: "change those to match native"). Ctrl+G, Ctrl+R, F4 and Ctrl+L are
+    // answered in registerHostActions; Ctrl+Y, F7 and Shift+F7 by actions of their own below.
+    // Here the defaults come off those keys, and the native IntelliSense keys go to the editor's
+    // own popups: Ctrl+I quick info, Ctrl+J and Ctrl+Shift+J the member and constant lists, which
+    // are one completion list here, and Ctrl+Shift+I parameter info. Redo keeps Ctrl+Shift+Z.
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG, command: "-editor.action.gotoLine" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, command: "-redo" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL, command: "-expandLineSelection" },
+    { keybinding: monaco.KeyCode.F7, command: "-editor.action.wordHighlight.next" },
+    { keybinding: monaco.KeyMod.Shift | monaco.KeyCode.F7, command: "-editor.action.wordHighlight.prev" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, command: "-editor.action.triggerSuggest" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, command: "editor.action.showHover" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, command: "editor.action.triggerSuggest" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyJ, command: "editor.action.triggerSuggest" },
+    { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyI, command: "editor.action.triggerParameterHints" },
   ]);
 
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
@@ -2519,6 +2537,8 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     ["xlide.toggleBreakpoint", "Toggle Breakpoint", "toggleBreakpoint", monaco.KeyCode.F9],
     ["xlide.runToCursor", "Run To Cursor", "runToCursor",
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8],
+    // The Call Stack is the native editor's own window still, on the native editor's key.
+    ["xlide.callStack", "Call Stack", "callStack", monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
   ];
 
   for (const [id, label, command, key] of hostActions) {
@@ -2531,6 +2551,79 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
       run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
     });
   }
+
+  // THE NATIVE EDITOR'S WINDOW KEYS, answered by the panes that replaced those windows: Ctrl+G
+  // the Immediate window, Ctrl+R the Project Explorer, F4 the Properties window. The hook claims
+  // these too (VbeCommands.SurfaceCommandForKey), so they work from any pane as they do natively;
+  // declared here for the palette and as the fallback, like the three above. Palette only - the
+  // context menu is about the code under the pointer.
+  const paneActions: Array<[string, string, number, () => void]> = [
+    ["xlide.panel.immediate", "Immediate Window", monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG,
+      () => bridge.shell?.showImmediate()],
+    ["xlide.panel.explorer", "Project Explorer", monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyR,
+      () => bridge.shell?.showExplorer()],
+    ["xlide.panel.properties", "Properties Window", monaco.KeyCode.F4,
+      () => bridge.shell?.revealProperties()],
+  ];
+
+  for (const [id, label, key, run] of paneActions) {
+    editor.addAction({ id, label, keybindings: [key], run });
+  }
+
+  // CTRL+Y IS CUT LINE in the native editor, a reflex in every VBA developer's hands; the
+  // editor's own Ctrl+Y was Redo, which keeps Ctrl+Shift+Z. The whole line goes, its line
+  // break with it, whatever the selection covered; on the last line the break before it goes
+  // instead, so the line is gone rather than left blank.
+  editor.addAction({
+    id: "xlide.cutLine",
+    label: "Cut Line",
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY],
+    run: (target) => {
+      const model = target.getModel();
+      const selection = target.getSelection();
+      if (!model || !selection) {
+        return;
+      }
+      const first = selection.startLineNumber;
+      const last = selection.endLineNumber > first && selection.endColumn === 1
+        ? selection.endLineNumber - 1
+        : selection.endLineNumber;
+      const whole = last < model.getLineCount()
+        ? new monaco.Selection(first, 1, last + 1, 1)
+        : first > 1
+          ? new monaco.Selection(first - 1, model.getLineMaxColumn(first - 1), last, model.getLineMaxColumn(last))
+          : new monaco.Selection(first, 1, last, model.getLineMaxColumn(last));
+      target.setSelection(whole);
+      target.trigger("keyboard", "editor.action.clipboardCutAction", null);
+    },
+  });
+
+  // F7 AND SHIFT+F7 ARE VIEW CODE AND VIEW OBJECT, between a form's code and its designer; the
+  // editor's own defaults had the next and previous word highlight on them. From a designer tab
+  // the key never reaches this editor, so the designer answers F7 itself (designerview.ts).
+  editor.addAction({
+    id: "xlide.viewCode",
+    label: "View Code",
+    keybindings: [monaco.KeyCode.F7],
+    run: () => {
+      const active = bridge.workspace?.activeDocument();
+      if (active) {
+        bridge.activateModule(active.module, active.project ?? undefined);
+      }
+    },
+  });
+
+  editor.addAction({
+    id: "xlide.viewObject",
+    label: "View Object",
+    keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F7],
+    run: () => {
+      const active = bridge.workspace?.activeDocument();
+      if (active) {
+        bridge.activateModule(active.module, active.project ?? undefined, "design");
+      }
+    },
+  });
 
   /*
    * SUPPRESSION FROM THE CODE'S OWN RIGHT-CLICK, beside the problems pane and the lightbulb
