@@ -121,9 +121,11 @@ try {
         $hostPid = Launch $hostName
         Page-Probe $hostPid 'verify'
         $frame = [XlidePreferencesHarness.Windows]::Find($hostPid, 'wndclass_desked_gsk')
-        if ([XlidePreferencesHarness.Windows]::Geometry($frame) -ne $frameExpected) { throw "$hostName editor geometry differs" }
+        $frameNow = [XlidePreferencesHarness.Windows]::Geometry($frame)
+        if ($frameNow -ne $frameExpected) { throw "$hostName editor geometry differs: expected $frameExpected, restored $frameNow" }
         $palette = Open-Palette $hostPid
-        if ([XlidePreferencesHarness.Windows]::Geometry($palette) -ne $paletteExpected) { throw "$hostName palette geometry differs" }
+        $paletteNow = [XlidePreferencesHarness.Windows]::Geometry($palette)
+        if ($paletteNow -ne $paletteExpected) { throw "$hostName palette geometry differs: expected $paletteExpected, restored $paletteNow" }
         Write-Host "PASS: $hostName restored editor and Object Browser window bounds."
         Close-Owned $hostPid
     }
