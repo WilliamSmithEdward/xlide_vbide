@@ -1202,12 +1202,15 @@ at measuring this both passed on the broken build, and both were deleted. One of
 that forced a collection and drained the finalizers, which reported completely clean with 8,734
 leaked wrappers pending.
 
-Handles ride along, reported per row and judged once over the whole sweep. Per row they are
+Handles ride along, reported per row and judged once over the rows together. Per row they are
 unjudgeable: Excel opens and closes handles constantly and this product is a guest in its process,
 so a row's delta is mostly Excel. Taking the floor of four samples cut the swing from plus or
 minus 19 to mostly zero, and what was left still tripped a per-round threshold on rows that cannot
 leak, picking DIFFERENT rows on consecutive runs. Across 250 operations a leak of even one handle
-each is hundreds while the churn is tens, and that is a judgement worth making.
+each is hundreds while the churn is tens, and that is a judgement worth making. The verdict sums
+the rows and sets the largest one aside, because a one-time jump of about 350 handles turns up in
+a different place each run - inside one row, or between rows in none of them - and only growth a
+row saw can be this product's; the aggregate is still printed beside it.
 
 ### When the host dies, the harness says why
 

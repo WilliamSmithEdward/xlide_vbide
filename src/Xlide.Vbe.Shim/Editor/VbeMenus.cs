@@ -43,6 +43,7 @@ internal static class VbeMenus
         [VbeCommands.Command.ToggleBreakpoint] = "F9",
         [VbeCommands.Command.SetNextStatement] = "Ctrl+F9",
         [VbeCommands.Command.ClearAllBreakpoints] = "Ctrl+Shift+F9",
+        [VbeCommands.Command.CallStack] = "Ctrl+L",
         [VbeCommands.Command.Save] = "Ctrl+S",
     };
 

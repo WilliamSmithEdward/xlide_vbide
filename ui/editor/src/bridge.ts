@@ -2565,6 +2565,11 @@ export class EditorBridge {
       return;
     }
 
+    if (id === "xlide.panel.explorer") {
+      this.shell?.showExplorer();
+      return;
+    }
+
     // Tab cycling arrives from the host because the browser swallows Ctrl+PageDown for its own
     // tab switching before the page could ever see the key. Cycling is within the active group.
     if (id === "xlide.tab.close") {

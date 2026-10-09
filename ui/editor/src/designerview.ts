@@ -278,6 +278,9 @@ export interface DesignerViewDeps {
    * document, because MSForms' collection order is not z-order and the dialect cannot say it. */
   zorder(control: string, front: boolean): void;
 
+  /** F7, the native editor's View Code: the form's code face comes forward. */
+  viewCode(): void;
+
   /** Writes one of a control's properties straight at the model, through the same host call the
    * Properties panel makes. The tab-order dialog's Move Up is a TabIndex write and nothing else. */
   setProperty(control: string, property: string, value: string): void;
@@ -693,6 +696,15 @@ export class DesignerView {
         event.preventDefault();
         event.stopPropagation();
         this.applyNow();
+        return;
+      }
+
+      // F7 is View Code in the native editor, and from the designer it is the one direction the
+      // code editor's own F7 cannot serve, since the key never reaches it from here.
+      if (event.key === "F7" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.deps.viewCode();
       }
     }, { capture: true });
 

@@ -1162,6 +1162,11 @@ export class Shell {
     this.docks.reveal("locals");
   }
 
+  /** Brings the explorer forward wherever it is docked: the native editor's Ctrl+R. */
+  showExplorer(): void {
+    this.docks.reveal("explorer");
+  }
+
   /**
    * Replaces the Locals panel content. Stopped false is the idle state. Stopped true with no
    * rows is a break with nothing readable in scope - the panel must not claim "not stopped"

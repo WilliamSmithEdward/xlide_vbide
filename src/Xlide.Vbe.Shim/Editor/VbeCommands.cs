@@ -453,6 +453,14 @@ internal static class VbeCommands
         VirtualKey.F4 when control && !shift => "xlide.tab.close",
         VirtualKey.PageDown when control && !shift => "xlide.tab.next",
         VirtualKey.PageUp when control && !shift => "xlide.tab.previous",
+
+        // The native editor's window keys, answered by the panes that replaced those windows:
+        // Ctrl+G the Immediate window, Ctrl+R the Project Explorer, F4 the Properties window.
+        // Claimed here rather than bound in the page so they work from any pane, as they do
+        // natively, and so the browser's Go to Line never answers Ctrl+G (the owner, 2026-10-09).
+        VirtualKey.G when control && !shift => "xlide.panel.immediate",
+        VirtualKey.R when control && !shift => "xlide.panel.explorer",
+        VirtualKey.F4 when !control && !shift => "xlide.panel.properties",
         _ => null,
     };
 
@@ -493,6 +501,11 @@ internal static class VbeCommands
 
             // Saving belongs to the host: the workbook is what gets written, not the module.
             VirtualKey.S when control => Command.Save,
+
+            // The Call Stack is the one native window this product still opens as the editor's
+            // own, so its key goes to the editor's command (greyed outside break mode, which the
+            // refusal says in words).
+            VirtualKey.L when control && !shift => Command.CallStack,
             _ => 0,
         };
     }
@@ -509,6 +522,9 @@ internal static class VirtualKey
     public const uint F9 = 0x78;
     public const uint PageUp = 0x21;
     public const uint PageDown = 0x22;
+    public const uint G = 0x47;
+    public const uint L = 0x4C;
+    public const uint R = 0x52;
     public const uint S = 0x53;
     public const uint W = 0x57;
 }

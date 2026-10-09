@@ -924,6 +924,9 @@ if ($Live) {
                                      # it evaluate through the door, and were green over #30.
                                      'immediate-panel.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
+                                     # menu-keys reads the editor's context menu off the page and
+                                     # holds every key it shows to one the page actually gets (#90).
+                                     'menu-keys.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
