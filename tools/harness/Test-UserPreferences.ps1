@@ -25,6 +25,7 @@ Add-Type -Namespace XlidePreferencesHarness -Name Windows -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetWindowPlacement(IntPtr window, ref Placement placement);
 [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
 [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+[DllImport("user32.dll")] public static extern bool SystemParametersInfoW(uint action, uint param, ref Rect rect, uint winIni);
 [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; }
 [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
 [StructLayout(LayoutKind.Sequential)] public struct Placement { public int Length,Flags,Show; public Point Min,Max; public Rect Normal; }
@@ -46,6 +47,10 @@ public static void Place(IntPtr window,int left,int top,int width,int height,boo
         Normal=new Rect {Left=left,Top=top,Right=left+width,Bottom=top+height}};
     if(!SetWindowPlacement(window,ref p)) throw new Exception("Placement refused");
     SendMessageW(window,0x232,IntPtr.Zero,IntPtr.Zero);
+}
+public static int[] WorkArea() {
+    var r=new Rect(); if(!SystemParametersInfoW(0x30,0,ref r,0)) throw new Exception("No work area");
+    return new int[] { r.Left, r.Top, r.Right, r.Bottom };
 }
 '@
 [void] [XlidePreferencesHarness.Windows]::SetProcessDpiAwarenessContext([IntPtr](-4))
@@ -105,13 +110,32 @@ function Open-Palette([int] $HostPid) {
 }
 
 try {
+    # SEEDED INSIDE THE WORK AREA. The restore fits a window into the work area of the monitor it
+    # lands on, so a seed larger than the display comes back clamped, and the check then fails on
+    # the display rather than on the product: a disconnected Remote Desktop session leaves a
+    # 640x480 virtual screen, which was the one red step of a release gate (2026-10-08). The
+    # frame accepts 500x350 and up, so the seeds stay as large as the display allows, up to the
+    # sizes this check always used.
+    $work = [XlidePreferencesHarness.Windows]::WorkArea()
+    $workWidth = $work[2] - $work[0]
+    $workHeight = $work[3] - $work[1]
+    if ($workWidth -lt 1024 -or $workHeight -lt 700) {
+        # Measured 2026-10-08 on that virtual screen: the frame restores exactly, but the Object
+        # Browser palette will not hold a placed height there (232 px came back), and the restore
+        # floors a window at 300 px high on purpose - so the check cannot pass, whatever the
+        # product does. Said plainly rather than as a geometry mismatch.
+        throw "this check needs a display of at least 1024x700; the work area is ${workWidth}x${workHeight} (a disconnected Remote Desktop session leaves a 640x480 virtual screen)"
+    }
+    $frameSeed = @(($work[0] + 60), ($work[1] + 50), [Math]::Min(1100, $workWidth - 120), [Math]::Min(760, $workHeight - 100))
+    $paletteSeed = @(($work[0] + 180), ($work[1] + 120), [Math]::Min(680, $workWidth - 240), [Math]::Min(500, $workHeight - 200))
+
     $first = Launch 'excel'
     $frame = [XlidePreferencesHarness.Windows]::Find($first, 'wndclass_desked_gsk')
-    [XlidePreferencesHarness.Windows]::Place($frame,60,50,1100,760,$false)
+    [XlidePreferencesHarness.Windows]::Place($frame,$frameSeed[0],$frameSeed[1],$frameSeed[2],$frameSeed[3],$false)
     Page-Probe $first 'seed'
     $frameExpected = [XlidePreferencesHarness.Windows]::Geometry($frame)
     $palette = Open-Palette $first
-    [XlidePreferencesHarness.Windows]::Place($palette,180,120,680,500,$false)
+    [XlidePreferencesHarness.Windows]::Place($palette,$paletteSeed[0],$paletteSeed[1],$paletteSeed[2],$paletteSeed[3],$false)
     $paletteExpected = [XlidePreferencesHarness.Windows]::Geometry($palette)
     Close-Owned $first
 
@@ -132,19 +156,20 @@ try {
     $hostPid = Launch 'excel'
     Page-Probe $hostPid 'verify'
     $frame = [XlidePreferencesHarness.Windows]::Find($hostPid, 'wndclass_desked_gsk')
-    [XlidePreferencesHarness.Windows]::Place($frame,60,50,1100,760,$true)
+    [XlidePreferencesHarness.Windows]::Place($frame,$frameSeed[0],$frameSeed[1],$frameSeed[2],$frameSeed[3],$true)
     $maxFrame = [XlidePreferencesHarness.Windows]::Geometry($frame)
     $palette = Open-Palette $hostPid
-    [XlidePreferencesHarness.Windows]::Place($palette,180,120,680,500,$true)
+    [XlidePreferencesHarness.Windows]::Place($palette,$paletteSeed[0],$paletteSeed[1],$paletteSeed[2],$paletteSeed[3],$true)
     $maxPalette = [XlidePreferencesHarness.Windows]::Geometry($palette)
     Close-Owned $hostPid
     $hostPid = Launch 'word'
     Page-Probe $hostPid 'verify'
     $frame = [XlidePreferencesHarness.Windows]::Find($hostPid, 'wndclass_desked_gsk')
     $palette = Open-Palette $hostPid
-    if ([XlidePreferencesHarness.Windows]::Geometry($frame) -ne $maxFrame -or
-        [XlidePreferencesHarness.Windows]::Geometry($palette) -ne $maxPalette) {
-        throw 'Maximized window state or normal restore bounds were lost across hosts'
+    $maxFrameNow = [XlidePreferencesHarness.Windows]::Geometry($frame)
+    $maxPaletteNow = [XlidePreferencesHarness.Windows]::Geometry($palette)
+    if ($maxFrameNow -ne $maxFrame -or $maxPaletteNow -ne $maxPalette) {
+        throw "Maximized window state or normal restore bounds were lost across hosts: frame expected $maxFrame, restored $maxFrameNow; palette expected $maxPalette, restored $maxPaletteNow"
     }
     Write-Host 'PASS: maximized editor and Object Browser restore across Excel and Word.'
     Close-Owned $hostPid
