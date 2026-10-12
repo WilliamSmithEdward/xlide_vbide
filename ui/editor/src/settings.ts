@@ -27,6 +27,11 @@ export interface EditorSettings {
    * modules by their '@Folder("Parent.Child") annotation. The tabs at the top of the pane.
    */
   explorerView: "tree" | "folders";
+  /**
+   * How an unfolded module lists its members: "code" as written, "name" alphabetically, "kind"
+   * by kind then name. A property's Get, Let and Set sit together under every order (#92).
+   */
+  explorerSort: "code" | "name" | "kind";
   /** A save first writes every module's attribute annotations into its attributes. */
   applyAttributesOnSave: boolean;
   /** One indent level, in spaces. Governs typing, smart Enter, and Format Module alike. */
@@ -52,6 +57,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   insertOptionExplicit: true,
   treeFollowsEditor: true,
   explorerView: "tree",
+  explorerSort: "code",
   applyAttributesOnSave: true,
   formatIndentSize: 4,
   syncEngine: "xlide",
@@ -84,6 +90,7 @@ export function applySettings(next: IncomingSettings): void {
     insertOptionExplicit: next.insertOptionExplicit !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
     explorerView: next.explorerView === "folders" ? "folders" : "tree",
+    explorerSort: next.explorerSort === "name" ? "name" : next.explorerSort === "kind" ? "kind" : "code",
     applyAttributesOnSave: next.applyAttributesOnSave !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",

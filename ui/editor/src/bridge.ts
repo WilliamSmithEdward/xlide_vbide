@@ -3932,6 +3932,7 @@ export function demoTransport(): HostTransport {
           designerSnap: message.designerSnap,
           designerGridSize: message.designerGridSize,
           explorerView: message.explorerView,
+          explorerSort: message.explorerSort,
           applyAttributesOnSave: message.applyAttributesOnSave !== false,
         });
       }

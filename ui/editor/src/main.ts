@@ -1049,6 +1049,7 @@ function boot(): void {
     activateModule: (name, project) => bridge.activateModule(name, project),
     // The layout is a setting: the same whole-object post the dialog makes, echoed back.
     changeView: (view) => bridge.updateSettings({ ...currentSettings(), explorerView: view }),
+    changeSort: (sort) => bridge.updateSettings({ ...currentSettings(), explorerSort: sort }),
     openDesigner: (name, project) => bridge.activateModule(name, project, "design"),
     navigate: (module, line, column, selectLine, project) =>
       bridge.navigate(module, line, column, selectLine, project),

@@ -368,7 +368,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `breakpoints` | `breakpoints()` / `breakpointsIn(project)` | what is set, per module AND workbook, and the mode. The record follows each WRITE of a module the way the editor's own breakpoints do - a line replaced in place keeps its breakpoint, a deleted line loses it, lines below a window move with it - so between a keystroke and its write-back the lines read as the editor numbers them, and `breakpoint` writes pending edits first (#84) |
 | `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
-| `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
+| `outline` | `outline(module, project)` | a module's procedures, from the analyzer, with its Enums and Types under the kinds `Enum` and `Type` (#92); filter on the kind for procedures only |
 | `attributes` | `attributes(module, {project})` / `attributesApply(module, {project})` / `attributesRemove(module, kind, {project, target, occurrence})` | the attribute annotations, the saved module's hidden attributes, and the drift between them; apply re-imports the module with the annotated attributes written, remove takes one away |
 | `agent` | `agent()` / `agentRoutes()` / `agentRoute(name)` / `agentExamples()` | the api explaining itself: identity and HOST (excel/word/powerpoint), the route table as data, one route's detail, runnable recipes. The discovery file's `agent` URL points here, so an agent handed that file is one GET from the whole surface |
 | `model` | `model(type)` | what the language service knows about this host's object model: the type inventory bare, one type's members when named. `known:false` with a note in a host with no model yet |
@@ -806,6 +806,7 @@ attributes.drift;                                   // annotation-not-applied an
 await api.attributesApply("Registry", { project: "AttributesFixture.xlsm" });
 await api.attributesRemove("Registry", "PredeclaredId", { project: "AttributesFixture.xlsm" });
 await api.act("explorerView", { view: "folders" });   // a settings change: poll ui.explorer.view
+await api.act("explorerSort", { sort: "kind" });      // code | name | kind, through the header's select: poll ui.explorer.sort
 await api.act("expandFolder", { project: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");

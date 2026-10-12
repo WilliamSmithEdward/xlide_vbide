@@ -11,7 +11,7 @@
 
 import { closeColourPicker, colourPickerState, onColourPickerClosed, openColourPicker } from "./colourpicker.js";
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
-import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject, type ExplorerView } from "./explorer.js";
+import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject, type ExplorerSort, type ExplorerView } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { openModal } from "./modal.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
@@ -59,6 +59,8 @@ export interface ShellHandlers {
   activateModule(name: string, project?: string): void;
   /** The developer pressed the explorer's other layout tab: a settings change, echoed back. */
   changeView(view: ExplorerView): void;
+  /** The developer picked another member order in the explorer's header. */
+  changeSort(sort: ExplorerSort): void;
   /** The developer asked for a form's designer tab - markup beside the visual form. */
   openDesigner(name: string, project?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
@@ -293,6 +295,7 @@ export class Shell {
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
       changeView: (view) => handlers.changeView(view),
+      changeSort: (sort) => handlers.changeSort(sort),
       open: (name, project) => handlers.activateModule(name, project),
       context: (name, kind, x, y, project) => this.componentMenu(name, kind, x, y, project),
       projectContext: (project, x, y) => this.projectMenu(project, x, y),

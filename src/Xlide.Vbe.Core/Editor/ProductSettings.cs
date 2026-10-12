@@ -77,6 +77,14 @@ public sealed record ProductSettings
     public string ExplorerView { get; set; } = "tree";
 
     /// <summary>
+    /// How an unfolded module lists its members: "code" in the order they are written, "name"
+    /// alphabetically, "kind" by kind (Enums, Types, Subs, Functions, Properties) and then by
+    /// name. A property's Get, Let and Set sit together under every order (#92).
+    /// </summary>
+    [JsonPropertyName("explorer.sort")]
+    public string ExplorerSort { get; set; } = "code";
+
+    /// <summary>
     /// Saving the workbook first writes every module's attribute annotations into its attributes
     /// ('@PredeclaredId, '@Description and the rest), and so does importing a module. On by
     /// default, because an annotation the developer typed is what they meant the module to be,
@@ -224,6 +232,12 @@ public sealed record ProductSettings
         ExplorerView = string.Equals(ExplorerView, "folders", StringComparison.OrdinalIgnoreCase)
             ? "folders"
             : "tree",
+        ExplorerSort = ExplorerSort?.ToLowerInvariant() switch
+        {
+            "name" => "name",
+            "kind" => "kind",
+            _ => "code",
+        },
     };
 
     /// <summary>
