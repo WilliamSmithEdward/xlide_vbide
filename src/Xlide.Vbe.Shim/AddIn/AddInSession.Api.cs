@@ -4851,6 +4851,9 @@ internal sealed partial class AddInSession
                         ExplorerView = request.Query.TryGetValue("explorerView", out var view)
                             ? view
                             : settings.ExplorerView,
+                        ExplorerSort = request.Query.TryGetValue("explorerSort", out var sort)
+                            ? sort
+                            : settings.ExplorerSort,
                         ApplyAttributesOnSave = Flag("applyAttributesOnSave", settings.ApplyAttributesOnSave),
                     }).Normalized();
 
@@ -4869,7 +4872,8 @@ internal sealed partial class AddInSession
                         settings.DesignerSnap,
                         settings.DesignerGridSize,
                         settings.ExplorerView,
-                        settings.ApplyAttributesOnSave),
+                        settings.ApplyAttributesOnSave,
+                        settings.ExplorerSort),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

@@ -40,17 +40,24 @@ export function outlineFor(
     // same table and the same search.
     const starts = lineStarts(source);
 
+    // Enums and Types ride along under their own kinds (xlide_vbide#92): the tree lists what a
+    // module declares that a developer goes looking for, and a caller that wants procedures
+    // only filters on the kind.
     const procedures: OutlineProcedure[] = [];
     for (const member of parseModule(source).members) {
-        if (member.kind !== 'Procedure') {
-            continue;
+        if (member.kind === 'Procedure') {
+            procedures.push({
+                name: member.name,
+                kind: PROC_KIND_LABELS[member.procKind] ?? member.procKind,
+                line: toLineColumn(starts, member.span.start).line,
+            });
+        } else if ((member.kind === 'Enum' || member.kind === 'Type') && member.name) {
+            procedures.push({
+                name: member.name,
+                kind: member.kind,
+                line: toLineColumn(starts, member.span.start).line,
+            });
         }
-
-        procedures.push({
-            name: member.name,
-            kind: PROC_KIND_LABELS[member.procKind] ?? member.procKind,
-            line: toLineColumn(starts, member.span.start).line,
-        });
     }
 
     return procedures;

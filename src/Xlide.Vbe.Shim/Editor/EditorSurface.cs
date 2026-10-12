@@ -1625,7 +1625,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.DesignerSnap,
                 settings.DesignerGridSize,
                 settings.ExplorerView,
-                settings.ApplyAttributesOnSave),
+                settings.ApplyAttributesOnSave,
+                settings.ExplorerSort),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2589,6 +2590,10 @@ internal sealed class EditorSurface : IDisposable
                         && viewValue.ValueKind == JsonValueKind.String
                             ? viewValue.GetString() ?? held.ExplorerView
                             : held.ExplorerView;
+                    var explorerSort = document.RootElement.TryGetProperty("explorerSort", out var sortValue)
+                        && sortValue.ValueKind == JsonValueKind.String
+                            ? sortValue.GetString() ?? held.ExplorerSort
+                            : held.ExplorerSort;
                     var applyOnSave = document.RootElement.TryGetProperty("applyAttributesOnSave", out var applyValue)
                         ? applyValue.ValueKind is not JsonValueKind.False
                         : held.ApplyAttributesOnSave;
@@ -2611,6 +2616,7 @@ internal sealed class EditorSurface : IDisposable
                         DesignerSnap = snapMode,
                         DesignerGridSize = gridSize,
                         ExplorerView = explorerView,
+                        ExplorerSort = explorerSort,
                         ApplyAttributesOnSave = applyOnSave,
                     }).Normalized());
                     break;

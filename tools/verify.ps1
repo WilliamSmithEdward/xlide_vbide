@@ -927,6 +927,9 @@ if ($Live) {
                                      # menu-keys reads the editor's context menu off the page and
                                      # holds every key it shows to one the page actually gets (#90).
                                      'menu-keys.mjs',
+                                     # explorer-members reads an unfolded module's rows off the
+                                     # tree under each of the header's three orders (#92).
+                                     'explorer-members.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',

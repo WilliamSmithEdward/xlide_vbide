@@ -919,9 +919,35 @@ span.prop-value.readonly {
 /* The explorer's two layout tabs, its own header row above the tree. */
 #explorer-views {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   padding: 2px 6px;
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.explorer-view-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+/* How an unfolded module lists its members (#92), at the row's far end. */
+.explorer-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.explorer-sort select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--vscode-dropdown-foreground, inherit);
+  background: var(--vscode-dropdown-background, transparent);
+  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.4));
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
 .explorer-view {

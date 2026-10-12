@@ -36,6 +36,7 @@
 
 import { currentSettings, onSettingsApplied, type EditorSettings } from "./settings.js";
 import { allFolders, ancestorPaths, buildFolderTree, folderKey, type FolderNode } from "./foldertree.js";
+import { orderMembers } from "./memberorder.js";
 
 /** Component kinds, as the host numbers them. */
 export const enum ComponentKind {
@@ -55,6 +56,7 @@ export interface ExplorerComponent {
 
 /** The two layouts the pane offers. */
 export type ExplorerView = EditorSettings["explorerView"];
+export type ExplorerSort = EditorSettings["explorerSort"];
 
 export interface ExplorerProject {
   name: string;
@@ -80,6 +82,8 @@ export interface ExplorerSnapshot {
   follows: boolean;
   /** Which layout is showing. */
   view: ExplorerView;
+  /** How an unfolded module lists its members. */
+  sort: ExplorerSort;
   /** The procedure row wearing the caret's mark, or null when no row does. */
   currentProcedure: { module: string; project: string | null; name: string; line: number } | null;
   projects: {
@@ -159,6 +163,8 @@ export interface ExplorerHandlers {
    * to change it the way the dialog does; the tree redraws when the echo lands, and not before.
    */
   changeView(view: ExplorerView): void;
+  /** The developer picked another member order in the header: a settings change, echoed back. */
+  changeSort(sort: ExplorerSort): void;
   /** A line for the host's log, for the defects only the log's data cadence explains. */
   trace?(text: string): void;
 }
@@ -226,6 +232,42 @@ export class Explorer {
   /** The layout last drawn, so a settings echo that changed something else redraws nothing. */
   private drawnView: ExplorerView = currentSettings().explorerView;
 
+  /** The member order last drawn, for the same reason. */
+  private drawnSort: ExplorerSort = currentSettings().explorerSort;
+
+  /** The member-order picker in the header, kept to follow the setting's echo. */
+  private sortSelect: HTMLSelectElement | null = null;
+
+  /**
+   * The member-order picker: a labelled select, because three choices with words are clearer
+   * than an icon that cycles. It ASKS, like the layout tabs: the order is a setting the host
+   * owns, and the tree redraws on the echo.
+   */
+  private sortControl(): HTMLElement {
+    const label = document.createElement("label");
+    label.className = "explorer-sort";
+    const text = document.createElement("span");
+    text.textContent = "Sort";
+    const select = document.createElement("select");
+    select.id = "explorer-sort";
+    for (const [value, title] of [["code", "As in code"], ["name", "By name"], ["kind", "By kind"]] as const) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = title;
+      select.appendChild(option);
+    }
+    select.value = currentSettings().explorerSort;
+    select.addEventListener("change", () => {
+      const sort = select.value as ExplorerSort;
+      if (currentSettings().explorerSort !== sort) {
+        this.handlers.changeSort(sort);
+      }
+    });
+    this.sortSelect = select;
+    label.append(text, select);
+    return label;
+  }
+
   constructor(root: HTMLElement, handlers: ExplorerHandlers, views: HTMLElement | null = null) {
     this.root = root;
     this.handlers = handlers;
@@ -234,7 +276,12 @@ export class Explorer {
     // The two layout tabs. They ASK for the layout rather than switching to it: the layout is a
     // setting the host owns, and the tree redraws on the echo, the same road the dialog takes.
     if (views) {
-      views.replaceChildren();
+      // The header row: the layout tabs, then how an unfolded module lists its members (#92).
+      const tabs = document.createElement("div");
+      tabs.className = "explorer-view-tabs";
+      tabs.setAttribute("role", "tablist");
+      tabs.setAttribute("aria-label", "Explorer layout");
+      views.replaceChildren(tabs, this.sortControl());
       for (const [view, title] of [["tree", "Tree"], ["folders", "Folders"]] as const) {
         const tab = document.createElement("button");
         tab.type = "button";
@@ -247,13 +294,17 @@ export class Explorer {
             this.handlers.changeView(view);
           }
         });
-        views.appendChild(tab);
+        tabs.appendChild(tab);
       }
       this.paintViewTabs();
     }
 
     onSettingsApplied((settings) => {
-      if (settings.explorerView !== this.drawnView) {
+      if (settings.explorerView !== this.drawnView || settings.explorerSort !== this.drawnSort) {
+        this.drawnSort = settings.explorerSort;
+        if (this.sortSelect) {
+          this.sortSelect.value = settings.explorerSort;
+        }
         this.paintViewTabs();
         this.render();
       }
@@ -790,6 +841,7 @@ export class Explorer {
       },
       follows: currentSettings().treeFollowsEditor,
       view: currentSettings().explorerView,
+      sort: currentSettings().explorerSort,
       currentProcedure: this.currentProcedure === null ? null : { ...this.currentProcedure },
       projects: this.projects.map((project) => ({
         name: project.name,
@@ -1077,7 +1129,7 @@ export class Explorer {
       ? this.markedRow(current)
       : null;
 
-    for (const procedure of this.outlines.get(component.name) ?? []) {
+    for (const procedure of orderMembers(this.outlines.get(component.name) ?? [], currentSettings().explorerSort)) {
       const isCurrent = marked !== null && procedure.line === marked && procedure.name === current!.name;
       this.root.appendChild(this.procedureRow(component.name, procedure, project, depth, isCurrent));
     }
@@ -1272,8 +1324,12 @@ export class Explorer {
     }
     indent(button, depth);
 
+    // The glyph says the kind at a glance, the way the editor's own symbol lists do.
     const glyph = document.createElement("span");
-    glyph.className = "codicon codicon-symbol-method";
+    glyph.className = `codicon codicon-${procedure.kind === "Enum" ? "symbol-enum"
+      : procedure.kind === "Type" ? "symbol-structure"
+        : procedure.kind.startsWith("Property ") ? "symbol-property"
+          : "symbol-method"}`;
     glyph.setAttribute("aria-hidden", "true");
 
     button.append(glyph, document.createTextNode(`${procedure.kind} ${procedure.name}`));

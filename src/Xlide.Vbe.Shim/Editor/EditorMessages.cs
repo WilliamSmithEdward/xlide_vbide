@@ -288,7 +288,9 @@ public sealed record SetSettingsMessage(
     /// <summary>Which explorer layout is showing: "tree" or "folders".</summary>
     [property: JsonPropertyName("explorerView")] string ExplorerView = "tree",
     /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
-    [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true);
+    [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true,
+    /// <summary>How an unfolded module lists its members: "code", "name" or "kind".</summary>
+    [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code");
 
 /// <summary>One search hit, as the results list draws it. Project is the display name.</summary>
 public sealed record SurfaceSearchMatch(

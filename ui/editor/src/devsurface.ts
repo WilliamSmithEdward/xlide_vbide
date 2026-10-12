@@ -1729,6 +1729,25 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * Picks how an unfolded module lists its members, through the header's own select:
+     * `act("explorerSort", { sort: "kind" })`. A settings change like the layout's, so
+     * `ui.explorer.sort` says when the tree has redrawn (#92).
+     */
+    explorerSort: (args) => {
+      const sort = String(args.sort ?? "");
+      if (sort !== "code" && sort !== "name" && sort !== "kind") {
+        return { did: false, detail: `sort must be code, name or kind, not "${sort}"` };
+      }
+      const select = document.getElementById("explorer-sort") as HTMLSelectElement | null;
+      if (!select) {
+        return { did: false, detail: "the explorer's sort control is not on the page" };
+      }
+      select.value = sort;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return { did: true, detail: `asked for ${sort} order; ui.explorer.sort says when it landed` };
+    },
+
+    /**
      * Opens or shuts a folder row the way a click does: `act("expandFolder", { project, path,
      * open })`. The folder exists whether or not the folder layout is showing, so a script can
      * arrange the folders and then switch to them.

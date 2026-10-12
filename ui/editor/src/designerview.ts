@@ -4788,6 +4788,10 @@ export class DesignerView {
     // hold one in its own name and an event never does.
     const byControl = new Map<string, { name: string; line: number }[]>();
     for (const procedure of procedures) {
+      // The outline lists a module's Enums and Types as well; only procedures handle events.
+      if (procedure.kind === "Enum" || procedure.kind === "Type") {
+        continue;
+      }
       const at = procedure.name.lastIndexOf("_");
       if (at <= 0) {
         continue;
