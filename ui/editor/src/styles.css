@@ -930,6 +930,12 @@ span.prop-value.readonly {
   gap: 2px;
 }
 
+/* A sheet's tab name beside its code name (#98), quieter than the name itself. */
+.tree-caption {
+  opacity: 0.7;
+  white-space: pre;
+}
+
 /* How an unfolded module lists its members (#92), at the row's far end. */
 .explorer-sort {
   display: flex;
@@ -2665,14 +2671,12 @@ body.live-resize .minimap {
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
 }
 
+/* A one-line code editor (#97): the box is fixed at one line, the editor fills it. */
 #immediate-input {
   flex: 1;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
-  font-size: 12px;
-  outline: none;
+  min-width: 0;
+  height: 22px;
+  overflow: hidden;
 }
 
 #locals {

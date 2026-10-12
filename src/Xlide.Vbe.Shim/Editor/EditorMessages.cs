@@ -435,7 +435,10 @@ public sealed record SetFindingsMessage(
 public sealed record SurfaceComponent(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("kind")] int Kind,
-    [property: JsonPropertyName("folder")] string? Folder = null);
+    [property: JsonPropertyName("folder")] string? Folder = null,
+    // A worksheet's or chart's name on its tab, beside the code name as the native Project
+    // Explorer shows it (#98). Null for every other module.
+    [property: JsonPropertyName("caption"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Caption = null);
 
 /// <summary>One project and everything in it.</summary>
 public sealed record SurfaceProject(

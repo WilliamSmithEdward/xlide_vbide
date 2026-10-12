@@ -600,6 +600,9 @@ export type ClientMessage =
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "hostAction"; command: string; arguments: (string | null)[] }
   | { type: "completion"; id: number; offset: number }
+  /** The page's window took the focus back; the host re-reads what can change while away (#98). */
+  | { type: "surfaceFocused" }
+  | { type: "immediateCompletion" | "immediateHover" | "immediateSignatureHelp"; id: number; text: string; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; fullLength: number; single?: boolean; completeHeader?: boolean }
@@ -1316,6 +1319,32 @@ export class EditorBridge {
   requestCompletions(offset: number): Promise<HostCompletionItem[]> {
     return this.pendingCompletions.ask(() => [], 2000, (id) =>
       this.transport.post({ type: "completion", id, offset }));
+  }
+
+  /**
+   * The same three questions about the Immediate pane's entry line (#97). The host answers them
+   * in the scope the line will run in - the stopped procedure in break mode, the module on screen
+   * otherwise - so `text` travels with the request and offsets are into it. The replies come
+   * back the way the code window's do, on the same ids.
+   */
+  /** Tells the host the developer is back in the editor: a sheet tab renamed meanwhile shows (#98). */
+  surfaceFocused(): void {
+    this.transport.post({ type: "surfaceFocused" });
+  }
+
+  requestImmediateCompletions(text: string, offset: number): Promise<HostCompletionItem[]> {
+    return this.pendingCompletions.ask(() => [], 2000, (id) =>
+      this.transport.post({ type: "immediateCompletion", id, text, offset }));
+  }
+
+  requestImmediateHover(text: string, offset: number): Promise<HostHoverPayload | null> {
+    return this.pendingHovers.ask(() => null, 2000, (id) =>
+      this.transport.post({ type: "immediateHover", id, text, offset }));
+  }
+
+  requestImmediateSignatureHelp(text: string, offset: number): Promise<HostSignatureInfo | null> {
+    return this.pendingSignatures.ask(() => null, 2000, (id) =>
+      this.transport.post({ type: "immediateSignatureHelp", id, text, offset }));
   }
 
   /**

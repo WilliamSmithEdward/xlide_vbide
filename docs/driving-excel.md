@@ -448,6 +448,8 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | The Immediate window and Watch panel, end to end | `node tools\harness\immediate-watch.mjs` |
 | Break-mode evaluation, end to end | `node tools\harness\native-immediate.mjs` |
 | The Immediate PANEL, typed into the page, with a line that will not compile (#30) | `node tools\harness\immediate-panel.mjs` |
+| Type into the panel's entry line: a one-line code editor, so `setValue` and `submit` rather than a value and a synthetic Enter, which the editor ignores | `ask("xlideBridge.shell.immediateInput.setValue('? 1'); xlideBridge.shell.immediateInput.submit()")` |
+| The entry line's completions, quick info and call tips, in design and in break mode (#97) | `ask("xlideBridge.requestImmediateCompletions('? Application.', 14)")`, or `node tools\harness\immediate-completions.mjs` |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |

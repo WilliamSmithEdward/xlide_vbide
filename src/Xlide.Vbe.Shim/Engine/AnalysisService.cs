@@ -541,12 +541,18 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// <summary>
     /// Asks the engine what can be typed at an offset into a module's live text, or null when
     /// there is no engine or it has not yet seen the module's project.
+    ///
+    /// With <paramref name="sendSource"/>, the request is about <paramref name="source"/> rather
+    /// than the engine's live copy, which it leaves alone: the Immediate line asks about the
+    /// module with its line set into it, a text that exists only for the question (#97). The
+    /// same flag on hover and call tips.
     /// </summary>
     public async Task<EngineCompletionItem[]?> CompleteAsync(
         string moduleName,
         string source,
         int offset,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        bool sendSource = false)
     {
         if (_engine is not { IsRunning: true } engine)
         {
@@ -558,7 +564,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
+        var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, sendSource ? source : null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Items;
@@ -572,7 +578,8 @@ internal sealed class AnalysisService : IAsyncDisposable
         string moduleName,
         string source,
         int offset,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        bool sendSource = false)
     {
         if (_engine is not { IsRunning: true } engine)
         {
@@ -584,7 +591,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
+        var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, sendSource ? source : null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Hover;
@@ -931,7 +938,8 @@ internal sealed class AnalysisService : IAsyncDisposable
         string moduleName,
         string source,
         int offset,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        bool sendSource = false)
     {
         if (_engine is not { IsRunning: true } engine)
         {
@@ -943,7 +951,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
+        var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, sendSource ? source : null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Signature;

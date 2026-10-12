@@ -12,6 +12,7 @@
 import { closeColourPicker, colourPickerState, onColourPickerClosed, openColourPicker } from "./colourpicker.js";
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject, type ExplorerSort, type ExplorerView } from "./explorer.js";
+import { ImmediateEntry } from "./immediateentry.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { openModal } from "./modal.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
@@ -245,7 +246,8 @@ export class Shell {
   private readonly problemsBody: HTMLElement;
   private readonly immediateBody: HTMLElement;
   private readonly immediateLog: HTMLElement;
-  private readonly immediateInput: HTMLInputElement;
+  /** The entry line: a one-line code editor, with the code window's completions (#97). */
+  readonly immediateInput: ImmediateEntry;
   private readonly localsBody: HTMLElement;
   private readonly watchBody: HTMLElement;
   private readonly watchTable: HTMLElement;
@@ -254,8 +256,6 @@ export class Shell {
   private readonly localsTable: HTMLElement;
 
   /** Lines entered in the Immediate panel, newest last, walked with the arrow keys. */
-  private readonly history: string[] = [];
-  private historyIndex = 0;
 
   /** True between submitting a line and its first answer, when focus belongs back at the prompt. */
   private immediateAwaitingResult = false;
@@ -375,7 +375,9 @@ export class Shell {
     this.problemsBody = root.querySelector("#panel-list") as HTMLElement;
     this.immediateBody = root.querySelector("#immediate") as HTMLElement;
     this.immediateLog = root.querySelector("#immediate-log") as HTMLElement;
-    this.immediateInput = root.querySelector("#immediate-input") as HTMLInputElement;
+    this.immediateInput = new ImmediateEntry(
+      root.querySelector("#immediate-input") as HTMLElement,
+      (text) => this.submitImmediate(text));
     this.localsBody = root.querySelector("#locals") as HTMLElement;
     this.watchBody = root.querySelector("#watch") as HTMLElement;
     this.watchTable = root.querySelector("#watch-table") as HTMLElement;
@@ -438,7 +440,6 @@ export class Shell {
       });
 
     this.installWatchActions(root);
-    this.installImmediate();
     this.setLocals(false, null, []);
 
     this.panelList.addEventListener("click", (event) => {
@@ -645,7 +646,7 @@ export class Shell {
         powerpoint: "? ActivePresentation.Name",
         access: "? CurrentProject.Name",
       };
-      this.immediateInput.placeholder = hint[host] ?? "? 1 + 1";
+      this.immediateInput.setPlaceholder(hint[host] ?? "? 1 + 1");
     }
     this.explorer.setProjects(projects);
 
@@ -1322,41 +1323,8 @@ export class Shell {
       .addEventListener("click", () => run("quickWatch"));
   }
 
-  private installImmediate(): void {
-    this.immediateInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        this.submitImmediate();
-        return;
-      }
-
-      // The last few lines are usually variations on each other, so they are worth walking.
-      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-        if (this.history.length === 0) {
-          return;
-        }
-
-        event.preventDefault();
-        this.historyIndex = event.key === "ArrowUp"
-          ? Math.max(0, this.historyIndex - 1)
-          : Math.min(this.history.length, this.historyIndex + 1);
-
-        this.immediateInput.value = this.history[this.historyIndex] ?? "";
-        this.immediateInput.setSelectionRange(this.immediateInput.value.length, this.immediateInput.value.length);
-      }
-    });
-  }
-
-  private submitImmediate(): void {
-    const text = this.immediateInput.value.trim();
-    if (text.length === 0) {
-      return;
-    }
-
-    this.history.push(text);
-    this.historyIndex = this.history.length;
-    this.immediateInput.value = "";
-
+  /** A line the entry ran: Enter, history and the one-line rule live in ImmediateEntry. */
+  private submitImmediate(text: string): void {
     this.appendImmediate(text, "echo");
     this.immediateAwaitingResult = true;
     this.handlers.evaluate(text);

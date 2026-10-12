@@ -45,10 +45,10 @@ async function fromUi(expression, expected, failed = false) {
   await page("window.xlideBridge.runEditorCommand('xlide.panel.immediate')");
   const before = (await rows()).length;
   await page(`(() => {
-    const input = document.querySelector('#immediate-input');
-    input.value = ${JSON.stringify(expression)};
+    const input = window.xlideBridge.shell.immediateInput;
+    input.setValue(${JSON.stringify(expression)});
     input.focus();
-    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    input.submit();
   })()`);
   await waitFor('Immediate UI result', async () => (await rows()).length >= before + 2,
     { budgetMs: 10000 });
@@ -58,7 +58,7 @@ async function fromUi(expression, expected, failed = false) {
   check('UI returns the expected result',
     failed ? added[1].kind.includes('failed') && added[1].text.includes(expected)
       : !added[1].kind.includes('failed') && added[1].text === expected, JSON.stringify(added));
-  check('the Immediate prompt keeps keyboard focus', await page(`document.activeElement?.id === 'immediate-input'`));
+  check('the Immediate prompt keeps keyboard focus', await page(`document.getElementById('immediate-input').contains(document.activeElement)`));
   check('UI evaluation preserves the breakpoint', await stopped());
 }
 
@@ -139,9 +139,9 @@ try {
   // refused it as "already in progress" until the suspended line stopped holding it off.
   await page("window.xlideBridge.runEditorCommand('xlide.panel.immediate')");
   await page(`(() => {
-    const input = document.querySelector('#immediate-input');
-    input.value = 'Runner.Walk';
-    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    const input = window.xlideBridge.shell.immediateInput;
+    input.setValue('Runner.Walk');
+    input.submit();
   })()`);
   await waitFor('the panel line stops at the breakpoint', stopped, { budgetMs: 15000 });
   check('the panel line stopped in the developer\'s own module',

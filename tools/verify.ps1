@@ -930,6 +930,9 @@ if ($Live) {
                                      # explorer-members reads an unfolded module's rows off the
                                      # tree under each of the header's three orders (#92).
                                      'explorer-members.mjs',
+                                     # immediate-completions asks the Immediate entry line for
+                                     # the code window's lists, in design and in break mode (#97).
+                                     'immediate-completions.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',

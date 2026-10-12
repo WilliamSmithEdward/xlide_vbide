@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
@@ -263,6 +263,16 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised when the page asks what Enter should leave behind: (requestId, offset).</summary>
     public Action<int, int>? SmartEnterRequested { get; set; }
+
+    /// <summary>
+    /// Raised when the Immediate entry line asks one of the code window's three questions (#97):
+    /// the kind ("completion", "hover" or "signatureHelp"), request id, the line, and the offset
+    /// into it. Answered through the same ShowCompletions, ShowHover and ShowSignatureHelp.
+    /// </summary>
+    public Action<string, int, string, int>? ImmediateQuestionAsked { get; set; }
+
+    /// <summary>The page's window took the focus back: the developer returned to the editor.</summary>
+    public Action? SurfaceFocused { get; set; }
 
     /// <summary>
     /// Raised when the page asks for case corrections:
@@ -2692,6 +2702,36 @@ internal sealed class EditorSurface : IDisposable
                         && offset >= 0)
                     {
                         CompletionRequested?.Invoke(requestId, offset);
+                    }
+
+                    break;
+
+                case "surfaceFocused":
+                    SurfaceFocused?.Invoke();
+                    break;
+
+                case "immediateCompletion":
+                case "immediateHover":
+                case "immediateSignatureHelp":
+                    if (document.RootElement.TryGetProperty("id", out var immediateId)
+                        && immediateId.TryGetInt32(out var immediateRequestId)
+                        && document.RootElement.TryGetProperty("text", out var immediateText)
+                        && immediateText.GetString() is { } immediateLine
+                        && document.RootElement.TryGetProperty("offset", out var immediateOffsetElement)
+                        && immediateOffsetElement.TryGetInt32(out var immediateOffset)
+                        && immediateOffset >= 0
+                        && immediateOffset <= immediateLine.Length)
+                    {
+                        ImmediateQuestionAsked?.Invoke(
+                            type.GetString() switch
+                            {
+                                "immediateCompletion" => "completion",
+                                "immediateHover" => "hover",
+                                _ => "signatureHelp",
+                            },
+                            immediateRequestId,
+                            immediateLine,
+                            immediateOffset);
                     }
 
                     break;

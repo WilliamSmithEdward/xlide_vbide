@@ -85,6 +85,35 @@ try {
       "codicon-symbol-enum", "codicon-symbol-structure", "codicon-symbol-method", "codicon-symbol-method",
       "codicon-symbol-method", "codicon-symbol-property", "codicon-symbol-property"]),
     JSON.stringify(glyphs));
+
+  // ---- a sheet's tab name beside its code name (#98) --------------------------------------
+  // Renamed through Excel, the way a developer renames a tab, and read after a return to the
+  // editor, which is the only moment the tree re-reads the names.
+  const sheetRow = async () => await api.ask(`(() => {
+    const row = [...document.querySelectorAll('.tree-item[data-kind="100"]')]
+      .find((one) => one.dataset.component === "Sheet1");
+    return row ? row.textContent.trim() : null;
+  })()`);
+  const tabBefore = String((await api.immediate('?ThisWorkbook.Worksheets(1).Name')).text ?? "").trim();
+  check("a sheet's row shows its tab name in brackets",
+    (await sheetRow())?.startsWith(`Sheet1 (${tabBefore})`) === true, JSON.stringify(await sheetRow()));
+  const workbookRow = await api.ask(`[...document.querySelectorAll('.tree-item[data-kind="100"]')]
+    .filter((one) => !/[(]/.test(one.textContent)).map((one) => one.dataset.component)`);
+  check("the workbook's own module shows no bracket", (workbookRow ?? []).includes("ThisWorkbook"), JSON.stringify(workbookRow));
+  try {
+    await api.immediate('ThisWorkbook.Worksheets(1).Name = "Storage"');
+    await api.ask("window.xlideBridge.surfaceFocused()");
+    let renamed = null;
+    for (let tries = 0; tries < 20 && !(renamed ?? "").startsWith("Sheet1 (Storage)"); tries += 1) {
+      await wait(250);
+      renamed = await sheetRow();
+    }
+    check("a tab renamed in Excel shows once the developer is back in the editor",
+      (renamed ?? "").startsWith("Sheet1 (Storage)"), JSON.stringify(renamed));
+  } finally {
+    await api.immediate(`ThisWorkbook.Worksheets(1).Name = "${tabBefore}"`).catch(() => {});
+    await api.ask("window.xlideBridge.surfaceFocused()").catch(() => {});
+  }
 } finally {
   await sortBy(before).catch(() => {});
   await api.component("remove", { name: NAME, project: project.projectId }).catch(() => {});
