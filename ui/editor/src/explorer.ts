@@ -52,6 +52,11 @@ export interface ExplorerComponent {
   kind: number;
   /** The folder its '@Folder annotation names, dotted, or nothing: the host read it. */
   folder?: string | null;
+  /**
+   * A worksheet's or chart's name on its tab, shown in brackets after the code name the way the
+   * native Project Explorer shows "Sheet4 (Sheet1)" (#98). Absent for every other module.
+   */
+  caption?: string | null;
 }
 
 /** The two layouts the pane offers. */
@@ -1273,7 +1278,17 @@ export class Explorer {
     kind.className = "tree-kind";
     kind.textContent = meta.type;
 
-    button.append(chevron, glyph, document.createTextNode(component.name), kind);
+    button.append(chevron, glyph, document.createTextNode(component.name));
+
+    // The tab name beside the code name, as the native Project Explorer draws it (#98).
+    if (component.caption) {
+      const caption = document.createElement("span");
+      caption.className = "tree-caption";
+      caption.textContent = ` (${component.caption})`;
+      button.appendChild(caption);
+    }
+
+    button.appendChild(kind);
 
     const problems = this.problemCounts.get(problemCountKey(project, component.name)) ?? 0;
     if (problems > 0) {

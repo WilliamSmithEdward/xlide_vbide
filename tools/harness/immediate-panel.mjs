@@ -46,12 +46,14 @@ const QUIET_MS = 4000;
 
 /** Types each line into the panel and presses Enter, in the page, after `delayMs`. */
 const enter = (lines, delayMs = 0) => api.ask(`(() => {
-  const input = document.querySelector("#immediate-input");
+  // The entry line is a one-line code editor (#97); setValue and submit are what typing a
+  // line and pressing Enter come to, and Monaco does not act on synthesised key events.
+  const input = window.xlideBridge?.shell?.immediateInput;
   if (!input) { return "no input"; }
   const press = () => {
     for (const line of ${JSON.stringify(lines)}) {
-      input.value = line;
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.setValue(line);
+      input.submit();
     }
   };
   if (${delayMs} > 0) { setTimeout(press, ${delayMs}); } else { press(); }

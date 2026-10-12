@@ -110,6 +110,7 @@ import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
 import { Workspace } from "./workspace.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
+import { isImmediateModel } from "./immediateentry.js";
 
 // Stamped by the build; reported to the host so the log names the running bundle.
 declare const __XLIDE_BUILD__: string;
@@ -1615,6 +1616,9 @@ function boot(): void {
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
 
+  // Back from Excel: a sheet tab renamed there shows in the explorer now (#98). Once per return.
+  window.addEventListener("focus", () => bridge.surfaceFocused());
+
 
   // Tools > Options routes here from the host: the native Options dialog is superseded, and
   // the product's settings are where the choices that matter live.
@@ -1631,11 +1635,15 @@ function boot(): void {
   const completionProvider: monaco.languages.CompletionItemProvider = {
     triggerCharacters: ["."],
     provideCompletionItems: async (model, position) => {
-      if (model !== bridge.hostActiveModel()) {
+      const immediate = isImmediateModel(model);
+      if (!immediate && model !== bridge.hostActiveModel()) {
         return { suggestions: [] };
       }
 
-      const items = await bridge.requestCompletions(model.getOffsetAt(position));
+      // The Immediate entry line is answered in the scope it will run in (#97).
+      const items = immediate
+        ? await bridge.requestImmediateCompletions(model.getValue(), model.getOffsetAt(position))
+        : await bridge.requestCompletions(model.getOffsetAt(position));
       const word = model.getWordUntilPosition(position);
       const range = new monaco.Range(
         position.lineNumber,
@@ -1662,6 +1670,25 @@ function boot(): void {
   // way the extension renders it.
   const hoverProvider: monaco.languages.HoverProvider = {
     provideHover: async (model, position) => {
+      if (isImmediateModel(model)) {
+        // Quick info on the entry line, from the scope the line will run in (#97). The span is
+        // the host's, mapped back into the line.
+        const hover = await bridge.requestImmediateHover(model.getValue(), model.getOffsetAt(position));
+        if (!hover) {
+          return null;
+        }
+        const start = model.getPositionAt(hover.start);
+        const end = model.getPositionAt(hover.end);
+        const contents: monaco.IMarkdownString[] = [{ value: "```vba\n" + hover.signature + "\n```" }];
+        if (hover.details.length > 0) {
+          contents.push({ value: hover.details.join("  \n") });
+        }
+        if (hover.documentation) {
+          contents.push({ value: hover.documentation });
+        }
+        return { range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column), contents };
+      }
+
       if (model !== bridge.hostActiveModel()) {
         return null;
       }
@@ -2289,11 +2316,14 @@ function boot(): void {
     signatureHelpTriggerCharacters: ["(", ",", " "],
     signatureHelpRetriggerCharacters: [","],
     provideSignatureHelp: async (model, position) => {
-      if (model !== bridge.hostActiveModel()) {
+      const immediate = isImmediateModel(model);
+      if (!immediate && model !== bridge.hostActiveModel()) {
         return null;
       }
 
-      const info = await bridge.requestSignatureHelp(model.getOffsetAt(position));
+      const info = immediate
+        ? await bridge.requestImmediateSignatureHelp(model.getValue(), model.getOffsetAt(position))
+        : await bridge.requestSignatureHelp(model.getOffsetAt(position));
       if (!info) {
         return null;
       }

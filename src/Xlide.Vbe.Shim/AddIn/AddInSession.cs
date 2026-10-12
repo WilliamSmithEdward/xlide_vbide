@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
@@ -1450,6 +1450,8 @@ internal sealed partial class AddInSession : IDisposable
             }
         };
         _editorSurface.CompletionRequested = OnCompletionRequested;
+        _editorSurface.ImmediateQuestionAsked = OnImmediateQuestion;
+        _editorSurface.SurfaceFocused = OnSurfaceFocused;
         _editorSurface.HoverRequested = OnHoverRequested;
         _editorSurface.SignatureHelpRequested = OnSignatureHelpRequested;
         _editorSurface.SmartEnterRequested = OnSmartEnterRequested;
@@ -7950,6 +7952,169 @@ internal sealed partial class AddInSession : IDisposable
             (surface, items) => surface.ShowCompletions(requestId, items),
             items => $"{items.Length} item(s)");
 
+    /// <summary>
+    /// Where an Immediate line is set into a module for the engine to answer about it: the module,
+    /// the text with the line in it, where the line starts in that text, and how the line's
+    /// leading `?` was spelled out, so offsets map both ways.
+    /// </summary>
+    private sealed record ImmediateScope(string Module, string Source, int LineStart, int QuestionAt, int Shift);
+
+    /// <summary>The name of the procedure an Immediate line is set into outside break mode.</summary>
+    private const string ImmediateProbeName = "XlideImmediateLine";
+
+    /// <summary>
+    /// The text the engine is asked about for an Immediate line (#97): the line set into the code
+    /// it will run in. In break mode that is the stopped procedure, so the line goes in just
+    /// above the stopped statement and the procedure's locals are in scope, as the native window
+    /// offers them. Otherwise it is the module on screen, with the line in a procedure of its own
+    /// at the end. A leading `?` is spelled `Debug.Print`, the statement it stands for. Null when
+    /// there is no module to set it into.
+    /// </summary>
+    private ImmediateScope? ImmediateScopeFor(string line)
+    {
+        var lead = line.Length - line.TrimStart().Length;
+        var questionAt = line.Length > lead && line[lead] == '?' ? lead : -1;
+        const string spelled = "Debug.Print ";
+        var statement = questionAt >= 0 ? line[..questionAt] + spelled + line[(questionAt + 1)..] : line;
+        var shift = questionAt >= 0 ? spelled.Length - 1 : 0;
+
+        var surface = _editorSurface;
+        if (_inBreak && _lastStopFollowed is { } stop && stop.LastIndexOf(':') is var colon and > 0
+            && int.TryParse(stop[(colon + 1)..], out var stopLine) && stopLine >= 1)
+        {
+            var module = stop[..colon];
+            if (surface?.TextOf(module, DisplayFromProjectId(_shownProject)) is { } stopped)
+            {
+                // The start of the stopped line, counted the way the engine counts offsets.
+                var at = 0;
+                for (var seen = 1; seen < stopLine && at >= 0; seen++)
+                {
+                    at = stopped.IndexOf('\n', at);
+                    at = at < 0 ? -1 : at + 1;
+                }
+
+                if (at >= 0)
+                {
+                    return new ImmediateScope(module, stopped[..at] + statement + "\r\n" + stopped[at..], at, questionAt, shift);
+                }
+            }
+        }
+
+        if (surface is { Module: { } shown, Text: { } text })
+        {
+            var head = text + "\r\n\r\nPublic Sub " + ImmediateProbeName + "()\r\n";
+            return new ImmediateScope(shown, head + statement + "\r\nEnd Sub\r\n", head.Length, questionAt, shift);
+        }
+
+        return null;
+    }
+
+    /// <summary>An offset into the Immediate line, as an offset into its scope's text.</summary>
+    private static int IntoScope(ImmediateScope scope, int offset) =>
+        scope.LineStart + offset + (scope.QuestionAt >= 0 && offset > scope.QuestionAt ? scope.Shift : 0);
+
+    /// <summary>An offset into the scope's text, back on the Immediate line, clamped to it.</summary>
+    private static int OutOfScope(ImmediateScope scope, int offset, int lineLength)
+    {
+        var at = offset - scope.LineStart;
+        if (scope.QuestionAt >= 0 && at > scope.QuestionAt)
+        {
+            at = Math.Max(scope.QuestionAt + 1, at - scope.Shift);
+        }
+
+        return Math.Clamp(at, 0, lineLength);
+    }
+
+    /// <summary>
+    /// Answers one of the code window's three questions about the Immediate entry line (#97),
+    /// through the same engine round trip and the same replies the code window gets.
+    /// </summary>
+    private void OnImmediateQuestion(string kind, int requestId, string line, int offset)
+    {
+        var scope = ImmediateScopeFor(line);
+        if (scope is null)
+        {
+            switch (kind)
+            {
+                case "completion": _editorSurface?.ShowCompletions(requestId, []); break;
+                case "hover": _editorSurface?.ShowHover(requestId, null); break;
+                default: _editorSurface?.ShowSignatureHelp(requestId, null); break;
+            }
+
+            return;
+        }
+
+        var at = IntoScope(scope, offset);
+        var locus = $"@immediate {offset} in {scope.Module}";
+        switch (kind)
+        {
+            case "completion":
+                AnswerFromEngine<SurfaceCompletionItem[]>(
+                    "completion",
+                    locus,
+                    [],
+                    async (analysis, module, source, token) =>
+                    {
+                        var answered = await analysis.CompleteAsync(module, source, at, token, sendSource: true)
+                            .ConfigureAwait(false);
+                        return answered is null ? [] : [.. answered
+                            .Where(item => !string.Equals(item.Label, ImmediateProbeName, StringComparison.OrdinalIgnoreCase))
+                            .Select(item => new SurfaceCompletionItem(
+                                item.Label, item.Kind, item.Detail, item.Documentation, item.InsertText, item.FilterText, item.SortText))];
+                    },
+                    (surface, items) => surface.ShowCompletions(requestId, items),
+                    items => $"{items.Length} item(s)",
+                    scope.Module,
+                    scope.Source);
+                break;
+
+            case "hover":
+                AnswerFromEngine<SurfaceHoverPayload?>(
+                    "hover",
+                    locus,
+                    null,
+                    async (analysis, module, source, token) =>
+                    {
+                        var answered = await analysis.HoverAsync(module, source, at, token, sendSource: true)
+                            .ConfigureAwait(false);
+                        return answered is null ? null : new SurfaceHoverPayload(
+                            answered.Signature,
+                            answered.Details,
+                            answered.Documentation,
+                            OutOfScope(scope, answered.Span.Start, line.Length),
+                            OutOfScope(scope, answered.Span.End, line.Length));
+                    },
+                    (surface, payload) => surface.ShowHover(requestId, payload),
+                    payload => payload is null ? "nothing" : payload.Signature,
+                    scope.Module,
+                    scope.Source);
+                break;
+
+            default:
+                AnswerFromEngine<SurfaceSignatureInfo?>(
+                    "signature",
+                    locus,
+                    null,
+                    async (analysis, module, source, token) =>
+                    {
+                        var answered = await analysis.SignatureHelpAsync(module, source, at, token, sendSource: true)
+                            .ConfigureAwait(false);
+                        return answered is null ? null : new SurfaceSignatureInfo(
+                            answered.Label,
+                            [.. answered.Parameters.Select(parameter =>
+                                new SurfaceSignatureParameter(parameter.Label, parameter.Documentation))],
+                            answered.ActiveParameter,
+                            answered.Documentation,
+                            answered.Details);
+                    },
+                    (surface, payload) => surface.ShowSignatureHelp(requestId, payload),
+                    payload => payload is null ? "nothing" : payload.Label,
+                    scope.Module,
+                    scope.Source);
+                break;
+        }
+    }
+
     /// <summary>Answers a hover request from the surface, the same way a completion is.</summary>
     private void OnHoverRequested(int requestId, int offset)
     {
@@ -10743,6 +10908,75 @@ internal sealed partial class AddInSession : IDisposable
     /// by, so it has to show modules that have never been opened. Reading a component's pane would
     /// create one, so nothing here touches CodeModule.
     /// </summary>
+    /// <summary>
+    /// A worksheet's or chart's name on its tab, for the explorer to show beside its code name
+    /// (#98): "Sheet4 (Sheet1)" when the two have drifted apart, as the native Project Explorer
+    /// shows it. Read through the component's Properties, the trust-free road the Properties
+    /// panel already takes. Only a sheet has an Index, so the workbook's own module - whose Name
+    /// is the file - and every other host's documents answer null.
+    /// </summary>
+    private static string? SheetCaptionOf(DispatchObject component, int type) =>
+        type == DocumentComponent && HostApp.Name == "excel"
+            && Xlide.Vbe.Shim.Editor.FormDesignService.PropertyInt(component, "Index") is not null
+                ? Xlide.Vbe.Shim.Editor.FormDesignService.PropertyText(component, "Name")
+                : null;
+
+    /// <summary>The sheet captions the tree was last published with, to notice a renamed tab.</summary>
+    private string? _publishedCaptions;
+
+    /// <summary>
+    /// The developer came back to the editor: a tab renamed in Excel meanwhile shows in the tree
+    /// now (#98). Nothing announces a rename, and the component watch sees only components
+    /// arriving and leaving, so the captions are compared once per return rather than polled.
+    /// </summary>
+    private void OnSurfaceFocused()
+    {
+        if (HostApp.Name != "excel" || _publishedCaptions is null)
+        {
+            return;
+        }
+
+        if (SheetCaptionSignature() is { } now && now != _publishedCaptions)
+        {
+            Log.Info("explorer: a sheet's tab name changed; the tree follows");
+            PublishProjects();
+        }
+    }
+
+    /// <summary>Every unlocked project's sheet captions, in order, as one string; null when unreadable.</summary>
+    private string? SheetCaptionSignature()
+    {
+        try
+        {
+            var signature = new System.Text.StringBuilder();
+            using var projects = _editor.GetObject("VBProjects");
+            var count = projects?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var project = projects!.GetItem(i);
+                if (project is null || ProjectReader.IsLocked(project))
+                {
+                    continue;
+                }
+
+                signature.Append('|');
+                ForEachRealComponent(project, (component, name) =>
+                {
+                    if (SheetCaptionOf(component, component.GetInt32("Type")) is { } caption)
+                    {
+                        signature.Append(name).Append('=').Append(caption).Append(';');
+                    }
+                });
+            }
+
+            return signature.ToString();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private void PublishProjects()
     {
         var surface = _editorSurface;
@@ -10803,6 +11037,7 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             var tree = new List<SurfaceProject>(projectCount);
+            var captions = new System.Text.StringBuilder();
             var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var readable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var locked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -10842,8 +11077,19 @@ internal sealed partial class AddInSession : IDisposable
                 // or a one-time read of the declarations for a module no pass has described.
                 var members = new List<SurfaceComponent>();
                 ForEachRealComponent(project, (component, name) =>
-                    members.Add(new SurfaceComponent(name, component.GetInt32("Type"), FolderOf(identity, component, name))));
+                {
+                    var type = component.GetInt32("Type");
+                    members.Add(new SurfaceComponent(name, type, FolderOf(identity, component, name), SheetCaptionOf(component, type)));
+                });
                 PruneFolders(identity, members.Select(member => member.Name));
+
+                // The same spelling SheetCaptionSignature builds, so a return to the editor
+                // republishes only when a tab name has really changed.
+                captions.Append('|');
+                foreach (var member in members.Where(member => member.Caption is not null))
+                {
+                    captions.Append(member.Name).Append('=').Append(member.Caption).Append(';');
+                }
 
                 // The cased name against the id, so the title bar can name the workbook on a tab
                 // switch without a COM call. The id is a lowercased path and everything derived
@@ -10856,6 +11102,7 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             surface.ShowProjects([.. tree]);
+            _publishedCaptions = captions.ToString();
 
             if (_nativeExplorerUnlockProject is { } unlocking && !locked.Contains(unlocking))
             {
