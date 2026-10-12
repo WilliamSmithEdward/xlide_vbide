@@ -1338,6 +1338,7 @@ internal sealed partial class AddInSession : IDisposable
             _editorSurface?.Notify(refused);
         };
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
+        _editorSurface.CommitsOnLineLeave = (_, project) => DocumentAutoSaveOn(project);
         _editorSurface.SearchRequested = OnSearchRequested;
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
@@ -10516,6 +10517,58 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         return null;
+    }
+
+    /// <summary>AutoSave answers per document display name, with when each was read.</summary>
+    private readonly Dictionary<string, (bool On, long At)> _autoSaveRead = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a document has AutoSave on, read through the trust-free application route and
+    /// held for five seconds: this is asked on keystrokes, and the switch is flipped by hand.
+    /// False when it cannot be read - an Office older than the property, Access, a document
+    /// never saved - which keeps the ordinary write-back (#94).
+    /// </summary>
+    private bool DocumentAutoSaveOn(string? display)
+    {
+        if (display is null)
+        {
+            return false;
+        }
+
+        var now = Environment.TickCount64;
+        if (_autoSaveRead.TryGetValue(display, out var held) && now - held.At < 5000)
+        {
+            return held.On;
+        }
+
+        var on = false;
+        try
+        {
+            using var book = FindWorkbookByDisplay(display);
+            on = book?.GetBool("AutoSaveOn") ?? false;
+
+#if DEBUG
+            // AutoSave needs a document in OneDrive or SharePoint, which no fixture is, so dev
+            // builds can claim it for every document to drive the held write-back by hand.
+            on |= Environment.GetEnvironmentVariable("XLIDE_DEV_AUTOSAVE") == "1";
+#endif
+        }
+        catch (Exception)
+        {
+            // No such property on this host or this Office; the ordinary write-back stands.
+        }
+
+        if (!held.Equals(default((bool, long))) && held.On != on)
+        {
+            Log.Info($"autosave: {display} is now {(on ? "on - typing is written as each line is left" : "off")}");
+        }
+        else if (held.Equals(default((bool, long))) && on)
+        {
+            Log.Info($"autosave: {display} has AutoSave on - typing is written as each line is left");
+        }
+
+        _autoSaveRead[display] = (on, now);
+        return on;
     }
 
     /// <summary>
