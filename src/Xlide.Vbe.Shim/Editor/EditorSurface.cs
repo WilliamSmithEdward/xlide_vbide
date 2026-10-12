@@ -95,6 +95,16 @@ internal sealed class EditorSurface : IDisposable
     private const uint WriteDelayMilliseconds = 400;
 
     /// <summary>
+    /// Asked whether a document's edits should wait for the caret to leave the line rather than
+    /// for a pause in typing: true while its host document has AutoSave on (#94). Module and
+    /// project display name.
+    /// </summary>
+    public Func<string, string?, bool>? CommitsOnLineLeave { get; set; }
+
+    /// <summary>Typing is held for the caret to leave its line; see <see cref="CommitsOnLineLeave"/>.</summary>
+    private bool _heldForLineLeave;
+
+    /// <summary>
     /// How long the typing rests before the live analysis pass. Just inside the write delay, so
     /// findings refresh from the text as typed without waiting for the module write-back. A
     /// large module waits longer: its pass costs more, and running it between keystrokes is
@@ -1887,6 +1897,7 @@ internal sealed class EditorSurface : IDisposable
     public void FlushEdits()
     {
         _overlay?.StopWriteTimer();
+        _heldForLineLeave = false;
 
         // Flags drop before the callbacks run: a flush reaches WriteModule and republishes,
         // and the re-entrant pass must find nothing left to flush.
@@ -2079,6 +2090,13 @@ internal sealed class EditorSurface : IDisposable
                             _overlay?.StartAnalyseTimer(1);
                         }
 
+                        // And it commits a line held for a document under AutoSave (#94).
+                        if (caretLine != CaretLine && _heldForLineLeave)
+                        {
+                            _heldForLineLeave = false;
+                            _overlay?.StartWriteTimer(1);
+                        }
+
                         CaretLine = caretLine;
                         CaretColumn = document.RootElement.TryGetProperty("startColumn", out var column)
                             && column.TryGetInt32(out var caretColumn)
@@ -2145,7 +2163,24 @@ internal sealed class EditorSurface : IDisposable
                             // to see it.
                             editedDoc.Text = updated;
                             editedDoc.Unwritten = true;
-                            _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+
+                            // A DOCUMENT UNDER AUTOSAVE IS WRITTEN WHEN THE LINE IS LEFT, as the
+                            // native editor commits a line, not at every pause in typing. Each
+                            // write dirties the document and the host saves it on its own thread,
+                            // to the cloud: a hitch of about a second per pause, and the
+                            // completion asked for meanwhile waits behind it (#94). Only typing
+                            // on one line waits; a paste, a format or a fix writes as before.
+                            var typedOnOneLine = !document.RootElement.TryGetProperty("source", out _)
+                                && document.RootElement.TryGetProperty("changes", out var heldSet)
+                                && SingleLineTypedIn(heldSet) is not null;
+                            if (typedOnOneLine && CommitsOnLineLeave?.Invoke(editedDoc.Module, editedDoc.Project) == true)
+                            {
+                                _heldForLineLeave = true;
+                            }
+                            else
+                            {
+                                _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+                            }
 
                             // THE BREAKPOINT RECORD DOES NOT FOLLOW THE TYPING. It used to shift
                             // with every edit that added or removed lines, and that is the record

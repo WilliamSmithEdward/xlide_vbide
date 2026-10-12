@@ -43,7 +43,7 @@ jobs:
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -51,7 +51,7 @@ jobs:
       - name: Build C# with source generators for extraction
         if: matrix.language == 'csharp'
         run: dotnet build xlide_vbide.slnx --configuration Release --no-incremental -p:UseSharedCompilation=false
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           output: security-results/codeql-${{ matrix.language }}
           category: /language:${{ matrix.language }}
@@ -89,7 +89,7 @@ jobs:
             --sarif-output security-results/semgrep/semgrep.sarif .
       - name: Upload to code scanning
         if: always() && github.ref_type != 'tag' && hashFiles('security-results/semgrep/*.sarif') != ''
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: security-results/semgrep/semgrep.sarif
           category: semgrep
@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.23.2'
           package-manager-cache: false

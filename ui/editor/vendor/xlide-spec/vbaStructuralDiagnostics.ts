@@ -2,7 +2,8 @@
 // diagnostics provider. Keeping this module free of any `vscode` import means
 // it can be unit-tested directly with vitest.
 
-import { leadingWhitespace, stripVba, toLogicalLines } from './vbaSourceScan';
+import { colonDirectiveStarts, remDirectiveStarts } from './analyzer/lexer/tokenHelpers';
+import { leadingWhitespace, lineIndexOf, lineStartOffsets, stripVba, toLogicalLines } from './vbaSourceScan';
 
 export interface VbaStructuralDiagnostic {
     /** 0-based physical line of the relevant token. */
@@ -32,7 +33,9 @@ export interface VbaStructuralAnalysisOptions {
     /**
      * Returns true for physical source lines that belong to a proven-inactive
      * conditional-compilation branch. Preprocessor lines are still analyzed so
-     * #If/#Else/#End If balance remains checked.
+     * #If/#Else/#End If balance remains checked. For an #ElseIf or #Else line
+     * it answers for the arm that line ends, as the line-start query of the
+     * conditional activity tracker does.
      */
     isInactiveLine?: (line: number) => boolean;
 }
@@ -397,16 +400,52 @@ export function analyzeVbaStructure(
     options: VbaStructuralAnalysisOptions = {},
 ): VbaStructuralDiagnostic[] {
     const physical = source.split(/\r\n|\r|\n/);
-    const { logical } = toLogicalLines(source);
+    const { stripped, logical } = toLogicalLines(source);
     const stack: OpenBlock[] = [];
     // One entry per open `#If`, carrying which arm of it we are currently in.
-    // endHeight0: the block-stack height when arm 0 ended; a closer in a later arm
-    // that would go below it restates arm 0's closer (issue #130).
-    const preprocessorStack: Array<{ line: number; chain: number; arm: number; endHeight0: number }> = [];
+    // endHeight: the block-stack height when the first arm that was read ended;
+    // a closer in a later arm that would go below it restates that arm's closer
+    // (issue #130).
+    const preprocessorStack: Array<{ line: number; chain: number; arm: number; endHeight?: number }> = [];
     let conditionalChains = 0;
     const currentBranch = (): ConditionalArm[] =>
         preprocessorStack.map((frame) => ({ chain: frame.chain, arm: frame.arm }));
     const problems: VbaStructuralDiagnostic[] = [];
+    // A directive line holding a Rem is no directive to the VBE (issue
+    // #1321): an #If, #ElseIf, #Else or #End If one opens, continues and
+    // closes nothing, and a #Const one is skipped like the rest.
+    const remStarts = remDirectiveStarts(source);
+    // Nor is one a statement colon follows (issue #1323); on that line no `#`
+    // segment is a directive.
+    const colonStarts = colonDirectiveStarts(source);
+    const lineStarts = remStarts.size > 0 || colonStarts.size > 0 ? lineStartOffsets(source) : [];
+    // True when physical line `i` runs on into the next through ` _`.
+    const continues = (i: number): boolean => /\s_[ \t]*$/.test(stripped[i] ?? '') && /\s_[ \t]*$/.test(physical[i] ?? '');
+    // Keyed by the logical line's first physical line, which a bare ` _` line
+    // before the `#` moves up.
+    const logicalLineOf = (offset: number): number => {
+        let line = lineIndexOf(lineStarts, offset);
+        while (line > 0 && continues(line - 1)) {
+            line--;
+        }
+        return line;
+    };
+    const remDirectiveLines = new Set([...remStarts].map(logicalLineOf));
+    const colonDirectiveLines = new Set([...colonStarts].map(logicalLineOf));
+    // The first character of the logical line starting at `line`, past blanks
+    // and bare ` _` lines. The colon segments drop an empty one, so `: #If`
+    // reaches the loop as a first segment (issue #1331).
+    const logicalLineHead = (line: number): string => {
+        for (let i = line; i < stripped.length; i++) {
+            const text = stripped[i] ?? '';
+            const continued = continues(i);
+            const body = (continued ? text.replace(/\s_[ \t]*$/, '') : text).trim();
+            if (body || !continued) {
+                return body.charAt(0);
+            }
+        }
+        return '';
+    };
 
     const closeOne = (closerKind: BlockKind, line: number, closerWord: string): void => {
         let idx = -1;
@@ -471,17 +510,25 @@ export function analyzeVbaStructure(
         stack.length = idx;
     };
 
+    let previousLine = -1;
     for (const ll of logical) {
+        const firstOnLine = ll.line !== previousLine;
+        previousLine = ll.line;
         // A line number ahead of the statement (`10  For i = 1 To 3`, as MZ-Tools
         // writes for Erl) is a label, not part of the block keyword (issue #131).
-        const t = ll.text.trim().replace(/^\d+(?:\s+|$)/, '');
-        if (!t) { continue; }
+        const raw = ll.text.trim();
+        const t = raw.replace(/^\d+(?:\s+|$)/, '');
+        // A directive starts its logical line: after a colon, a label or a
+        // line number a `#` is none, and opens and closes nothing (issue
+        // #1331, measured in Excel 16.0).
+        const misplaced = (): boolean => !firstOnLine || logicalLineHead(ll.line) !== '#';
+        if (!t || (t.startsWith('#') && (misplaced() || remDirectiveLines.has(ll.line) || colonDirectiveLines.has(ll.line)))) { continue; }
         if (options.isInactiveLine?.(ll.line) && !isPreprocessorLine(t)) {
             continue;
         }
 
         if (/^#\s*If\b/i.test(t)) {
-            preprocessorStack.push({ line: ll.line, chain: conditionalChains++, arm: 0, endHeight0: stack.length });
+            preprocessorStack.push({ line: ll.line, chain: conditionalChains++, arm: 0 });
             continue;
         }
 
@@ -498,7 +545,10 @@ export function analyzeVbaStructure(
             } else {
                 const frame = preprocessorStack[preprocessorStack.length - 1];
 
-                if (frame.arm === 0) { frame.endHeight0 = stack.length; }
+                // A skipped arm ran none of its closers, so it sets no height.
+                if (frame.endHeight === undefined && !options.isInactiveLine?.(ll.line)) {
+                    frame.endHeight = stack.length;
+                }
 
                 frame.arm += 1;
             }
@@ -521,11 +571,11 @@ export function analyzeVbaStructure(
         }
 
         // Only one arm of a chain is compiled: a closer in a later arm that
-        // would take the stack below where arm 0 left it is the same closer
-        // restated (issue #130: `End If` written in both arms).
+        // would take the stack below where the first read arm left it is the
+        // same closer restated (issue #130: `End If` written in both arms).
         const restated = (): boolean => {
-            const frame = preprocessorStack[preprocessorStack.length - 1];
-            return frame !== undefined && frame.arm > 0 && stack.length - 1 < frame.endHeight0;
+            const endHeight = preprocessorStack[preprocessorStack.length - 1]?.endHeight;
+            return endHeight !== undefined && stack.length - 1 < endHeight;
         };
 
         if (isTypeFieldInsideType(stack, t)) {
