@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { isImmediateModel } from "./immediateentry.js";
 import { DocumentStore, HISTORY_URI_SCHEME, docKeyOf, knownFace, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
 import { setSystemColours, type SystemColour } from "./colourpicker.js";
@@ -2650,8 +2651,10 @@ export class EditorBridge {
   modelCensus(): { models: number; documents: number } {
     // A past-version tab's model is not a document: it lives and dies with its tab, which the
     // host lists, and counting it here would read every open history tab as a leaked module.
+    // Nor is the Immediate entry line's (#97): one model for the page's life, never a module.
     return {
-      models: monaco.editor.getModels().filter((model) => model.uri.scheme !== HISTORY_URI_SCHEME).length,
+      models: monaco.editor.getModels().filter((model) =>
+        model.uri.scheme !== HISTORY_URI_SCHEME && !isImmediateModel(model)).length,
       documents: this.documents.all().length,
     };
   }
