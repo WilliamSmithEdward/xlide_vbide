@@ -809,6 +809,9 @@ await api.attributesApply("Registry", { project: "AttributesFixture.xlsm" });
 await api.attributesRemove("Registry", "PredeclaredId", { project: "AttributesFixture.xlsm" });
 await api.act("explorerView", { view: "folders" });   // a settings change: poll ui.explorer.view
 await api.act("explorerSort", { sort: "kind" });      // code | name | kind, through the header's select: poll ui.explorer.sort
+await api.act("codeBar");                              // the Object and Procedure lists above the active code editor (#101)
+await api.act("codeBar", { object: "Worksheet" });     // goes to Worksheet_SelectionChange, writing it when absent, as the native list does
+await api.act("codeBar", { object: "Worksheet", procedure: "Change" });  // an event: its handler, written when missing
 await api.act("expandFolder", { project: "FolderFixture.xlsm", path: "Accounts.Ledger", open: false });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");

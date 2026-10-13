@@ -110,6 +110,7 @@ export type HostMessage =
   | { type: "moveToModuleResult"; id: number; moved?: string | null; from?: string | null; to?: string | null; modules: string[]; requalified: number; refused?: string | null }
   | { type: "introduceParameterResult"; id: number; parameter?: string | null; declaredType?: string | null; value?: string | null; procedure?: string | null; modules: string[]; callSites: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
+  | { type: "codeObjectsResult"; id: number; objects: HostCodeObject[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
   | { type: "changesResult"; id: number; json: string }
@@ -323,6 +324,14 @@ export interface HostProcedure {
   name: string;
   kind: string;
   line: number;
+}
+
+/** One entry of the code window's Object list: the name its handlers take, and its events (#101). */
+export interface HostCodeObject {
+  name: string;
+  events: { name: string; params: string }[];
+  /** The event whose handler a pick of the object itself goes to, writing it when absent. */
+  defaultEvent?: string | null;
 }
 
 /** One search hit as the host answers it; project is the display name, or null unsaid. */
@@ -603,6 +612,8 @@ export type ClientMessage =
   | { type: "completion"; id: number; offset: number }
   /** The page's window took the focus back; the host re-reads what can change while away (#98). */
   | { type: "surfaceFocused" }
+  | { type: "codeObjects"; id: number; module: string; project?: string; text: string }
+  | { type: "eventHandler"; module: string; project?: string; object: string; event: string }
   | { type: "immediateCompletion" | "immediateHover" | "immediateSignatureHelp"; id: number; text: string; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
@@ -868,6 +879,7 @@ export class EditorBridge {
   private readonly pendingMoves = new RequestTable<HostMoveToModuleAnswer>();
   private readonly pendingParameters = new RequestTable<HostIntroduceParameterAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
+  private readonly pendingCodeObjects = new RequestTable<HostCodeObject[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
   private readonly pendingChanges = new RequestTable<Record<string, unknown>>();
@@ -1540,6 +1552,25 @@ export class EditorBridge {
       () => ({ error: "the host did not answer in time" }),
       10000,
       (id) => this.transport.post({ type: "api", id, ...args }));
+  }
+
+  /**
+   * The objects a module can handle events of, for the code window's Object list (#101): its
+   * own object, a form's controls, its WithEvents variables, each with its events. Null when no
+   * answer came, which the lists read as "keep what is shown".
+   */
+  /**
+   * The objects a module can handle events of, read from the text on screen: a WithEvents line
+   * typed a moment ago is in the list before the host has seen it.
+   */
+  requestCodeObjects(module: string, project: string | undefined, text: string): Promise<HostCodeObject[] | null> {
+    return this.pendingCodeObjects.ask(() => null, 8000, (id) =>
+      this.transport.post({ type: "codeObjects", id, module, ...(project ? { project } : {}), text }));
+  }
+
+  /** An event picked in the Procedure list: the host goes to its handler, writing it first if need be. */
+  goToEventHandler(module: string, project: string | null, object: string, event: string): void {
+    this.transport.post({ type: "eventHandler", module, ...(project ? { project } : {}), object, event });
   }
 
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
@@ -2468,6 +2499,9 @@ export class EditorBridge {
       case "outlineResult":
         // A failed answer is a shrug, not a statement of emptiness.
         this.pendingOutlines.settle(message.id, message.failed ? null : message.procedures);
+        return;
+      case "codeObjectsResult":
+        this.pendingCodeObjects.settle(message.id, message.failed ? null : message.objects);
         return;
       case "designerAutoSizeResult":
         this.pendingAutoSize.settle(
@@ -3983,6 +4017,22 @@ export function demoTransport(): HostTransport {
               { name: "Recalculate", kind: "Sub", line: 10 },
               { name: "Describe", kind: "Function", line: 44 },
             ]
+            : [],
+        });
+      }
+      if (message.type === "codeObjects") {
+        send({
+          type: "codeObjectsResult",
+          id: message.id,
+          objects: message.module === "Module1"
+            ? [{
+              name: "app",
+              events: [
+                { name: "NewWorkbook", params: "ByVal Wb As Workbook" },
+                { name: "SheetChange", params: "ByVal Sh As Object, ByVal Target As Range" },
+                { name: "WorkbookOpen", params: "ByVal Wb As Workbook" },
+              ],
+            }]
             : [],
         });
       }

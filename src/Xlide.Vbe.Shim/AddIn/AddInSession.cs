@@ -1452,6 +1452,8 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.CompletionRequested = OnCompletionRequested;
         _editorSurface.ImmediateQuestionAsked = OnImmediateQuestion;
         _editorSurface.SurfaceFocused = OnSurfaceFocused;
+        _editorSurface.CodeObjectsRequested = OnCodeObjectsRequested;
+        _editorSurface.EventHandlerRequested = OnEventHandlerRequested;
         _editorSurface.HoverRequested = OnHoverRequested;
         _editorSurface.SignatureHelpRequested = OnSignatureHelpRequested;
         _editorSurface.SmartEnterRequested = OnSmartEnterRequested;
@@ -7234,6 +7236,160 @@ internal sealed partial class AddInSession : IDisposable
                 surface.Notify("the event stub could not be written");
             }
         });
+    }
+
+    /// <summary>
+    /// Answers the code window's Object list (#101): the objects a module can handle events of,
+    /// with each one's events, from the engine's live copy of the module.
+    /// </summary>
+    private void OnCodeObjectsRequested(int requestId, string moduleName, string? projectDisplay, string? text)
+    {
+        var surface = _editorSurface;
+        if (surface is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowCodeObjects(requestId, [], failed: true);
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay);
+        _ = Task.Run(async () =>
+        {
+            SurfaceCodeObject[] objects = [];
+            var failed = false;
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var answered = await analysis.CodeObjectsAsync(moduleName, projectId, text, deadline.Token).ConfigureAwait(false);
+                if (answered is null)
+                {
+                    failed = true;
+                }
+                else
+                {
+                    objects = [.. answered.Select(one => new SurfaceCodeObject(
+                        one.Name, [.. one.Events.Select(e => new SurfaceCodeObjectEvent(e.Name, e.Params))], one.DefaultEvent))];
+                }
+
+                Log.Info(failed
+                    ? $"codeObjects: {moduleName} -> no answer (no engine, or no such module)"
+                    : $"codeObjects: {moduleName} -> {objects.Length} object(s): {string.Join(", ", objects.Select(one => one.Name))}");
+            }
+            catch (Exception ex)
+            {
+                failed = true;
+                Log.Info($"codeObjects: {moduleName} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowCodeObjects(requestId, objects, failed));
+        });
+    }
+
+    /// <summary>
+    /// An event picked in the code window's Procedure list (#101): the caret goes to its handler,
+    /// which is written first when the module has none - `Private Sub Object_Event(params)`, the
+    /// declaration the native editor writes, with the parameters the engine reads from the type
+    /// library. The event is looked up again here rather than taken from the page, so a stub can
+    /// only ever be one of the events the object really raises.
+    /// </summary>
+    private void OnEventHandlerRequested(string moduleName, string? projectDisplay, string objectName, string eventName)
+    {
+        if (_editorSurface is not { } surface || _analysis is not { } analysis)
+        {
+            return;
+        }
+
+        // The edits first: the handler is looked for, and written, against the text on screen.
+        surface.FlushEdits();
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        // Looked up in the module's text as the host holds it now, not the engine's seeded copy,
+        // which lags a change made outside the page until the next pass.
+        string? source;
+        using (var component = FindComponent(moduleName, projectId, out _))
+        {
+            source = component is null ? null : ProjectReader.ReadSource(component);
+        }
+
+        _ = Task.Run(async () =>
+        {
+            EngineCodeObjectEvent? found = null;
+            IReadOnlySet<string> handlers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var objects = await analysis.CodeObjectsAsync(moduleName, projectId, source, deadline.Token).ConfigureAwait(false);
+                found = objects?
+                    .FirstOrDefault(one => string.Equals(one.Name, objectName, StringComparison.OrdinalIgnoreCase))?
+                    .Events.FirstOrDefault(one => string.Equals(one.Name, eventName, StringComparison.OrdinalIgnoreCase));
+                // Every handler the module's objects can have: the placement orders a new one among
+                // the handlers, and an ordinary procedure is not one.
+                handlers = (objects ?? [])
+                    .SelectMany(one => one.Events.Select(e => $"{one.Name}_{e.Name}"))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (found is null)
+                {
+                    Log.Info(objects is null
+                        ? $"eventHandler: {moduleName} {objectName}_{eventName} not looked up (no engine answer)"
+                        : $"eventHandler: {moduleName} lists no {objectName}_{eventName} (objects: {string.Join(", ", objects.Select(one => one.Name))})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"eventHandler: {moduleName} {objectName}_{eventName} could not be looked up ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => WriteOrGoToEventHandler(surface, moduleName, projectId, objectName, found, handlers));
+        });
+    }
+
+    private void WriteOrGoToEventHandler(
+        EditorSurface surface, string moduleName, string? projectId, string objectName, EngineCodeObjectEvent? found,
+        IReadOnlySet<string> handlers)
+    {
+        if (found is null)
+        {
+            surface.Notify($"{objectName} raises no such event.");
+            return;
+        }
+
+        try
+        {
+            using var component = FindComponent(moduleName, projectId, out _);
+            if (component is null)
+            {
+                surface.Notify($"no component named {moduleName}");
+                return;
+            }
+
+            var source = ProjectReader.ReadSource(component) ?? string.Empty;
+            var handler = $"{objectName}_{found.Name}";
+
+            // Standing already, in any spelling of its declaration: the pick goes there.
+            var at = EventHandlers.Find(source, objectName, found.Name);
+            if (at >= 0)
+            {
+                Log.Info($"eventHandler: {handler} stands at line {at + 1} of {moduleName}; going there");
+                ShowModuleInSurface(moduleName, projectId);
+                surface.SetCaret(at + 2, 1);
+                return;
+            }
+
+            var (text, header) = EventHandlers.Place(source, objectName, found.Name, found.Params, handlers);
+            if (WriteModule(moduleName, text, projectId, hostRewrite: true) is { } refused)
+            {
+                surface.Notify($"The event handler could not be written: {refused}");
+                return;
+            }
+
+            Log.Info($"eventHandler: wrote {handler} in {moduleName} at line {header}");
+            ShowModuleInSurface(moduleName, projectId);
+            surface.SetCaret(header + 1, 1);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"eventHandler: {objectName}_{found.Name} in {moduleName} failed", ex);
+            surface.Notify("The event handler could not be written.");
+        }
     }
 
     /// <summary>Closes a designer tab, by name; closing what is not open changes nothing.</summary>

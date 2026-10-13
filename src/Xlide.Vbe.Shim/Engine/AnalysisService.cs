@@ -1043,6 +1043,38 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// Asks the engine for a module's procedures, or null when there is no engine or no address
     /// for the module. The source is given for the module being edited, null otherwise.
     /// </summary>
+    /// <summary>
+    /// The objects a module can handle events of, for the code window's Object and Procedure
+    /// lists (#101): the module's own object, a form's controls, its WithEvents variables. Null
+    /// when there is no engine or no address for the module.
+    /// </summary>
+    /// <summary>
+    /// The objects a module can handle events of (#101), read from <paramref name="source"/>,
+    /// the module's text as it stands now; the engine's seeded copy lags a change made outside
+    /// the page until the next pass, and a WithEvents line typed a moment ago is not in it.
+    /// </summary>
+    public async Task<EngineCodeObject[]?> CodeObjectsAsync(
+        string moduleName,
+        string? projectId,
+        string? source,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveNamedHome(moduleName, projectId) is not { } resolved)
+        {
+            return null;
+        }
+
+        var result = await engine.CodeObjectsAsync(resolved.ProjectId, moduleName, resolved.ModuleType, source, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Objects;
+    }
+
     public async Task<EngineOutlineProcedure[]?> OutlineAsync(
         string moduleName,
         string? projectId,

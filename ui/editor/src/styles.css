@@ -315,9 +315,23 @@ body {
 
 .editor-group {
   display: grid;
-  grid-template-rows: auto 1fr;
+  /* Tabs, the code window's Object and Procedure lists (#101), then the code. Placed by row,
+     so the code keeps the stretching row while the lists are hidden for a designer tab. */
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
+}
+
+.editor-group > .group-tabbar {
+  grid-row: 1;
+}
+
+.editor-group > .code-bar {
+  grid-row: 2;
+}
+
+.editor-group > .group-body {
+  grid-row: 3;
 }
 
 /* More than one group marks the active one on its strip, so the target of every
@@ -928,6 +942,53 @@ span.prop-value.readonly {
 .explorer-view-tabs {
   display: flex;
   gap: 2px;
+}
+
+/* The code window's Object and Procedure lists (#101), a row between the tabs and the code. */
+.code-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.code-bar[hidden] {
+  display: none;
+}
+
+/* Two equal halves, as the native lists are. The bar is shell chrome, dark in both editor
+   themes like the tab strip above it. The page defines no dropdown colours, so the field is a
+   translucent fill and the popup rows state their colours, as .scope-select's do, or the
+   browser draws them in its own greys. */
+.code-bar select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.12);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.code-bar select:hover {
+  border-color: rgba(128, 128, 128, 0.6);
+}
+
+.code-bar select:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
+}
+
+.code-bar option,
+.explorer-sort option {
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #f0f0f0);
 }
 
 /* A sheet's tab name beside its code name (#98), quieter than the name itself. */

@@ -28,6 +28,7 @@ import { analyzerInputFor } from './analyzerInput.js';
 import { registerReferenceLibraries } from './referenceLibraries.js';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
+import { codeObjectsFor } from './codeObjects';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { encapsulateFieldFor } from './encapsulateField';
 import { extractVariableFor } from './extractVariable';
@@ -76,6 +77,8 @@ import {
     type ModulePayload,
     type NavigationParams,
     type NavigationResult,
+    type CodeObjectsParams,
+    type CodeObjectsResult,
     type OutlineParams,
     type OutlineResult,
     type ProjectOpenParams,
@@ -504,6 +507,9 @@ export class Dispatcher {
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
+
+            case 'textDocument/codeObjects':
+                return this.codeObjects(this.require<CodeObjectsParams>(params));
 
             case 'sync/plan':
                 return this.syncPlan(this.require<SyncPlanParams>(params));
@@ -1160,6 +1166,18 @@ export class Dispatcher {
      */
     private syncPlan(params: SyncPlanParams): Promise<unknown> {
         return syncPlan(params);
+    }
+
+    /** The objects a module can handle events of, for the code window's lists (#101). */
+    private codeObjects(params: CodeObjectsParams): CodeObjectsResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { objects: [] };
+        }
+
+        return { objects: codeObjectsFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }) };
     }
 
     private outline(params: OutlineParams): OutlineResult {

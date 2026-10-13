@@ -31,6 +31,7 @@ import { groupHolding, prune, resizeAt, splitBeside, type TreeGroup, type TreeNo
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { installSplitterDrag } from "./livedrag.js";
 import { readUiPreference, watchUiPreference, writeUiPreference } from "./preferences.js";
+import type { CodeBar } from "./codebar.js";
 
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
@@ -59,6 +60,8 @@ export interface WorkspaceHandlers {
   /** The body a history-face tab shows: a module's text at a commit, read-only, built on
    * demand and reparented as the tab moves. Null refuses the show. */
   historyBody(id: DocumentId): HTMLElement | null;
+  /** The code window's Object and Procedure lists for a group's editor (#101); null for none. */
+  codeBar?(editor: monaco.editor.IStandaloneCodeEditor): CodeBar | null;
 }
 
 /** What the strip and the api call a tab: the face said the same way in both places. */
@@ -142,6 +145,8 @@ class EditorGroup {
   private readonly scroller: EdgeScroll;
   readonly body: HTMLElement;
   readonly editor: monaco.editor.IStandaloneCodeEditor;
+  /** The Object and Procedure lists over the editor (#101). */
+  readonly codeBar: CodeBar | null;
 
   tabs: Tab[] = [];
   /** A restored, unused split remains available for the next document opened in it. */
@@ -187,6 +192,10 @@ class EditorGroup {
     this.root.append(this.tabbar, this.body);
     this.scroller = installEdgeScroll(this.strip, "tab-edge");
     this.editor = workspace.handlers.createEditor(this.body);
+    this.codeBar = workspace.handlers.codeBar?.(this.editor) ?? null;
+    if (this.codeBar) {
+      this.root.insertBefore(this.codeBar.root, this.body);
+    }
 
     // Focus anywhere inside the group makes it the active group; the editor's own focus is
     // the usual way in, the strip the other.
@@ -328,6 +337,7 @@ class EditorGroup {
 
     this.active = id;
     this.pending = null;
+    this.codeBar?.show(id);
 
     const key = this.key(id);
     this.shownHere = [key, ...this.shownHere.filter((held) => held !== key)];
@@ -381,6 +391,7 @@ class EditorGroup {
   forget(): void {
     this.tabs = [];
     this.active = null;
+    this.codeBar?.show(null);
     this.pending = null;
     this.shownHere = [];
     this.viewStates.clear();
@@ -426,6 +437,7 @@ class EditorGroup {
 
     if (wasActive) {
       this.active = null;
+      this.codeBar?.show(null);
       if (isDesignFace(id) || isHistoryFace(id)) {
         this.unmountDesigner();
       } else if (this.editor.getModel()) {
@@ -644,6 +656,11 @@ export class Workspace {
   /** The editor of the active group - what "the editor" means for every editor-wide feature. */
   activeEditor(): monaco.editor.IStandaloneCodeEditor {
     return this.activeGroup.editor;
+  }
+
+  /** The active group's Object and Procedure lists (#101), for the xlide api. */
+  activeCodeBar(): CodeBar | null {
+    return this.activeGroup.codeBar;
   }
 
   /** The active group's active document, or null when the workspace is empty. */

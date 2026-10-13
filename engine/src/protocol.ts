@@ -955,6 +955,29 @@ export interface OutlineResult {
     procedures: OutlineProcedure[];
 }
 
+/** textDocument/codeObjects: the objects a module can handle events of, for the code window's lists (#101). */
+export type CodeObjectsParams = OutlineParams;
+
+/** One event an object raises, with its parameters as a handler must declare them. */
+export interface CodeObjectEvent {
+    name: string;
+    params: string;
+}
+
+/**
+ * One object of the Object list: the prefix its handlers take, the events it raises, and the
+ * one whose handler the native editor writes when the object itself is picked.
+ */
+export interface CodeObject {
+    name: string;
+    events: CodeObjectEvent[];
+    defaultEvent: string;
+}
+
+export interface CodeObjectsResult {
+    objects: CodeObject[];
+}
+
 /**
  * textDocument/didChange: the live text of a module, kept engine-side so requests can carry an
  * offset and nothing else. A full source replaces; edits apply to what is held, offsets into

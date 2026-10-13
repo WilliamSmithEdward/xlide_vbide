@@ -972,6 +972,25 @@ public sealed record OutlineResultMessage(
     [property: JsonPropertyName("procedures")] SurfaceOutlineProcedure[] Procedures,
     [property: JsonPropertyName("failed")] bool Failed = false);
 
+/// <summary>One event of a code-window object, with the parameters its handler declares (#101).</summary>
+public sealed record SurfaceCodeObjectEvent(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("params")] string Params);
+
+/// <summary>One entry of the code window's Object list: the name its handlers take, its events,
+/// and the one whose handler a pick of the object itself writes.</summary>
+public sealed record SurfaceCodeObject(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("events")] SurfaceCodeObjectEvent[] Events,
+    [property: JsonPropertyName("defaultEvent")] string? DefaultEvent);
+
+/// <summary>The answer to one code-objects request. Failed means "no answer", not "no objects".</summary>
+public sealed record CodeObjectsResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("objects")] SurfaceCodeObject[] Objects,
+    [property: JsonPropertyName("failed")] bool Failed = false);
+
 /// <summary>
 /// What MSForms' own AutoSize makes a control, answered for "Size to Fit".
 ///
@@ -1147,6 +1166,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
+[JsonSerializable(typeof(CodeObjectsResultMessage))]
 [JsonSerializable(typeof(DesignerAutoSizeResultMessage))]
 [JsonSerializable(typeof(SyncResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]
