@@ -796,6 +796,20 @@ internal sealed class EngineClient : IAsyncDisposable
     /// Asks for a module's procedures. The source is optional: given for the module being
     /// edited, omitted to answer from the engine's seeded copy.
     /// </summary>
+    /// <summary>The objects a module can handle events of, and their events (#101).</summary>
+    public async Task<EngineCodeObjects?> CodeObjectsAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? source,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+
+        var result = await CallAsync("textDocument/codeObjects", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineCodeObjects);
+    }
+
     public async Task<EngineOutline?> OutlineAsync(
         string projectId,
         string moduleName,

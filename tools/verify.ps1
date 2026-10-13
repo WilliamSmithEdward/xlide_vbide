@@ -933,6 +933,9 @@ if ($Live) {
                                      # immediate-completions asks the Immediate entry line for
                                      # the code window's lists, in design and in break mode (#97).
                                      'immediate-completions.mjs',
+                                     # code-bar picks in the Object and Procedure lists above the
+                                     # editor and reads the handlers they write back (#101).
+                                     'code-bar.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',

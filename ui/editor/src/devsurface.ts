@@ -1748,6 +1748,25 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * The code window's Object and Procedure lists over the active editor (#101), read or picked
+     * the way a click picks: `act("codeBar")` reads both lists, `act("codeBar", { object, procedure })`
+     * picks - an event not handled yet asks the host to write its handler, as the native lists do.
+     */
+    codeBar: (args) => {
+      const bar = workspace.activeCodeBar();
+      if (!bar) {
+        return { did: false, detail: "no code editor is showing" };
+      }
+      if (args.object === undefined) {
+        return { did: true, detail: "the lists as they stand", data: bar.snapshot() };
+      }
+      const picked = bar.pick(String(args.object), args.procedure === undefined ? undefined : String(args.procedure));
+      return picked
+        ? { did: true, detail: `picked ${String(args.object)}${args.procedure === undefined ? "" : ` / ${String(args.procedure)}`}`, data: bar.snapshot() }
+        : { did: false, detail: "no such entry in the lists", data: bar.snapshot() };
+    },
+
+    /**
      * Opens or shuts a folder row the way a click does: `act("expandFolder", { project, path,
      * open })`. The folder exists whether or not the folder layout is showing, so a script can
      * arrange the folders and then switch to them.

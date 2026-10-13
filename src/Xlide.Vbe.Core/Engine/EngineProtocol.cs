@@ -443,6 +443,22 @@ public sealed record EngineOutlineProcedure(
 public sealed record EngineOutline(
     [property: JsonPropertyName("procedures")] EngineOutlineProcedure[] Procedures);
 
+/// <summary>One event an object raises, with its parameters as a handler declares them (#101).</summary>
+public sealed record EngineCodeObjectEvent(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("params")] string Params);
+
+/// <summary>One object of the code window's Object list: the name its handlers take, its events,
+/// and the one whose handler a pick of the object itself writes.</summary>
+public sealed record EngineCodeObject(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("events")] EngineCodeObjectEvent[] Events,
+    [property: JsonPropertyName("defaultEvent")] string? DefaultEvent = null);
+
+/// <summary>The objects a module can handle events of.</summary>
+public sealed record EngineCodeObjects(
+    [property: JsonPropertyName("objects")] EngineCodeObject[] Objects);
+
 /// <summary>One search hit: where it is, and the line it sits on for the results list.</summary>
 public sealed record EngineSearchMatch(
     [property: JsonPropertyName("projectId")] string ProjectId,
@@ -523,6 +539,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
+[JsonSerializable(typeof(EngineCodeObjects))]
 [JsonSerializable(typeof(EngineProjectOpened))]
 [JsonSerializable(typeof(EngineReferenceLibrary[]))]
 [JsonSerializable(typeof(JsonElement))]

@@ -328,6 +328,16 @@ internal sealed class EditorSurface : IDisposable
     /// workbook or null).</summary>
     public Action<int, string, string?>? OutlineRequested { get; set; }
 
+    /// <summary>The code window's Object list asked for: (requestId, module, project display,
+    /// the module's text on the page) (#101).</summary>
+    public Action<int, string, string?, string?>? CodeObjectsRequested { get; set; }
+
+    /// <summary>
+    /// An event picked in the code window's Procedure list: (module, project display, object,
+    /// event). The handler is gone to, and written first when the module has none (#101).
+    /// </summary>
+    public Action<string, string?, string, string>? EventHandlerRequested { get; set; }
+
     /// <summary>The canvas asking what AutoSize would make a control: (request id, form, workbook
     /// display name or null, control). Answered through <see cref="ShowDesignerAutoSize"/>.</summary>
     public Action<int, string, string?, string>? DesignerAutoSizeRequested { get; set; }
@@ -765,6 +775,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new OutlineResultMessage("outlineResult", requestId, procedures, failed),
             EditorMessageContext.Default.OutlineResultMessage));
+    }
+
+    /// <summary>Answers one code-objects request (#101). Never held. Failed means "no answer".</summary>
+    public void ShowCodeObjects(int requestId, SurfaceCodeObject[] objects, bool failed = false)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new CodeObjectsResultMessage("codeObjectsResult", requestId, objects, failed),
+            EditorMessageContext.Default.CodeObjectsResultMessage));
     }
 
     /// <summary>The measured AutoSize back to whoever asked, nulls included: a control with no
@@ -3182,6 +3207,38 @@ internal sealed class EditorSurface : IDisposable
                             ? outlineOwner.GetString()
                             : null;
                         OutlineRequested?.Invoke(outlineRequestId, outlineModule, outlineProject);
+                    }
+
+                    break;
+
+                case "codeObjects":
+                    if (document.RootElement.TryGetProperty("id", out var objectsId)
+                        && objectsId.TryGetInt32(out var objectsRequestId)
+                        && document.RootElement.TryGetProperty("module", out var objectsModuleElement)
+                        && objectsModuleElement.GetString() is { Length: > 0 } objectsModule)
+                    {
+                        CodeObjectsRequested?.Invoke(
+                            objectsRequestId,
+                            objectsModule,
+                            document.RootElement.TryGetProperty("project", out var objectsOwner) ? objectsOwner.GetString() : null,
+                            document.RootElement.TryGetProperty("text", out var objectsText) ? objectsText.GetString() : null);
+                    }
+
+                    break;
+
+                case "eventHandler":
+                    if (document.RootElement.TryGetProperty("module", out var handlerModuleElement)
+                        && handlerModuleElement.GetString() is { Length: > 0 } handlerModule
+                        && document.RootElement.TryGetProperty("object", out var handlerObjectElement)
+                        && handlerObjectElement.GetString() is { Length: > 0 } handlerObject
+                        && document.RootElement.TryGetProperty("event", out var handlerEventElement)
+                        && handlerEventElement.GetString() is { Length: > 0 } handlerEvent)
+                    {
+                        EventHandlerRequested?.Invoke(
+                            handlerModule,
+                            document.RootElement.TryGetProperty("project", out var handlerOwner) ? handlerOwner.GetString() : null,
+                            handlerObject,
+                            handlerEvent);
                     }
 
                     break;

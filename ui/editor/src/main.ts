@@ -111,6 +111,7 @@ import { installTypingAutomation } from "./typing.js";
 import { Workspace } from "./workspace.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 import { isImmediateModel } from "./immediateentry.js";
+import { CodeBar } from "./codebar.js";
 
 // Stamped by the build; reported to the host so the log names the running bundle.
 declare const __XLIDE_BUILD__: string;
@@ -906,6 +907,11 @@ function boot(): void {
       return editor;
     },
     activate: (id, fallback) => bridge.activateModule(id.module, id.project ?? undefined, id.face, fallback),
+    // The native code window's Object and Procedure lists over each editor (#101).
+    codeBar: (editor) => new CodeBar(editor, {
+      objects: (id, text) => bridge.requestCodeObjects(id.module, id.project ?? undefined, text),
+      eventHandler: (id, object, event) => bridge.goToEventHandler(id.module, id.project ?? null, object, event),
+    }),
     /*
      * A DESIGNER TAB'S UNAPPLIED EDITS GET THE SAME QUESTION a module's unsaved text gets.
      *

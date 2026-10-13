@@ -363,6 +363,27 @@ await repeat("reading and writing a module", 0, async () => {
   await wait(500);
 }, changing);
 
+// The code bar's object pick (#101): the host finds the component, reads it, asks the engine for
+// the object's events, writes the default handler and shows it - a find, a read and a write
+// through the component every round. A sheet's module, because a sheet's object is the one every
+// workbook has; undone by writing the module back.
+const sheet = (project.components ?? [])
+  .filter((one) => (one.kind ?? one.type) === "document" && !/workbook/i.test(one.name))
+  .map((one) => one.name)
+  .find(Boolean);
+if (sheet) {
+  await repeat("writing an event handler from the code bar and undoing it", 0, async () => {
+    const before = (await api.readModule(sheet, project.projectId)).text ?? "";
+    await onScreen(sheet);
+    await api.act("codeBar", { object: "Worksheet" });
+    await waitFor("the handler to be written", async () =>
+      ((await api.readModule(sheet, project.projectId)).text ?? "").includes("Worksheet_SelectionChange("),
+      { budgetMs: 15000 });
+    await api.writeModule(sheet, before, project.projectId);
+    await wait(500);
+  }, changing);
+}
+
 // Extract Method reads the module for the undo slot, writes it, and syncs it into the open tab -
 // three trips through the component every round, on a path that is one of only two that write a
 // module the developer did not type in. Undone at the end of each round, so the module the sweep
