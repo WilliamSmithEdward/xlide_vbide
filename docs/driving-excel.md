@@ -450,6 +450,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | The Immediate PANEL, typed into the page, with a line that will not compile (#30) | `node tools\harness\immediate-panel.mjs` |
 | Type into the panel's entry line: a one-line code editor, so `setValue` and `submit` rather than a value and a synthetic Enter, which the editor ignores | `ask("xlideBridge.shell.immediateInput.setValue('? 1'); xlideBridge.shell.immediateInput.submit()")` |
 | The entry line's completions, quick info and call tips, in design and in break mode (#97) | `ask("xlideBridge.requestImmediateCompletions('? Application.', 14)")`, or `node tools\harness\immediate-completions.mjs` |
+| Press a REAL key in the page - Enter, Up, Down - through the DevTools protocol, so it runs through Monaco's keybinding service as a person's key does; `act("press")` types the newline directly and cannot see a binding that steals the key (#103) | `node tools\harness\editor-keys.mjs` (`Input.dispatchKeyEvent` on the `xlide editor` page target) |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |

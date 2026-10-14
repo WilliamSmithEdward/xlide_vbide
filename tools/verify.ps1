@@ -936,6 +936,9 @@ if ($Live) {
                                      # code-bar picks in the Object and Procedure lists above the
                                      # editor and reads the handlers they write back (#101).
                                      'code-bar.mjs',
+                                     # editor-keys presses Enter, Up and Down as real keys in the
+                                     # code editor and the Immediate entry line (#103).
+                                     'editor-keys.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
