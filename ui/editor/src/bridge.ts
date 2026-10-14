@@ -9,7 +9,7 @@ import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { SearchWidget } from "./searchwidget.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import type { Workspace } from "./workspace.js";
-import { takeFormattingMark } from "./format.js";
+import { markNotTyped, takeFormattingMark } from "./format.js";
 import { applySettings, type EditorSettings, type IncomingSettings } from "./settings.js";
 import { procedureAt, scanProcedures, type ProcedureRange } from "./procedureat.js";
 import { widenIfEmpty } from "./markerspan.js";
@@ -69,6 +69,7 @@ export type HostMessage =
   | { type: "clearDocuments" }
   | { type: "syncDocument"; moduleName: string; project?: string | null; text: string; seq?: number }
   | { type: "resendDocument"; moduleName: string; project?: string | null }
+  | { type: "adoptLines"; moduleName: string; project?: string | null; seq: number; lines: { line: number; expected: string; text: string }[] }
   | { type: "notice"; text: string; sticky?: boolean }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
@@ -2183,6 +2184,9 @@ export class EditorBridge {
       case "resendDocument":
         this.resendDocument(message.moduleName, message.project ?? null);
         return;
+      case "adoptLines":
+        this.adoptLines(message.moduleName, message.project ?? null, message.seq, message.lines);
+        return;
       case "clearDocuments":
         this.clearDocuments();
         return;
@@ -2869,6 +2873,49 @@ export class EditorBridge {
     if (typeof seq === "number") {
       this.hostSeqs.set(docKeyOf(moduleName, project), seq);
     }
+  }
+
+  /**
+   * The VBE's own spelling of lines it has just been given: it respaces operators, closes a string
+   * left open at the end of a line, writes `1.0` as `1#` and `?` as `Print`, as the native editor
+   * shows the moment a line is left. Applied line by line, and only where the line still reads
+   * exactly what was written and the caret is not on it, so nothing typed since is touched. It
+   * goes through the ordinary edit path, which carries it to the host's copy and the engine's.
+   */
+  private adoptLines(
+    moduleName: string,
+    project: string | null,
+    seq: number,
+    lines: { line: number; expected: string; text: string }[],
+  ): void {
+    const model = this.documents.get(moduleName, project);
+    if (!model || model.isDisposed() || this.hostSeqs.get(docKeyOf(moduleName, project)) !== seq) {
+      return;
+    }
+
+    const caretLines = new Set<number>();
+    const showing = this.workspace?.editorShowing(model) ?? null;
+    for (const selection of showing?.getSelections() ?? []) {
+      for (let line = selection.startLineNumber; line <= selection.endLineNumber; line++) {
+        caretLines.add(line);
+      }
+    }
+
+    const edits = lines
+      .filter((one) => one.line >= 1 && one.line <= model.getLineCount()
+        && !caretLines.has(one.line)
+        && model.getLineContent(one.line) === one.expected)
+      .map((one) => ({
+        range: new monaco.Range(one.line, 1, one.line, model.getLineMaxColumn(one.line)),
+        text: one.text,
+      }));
+    if (edits.length === 0) {
+      return;
+    }
+
+    markNotTyped(model);
+    const selections = showing?.getSelections() ?? null;
+    model.pushEditOperations(selections, edits, () => selections);
   }
 
   /** The host has lost track of a document's text and asks for all of it. */

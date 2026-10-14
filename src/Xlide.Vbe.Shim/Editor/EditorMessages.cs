@@ -524,6 +524,24 @@ public sealed record SyncDocumentMessage(
     [property: JsonPropertyName("text")] string Text,
     [property: JsonPropertyName("seq")] int Seq);
 
+/// <summary>One line as the VBE stored it, with what the page should still hold there.</summary>
+public sealed record AdoptedLine(
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("expected")] string Expected,
+    [property: JsonPropertyName("text")] string Text);
+
+/// <summary>
+/// The VBE's rewrite of lines it was just given - spacing, a closed string, `1#` for `1.0` - for
+/// the page to show as the native editor does once a line is left. The page applies a line only
+/// where it still reads what was written and the caret is not on it.
+/// </summary>
+public sealed record AdoptLinesMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("seq")] int Seq,
+    [property: JsonPropertyName("lines")] AdoptedLine[] Lines);
+
 /// <summary>
 /// Asks the page for a module's whole text, when the shadow here can no longer be trusted to
 /// match it: an edit that arrived against text this side has since replaced, or a rebuild whose
@@ -1130,6 +1148,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetTestsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
 [JsonSerializable(typeof(ResendDocumentMessage))]
+[JsonSerializable(typeof(AdoptLinesMessage))]
 [JsonSerializable(typeof(EditorCommandMessage))]
 [JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(ImmediateResultMessage))]

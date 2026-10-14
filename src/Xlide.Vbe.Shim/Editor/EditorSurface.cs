@@ -63,6 +63,11 @@ internal sealed class EditorSurface : IDisposable
         /// against text the shadow no longer holds, and applying it would corrupt it (#105).
         /// </summary>
         public int Seq { get; set; }
+
+        /// <summary>The last text written for this document, by reference, and the lines the VBE
+        /// rewrote in it, kept so a rewrite can be shown once the caret leaves its line.</summary>
+        public string? LastWritten { get; set; }
+        public AdoptedLine[]? StoredLines { get; set; }
     }
 
     /// <summary>
@@ -1383,6 +1388,84 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SyncDocumentMessage));
     }
 
+    /// <summary>
+    /// Shows the VBE's rewrite of a write on the page, as the native editor shows a line the
+    /// moment it is left: `x=1+2` as `x = 1 + 2`, a string closed, `1.0` as `1#`. Only rewrites
+    /// that keep every line where it was - one line for one - and only while this side's copy is
+    /// still the text that was written; the page then skips any line the caret is on or that has
+    /// changed since. A rewrite that adds lines (the VBE completing a Sub header) is left alone:
+    /// sending those back duplicated what was being typed.
+    /// </summary>
+    public void AdoptLines(string moduleName, string? project, string written, string stored)
+    {
+        if (!_docs.TryGetValue(DocKey(moduleName, project), out var doc))
+        {
+            return;
+        }
+
+        doc.LastWritten = written;
+        doc.StoredLines = RewrittenLines(moduleName, written, stored);
+        OfferStoredLines(doc);
+    }
+
+    /// <summary>
+    /// Offers the VBE's rewrite again once the caret has left the line it was on: a write lands
+    /// on a pause in typing, usually with the caret still on the line, and the page leaves that
+    /// line alone until then.
+    /// </summary>
+    private void OfferStoredLinesOnLineLeave()
+    {
+        if (_activeKey is { } key && _docs.TryGetValue(key, out var doc))
+        {
+            OfferStoredLines(doc);
+        }
+    }
+
+    private void OfferStoredLines(OpenDoc doc)
+    {
+        // By reference: the shadow is a new string after any edit, so the same object is proof
+        // that nothing has been typed since the write - without comparing a large module.
+        if (!_loaded
+            || doc.StoredLines is not { Length: > 0 } lines
+            || doc.Unwritten
+            || !ReferenceEquals(doc.Text, doc.LastWritten))
+        {
+            return;
+        }
+
+        Log.Info($"surface: {doc.Module}: showing the VBE's rewrite of {lines.Length} line(s)");
+        Post(JsonSerializer.Serialize(
+            new AdoptLinesMessage("adoptLines", doc.Module, doc.Project, doc.Seq, lines),
+            EditorMessageContext.Default.AdoptLinesMessage));
+    }
+
+    /// <summary>The lines the VBE rewrote one for one, or none when its rewrite moved lines.</summary>
+    private static AdoptedLine[]? RewrittenLines(string moduleName, string written, string stored)
+    {
+        var before = written.Replace("\r\n", "\n").Split('\n');
+        var after = stored.Replace("\r\n", "\n").Split('\n');
+
+        // The VBE keeps an empty line after a final break that the page's text may not have.
+        var count = Math.Min(before.Length, after.Length);
+        if (Math.Abs(before.Length - after.Length) > 1
+            || (before.Length != after.Length && (before.Length > count ? before[count] : after[count]).Length > 0))
+        {
+            Log.Info($"surface: {moduleName}: the VBE's rewrite moved lines ({before.Length} to {after.Length}); not shown");
+            return null;
+        }
+
+        var lines = new List<AdoptedLine>();
+        for (var at = 0; at < count; at++)
+        {
+            if (!string.Equals(before[at], after[at], StringComparison.Ordinal))
+            {
+                lines.Add(new AdoptedLine(at + 1, before[at], after[at]));
+            }
+        }
+
+        return lines.Count is > 0 and <= 200 ? [.. lines] : null;
+    }
+
     /// <summary>Asks the page for a document's whole text, the shadow having lost track of it.</summary>
     private void RequestPageText(OpenDoc doc, string why)
     {
@@ -2212,6 +2295,7 @@ internal sealed class EditorSurface : IDisposable
                             _overlay?.StartWriteTimer(1);
                         }
 
+                        var leftLine = caretLine != CaretLine;
                         CaretLine = caretLine;
                         CaretColumn = document.RootElement.TryGetProperty("startColumn", out var column)
                             && column.TryGetInt32(out var caretColumn)
@@ -2221,6 +2305,12 @@ internal sealed class EditorSurface : IDisposable
                         // After the properties update, so whatever this triggers reads the
                         // caret as settled, not as it was.
                         CaretLineSettled?.Invoke(caretLine);
+
+                        // The line just left may hold the VBE's rewrite still to be shown.
+                        if (leftLine)
+                        {
+                            OfferStoredLinesOnLineLeave();
+                        }
                     }
 
                     break;

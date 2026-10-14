@@ -66,6 +66,129 @@ const LOOP_LINE = /^[ \t]*(?:For|Next)\b/i;
 /** Distinguishes each editor's key rules from every other editor's. See the scope key below. */
 let nextEditorScope = 1;
 
+/**
+ * The closers Smart Enter wrote, per model: a whole-line decoration that rides edits above it,
+ * with the text the line held when it was written. A closer whose line no longer reads that text
+ * has been edited by hand and is the developer's, so it is never typed over.
+ */
+const insertedClosers = new WeakMap<monaco.editor.ITextModel, Map<string, string>>();
+
+function trackInsertedCloser(model: monaco.editor.ITextModel, line: number): void {
+  const [id] = model.deltaDecorations([], [{
+    range: new monaco.Range(line, 1, line, 1),
+    options: { isWholeLine: true, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
+  }]);
+  if (!id) {
+    return;
+  }
+  const held = insertedClosers.get(model) ?? new Map<string, string>();
+  held.set(id, model.getLineContent(line));
+  insertedClosers.set(model, held);
+}
+
+function forgetInsertedCloser(model: monaco.editor.ITextModel, id: string): void {
+  insertedClosers.get(model)?.delete(id);
+  model.deltaDecorations([id], []);
+}
+
+/**
+ * The nearest closer Smart Enter wrote below a line, of the given kind, still as written, with
+ * only blank lines between - or none.
+ */
+function insertedCloserBelow(
+  model: monaco.editor.ITextModel,
+  typedLine: number,
+  kind: string,
+): { id: string; line: number } | null {
+  const held = insertedClosers.get(model);
+  if (!held || held.size === 0) {
+    return null;
+  }
+
+  let best: { id: string; line: number } | null = null;
+  for (const [id, written] of [...held]) {
+    const range = model.getDecorationRange(id);
+    if (!range || model.getLineContent(range.startLineNumber) !== written) {
+      // Gone, or edited by hand: the developer's now.
+      forgetInsertedCloser(model, id);
+      continue;
+    }
+    const line = range.startLineNumber;
+    if (line > typedLine && (!best || line < best.line)
+      && closerKind(lexerStrippedLine(written)) === kind) {
+      best = { id, line };
+    }
+  }
+  if (!best) {
+    return null;
+  }
+
+  for (let between = typedLine + 1; between < best.line; between++) {
+    if (model.getLineContent(between).trim().length > 0) {
+      return null;
+    }
+  }
+  return best;
+}
+
+/**
+ * What a line closes, spelled one way: `end if` for `End If`, `endif` or `End  If`; `next` for
+ * `Next` and `Next i`; `loop` for any Loop. Null for a line that is not a closer.
+ */
+function closerKind(line: string): string | null {
+  const text = line.trim().toLowerCase().replace(/\s+/g, " ");
+  if (text === "endif") {
+    return "end if";
+  }
+  const end = /^end (if|select|with|sub|function|property|type|enum)\b/.exec(text);
+  if (end) {
+    return `end ${end[1]}`;
+  }
+  const word = /^(wend|loop|next)\b/.exec(text);
+  return word ? word[1]! : null;
+}
+
+/** The procedure kinds whose closers balance across the whole module rather than within one. */
+const PROCEDURE_CLOSERS = new Set(["end sub", "end function", "end property", "end type", "end enum"]);
+
+/**
+ * Whether the code around a typed closer now holds more closers of its kind than openers - the
+ * proof that one of them is a duplicate. Counted within the enclosing procedure for block
+ * closers, and across the module for procedure closers; openers are what Smart Enter itself
+ * recognises, so the two agree on what a block is.
+ */
+function closersOutnumberOpeners(model: monaco.editor.ITextModel, typedLine: number, kind: string): boolean {
+  const lines = lexerStrippedLines(model.getValue());
+  let from = 0;
+  let to = lines.length - 1;
+
+  if (!PROCEDURE_CLOSERS.has(kind)) {
+    const header = /^\s*(?:(?:public|private|friend|static)\s+)*(?:sub|function|property\s+(?:get|let|set))\b/i;
+    const footer = /^\s*end\s+(?:sub|function|property)\b/i;
+    for (let at = typedLine - 1; at >= 0; at--) {
+      if (header.test(lines[at] ?? "")) { from = at; break; }
+      if (at < typedLine - 1 && footer.test(lines[at] ?? "")) { from = at + 1; break; }
+    }
+    for (let at = typedLine - 1; at < lines.length; at++) {
+      if (at > typedLine - 1 && header.test(lines[at] ?? "")) { to = at - 1; break; }
+    }
+  }
+
+  let openers = 0;
+  let closers = 0;
+  for (let at = from; at <= to; at++) {
+    const line = lines[at] ?? "";
+    const opener = detectSmartBlockOpener(line);
+    if (opener && closerKind(opener.endKeyword) === kind) {
+      openers++;
+    }
+    if (closerKind(line) === kind) {
+      closers++;
+    }
+  }
+  return closers > openers;
+}
+
 // The extension reads these from settings, and so does this surface now: the host loads the
 // developer's file, the page applies what arrives, and every Enter reads the choice as it
 // stands. See settings.ts for the store and settingsdialog.ts for where choices are made.
@@ -360,6 +483,72 @@ class TypingAutomation {
       insertion.replacementText,
       insertion.bodyText.length,
       insertion.bodyLineOffset);
+
+    // The closer this Enter wrote is remembered, so a developer who types the same closer
+    // above it has typed over it rather than written a second one (see absorbDuplicateCloser).
+    if (!closedAhead) {
+      const closerLine = bodyLineNumber + insertion.replacementText.split(/\r?\n/).length - 1;
+      if (closerLine <= model.getLineCount()
+        && closerKind(lexerStrippedLine(model.getLineContent(closerLine))) === closerKind(opener.endKeyword)) {
+        trackInsertedCloser(model, closerLine);
+      }
+    }
+  }
+
+  /**
+   * TYPING OVER THE CLOSER SMART ENTER WROTE (found 2026-10-13). Enter after `If x Then`
+   * writes the `End If`; a developer used to the native editor, which writes none, then types
+   * their own - and had two, which does not compile. When the line just left is a closer, the
+   * nearest closer this controller inserted below it is untouched, only blank lines lie between
+   * them, and the procedure now holds more closers of that kind than openers, the inserted one
+   * goes: one closer remains, at the inserted one's indent, with the caret on a fresh line below
+   * it, as the native editor leaves it. A closer that balances the code is never touched - typing
+   * `End If` for an inner block Smart Enter left open is a closer the code needs.
+   */
+  private absorbDuplicateCloser(model: monaco.editor.ITextModel, typedLine: number): boolean {
+    if (typedLine < 1 || typedLine > model.getLineCount()) {
+      return false;
+    }
+
+    const kind = closerKind(lexerStrippedLine(model.getLineContent(typedLine)));
+    if (!kind) {
+      return false;
+    }
+
+    const inserted = insertedCloserBelow(model, typedLine, kind);
+    if (!inserted) {
+      return false;
+    }
+
+    if (!closersOutnumberOpeners(model, typedLine, kind)) {
+      return false;
+    }
+
+    const closerText = model.getLineContent(inserted.line);
+    const indent = /^[ \t]*/.exec(closerText)?.[0] ?? "";
+    const caret = this.editor.getModel() === model ? this.editor.getPosition() : null;
+    const caretBetween = caret !== null && caret.lineNumber > typedLine && caret.lineNumber <= inserted.line;
+    const eol = model.getEOL();
+
+    this.applying = true;
+    try {
+      forgetInsertedCloser(model, inserted.id);
+      this.editor.pushUndoStop();
+      this.editor.executeEdits("xlide-closer-typed-over", [{
+        range: new monaco.Range(typedLine, 1, inserted.line, model.getLineMaxColumn(inserted.line)),
+        text: caretBetween ? `${closerText}${eol}${indent}` : closerText,
+      }]);
+      this.editor.pushUndoStop();
+      if (caretBetween) {
+        const at = new monaco.Position(typedLine + 1, indent.length + 1);
+        this.editor.setPosition(at);
+        this.candidate = { model, position: at };
+      }
+    } finally {
+      this.applying = false;
+    }
+
+    return true;
   }
 
   /**
@@ -602,7 +791,11 @@ class TypingAutomation {
     const previous = this.candidate;
     if (previous && previous.model === model) {
       if (previous.position.lineNumber !== event.position.lineNumber) {
-        void this.recaseLine(model, previous.position.lineNumber, true);
+        // A typed closer over the one Smart Enter wrote replaces that line outright, already in
+        // the inserted one's spelling, so there is nothing left of it to recase.
+        if (!this.absorbDuplicateCloser(model, previous.position.lineNumber)) {
+          void this.recaseLine(model, previous.position.lineNumber, true);
+        }
       } else if (
         event.reason === monaco.editor.CursorChangeReason.Explicit
         && !previous.position.equals(event.position)
