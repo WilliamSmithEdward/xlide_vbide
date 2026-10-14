@@ -37,6 +37,9 @@ import {
 import { showTabOrder } from "./taborderdialog.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
+/** Markup editors made so far, so each one's Ctrl+S context key has a name of its own. */
+let markupEditors = 0;
+
 const PT = 4 / 3;
 
 /*
@@ -761,9 +764,14 @@ export class DesignerView {
       contextmenu: false,
     });
 
-    // Ctrl+S applies THIS document, while focus is in it; the code editors' save flows are
-    // untouched because the command binds to this editor instance alone.
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.applyNow());
+    // Ctrl+S applies THIS document, while focus is in it. addCommand alone does not keep it here:
+    // it registers with the keybinding service every editor shares, so the last designer opened
+    // took Ctrl+S from the code editors and from every other designer (#103 found the pattern).
+    // The context key is set on this editor and is true only while the focus is inside it.
+    const markupKey = `xlideMarkup${++markupEditors}`;
+    this.editor.createContextKey(markupKey, true);
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.applyNow(),
+      `${markupKey} && editorTextFocus`);
 
     /*
      * THE CARET PICKS THE CONTROL, which is the canvas-to-markup link run backwards.

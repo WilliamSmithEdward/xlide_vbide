@@ -77,8 +77,15 @@ export class ImmediateEntry {
       }
     });
 
-    const listClosed = "!suggestWidgetVisible && !parameterHintsVisible";
-    this.editor.addCommand(monaco.KeyCode.Enter, () => this.submit(), "!suggestWidgetVisible");
+    // ONLY ON THIS LINE. Monaco's addCommand registers with the keybinding service every editor on
+    // the page shares, and its `when` is the only thing that keeps a binding to one editor. A
+    // when of the suggest list alone held in the code editor too, so Enter, Up and Down ran this
+    // line's commands there and stopped making lines and moving the caret (#103). A context key
+    // set on this editor is true only while the focus is inside it.
+    this.editor.createContextKey("xlideImmediateEntry", true);
+    const here = "xlideImmediateEntry && editorTextFocus";
+    const listClosed = `${here} && !suggestWidgetVisible && !parameterHintsVisible`;
+    this.editor.addCommand(monaco.KeyCode.Enter, () => this.submit(), `${here} && !suggestWidgetVisible`);
     this.editor.addCommand(monaco.KeyCode.UpArrow, () => this.walk(-1), listClosed);
     this.editor.addCommand(monaco.KeyCode.DownArrow, () => this.walk(1), listClosed);
   }
