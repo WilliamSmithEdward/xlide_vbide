@@ -3063,6 +3063,16 @@ internal sealed partial class AddInSession : IDisposable
 
             _writtenModules[writtenKey] = stored ?? text;
 
+            // WHAT THE VBE MADE OF IT, SHOWN AS IT SHOWS IT. The native editor respaces a line,
+            // closes a string and writes `1.0` as `1#` the moment the line is left; the page kept
+            // the text as typed until the module was shown again, so it read differently from the
+            // code that compiles (2026-10-13). The surface sends those lines, and the page takes
+            // them where nothing has been typed since.
+            if (!hostRewrite && stored is not null && !string.Equals(stored, text, StringComparison.Ordinal))
+            {
+                _editorSurface?.AdoptLines(component, DisplayFromProjectId(foundOwner ?? owner), text, stored);
+            }
+
             if (hostRewrite)
             {
                 // The engine's live copy of a module OUTRANKS its seeded copy everywhere -

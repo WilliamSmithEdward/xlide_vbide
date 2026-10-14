@@ -402,6 +402,16 @@ export function takeFormattingMark(model: monaco.editor.ITextModel): boolean {
  * no change event, and a mark left standing would be spent on whatever the developer typed next.
  * The timer is the backstop for an edit the editor declines to apply at all.
  */
+/**
+ * Marks this model's next change as made by the product rather than typed, the way a format's
+ * edit is marked: the host must not read it as a keystroke and hold the line's findings back.
+ * For the VBE's own rewrite of a committed line, adopted onto the page.
+ */
+export function markNotTyped(model: monaco.editor.ITextModel): void {
+  formatting.add(model);
+  setTimeout(() => formatting.delete(model), 2000);
+}
+
 function marked(
   model: monaco.editor.ITextModel,
   edits: monaco.languages.TextEdit[],

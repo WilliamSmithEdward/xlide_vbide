@@ -942,6 +942,12 @@ if ($Live) {
                                      # text-mirror holds the page, the shadow, the engine's mirror and
                                      # the workbook to one text through the paths that split them (#105).
                                      'text-mirror.mjs',
+                                     # commit-rewrite holds the page to the VBE's rewrite of a line
+                                     # once it is left: spacing, a closed string, 1# for 1.0.
+                                     'commit-rewrite.mjs',
+                                     # closer-typeover types a closer over the one Smart Enter wrote
+                                     # and holds the code to one, or to both where it needs both.
+                                     'closer-typeover.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
