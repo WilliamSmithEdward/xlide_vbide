@@ -71,6 +71,29 @@ try {
       `page ${JSON.stringify(shown)}, VBE ${JSON.stringify(vbe)}`);
   }
 
+  // THE VBE'S CASING IS NOT TAKEN. It recases a word to match the same name anywhere in the
+  // project - `a.Value` becomes `a.value` beside a `value` declared - while this editor keeps its
+  // own spelling. Taking the VBE's started a loop, each side rewriting the line the other had
+  // just written, and every write cost the line its breakpoint (debugger-features, 2026-10-13).
+  await editor(`const n = m.getValue().split(/\\r?\\n/).findIndex((l) => /Dim x, a, b/.test(l)) + 1;
+    m.pushEditOperations([], [{ range: { startLineNumber: n, startColumn: m.getLineMaxColumn(n), endLineNumber: n, endColumn: m.getLineMaxColumn(n) }, text: ", value" }], () => null);
+    return n;`);
+  await wait(1500);
+  const caseLine = await editor(`return m.getValue().split(/\\r?\\n/).lastIndexOf("End Sub");`);
+  const writesBefore = (await api.log({ max: 1 })).next;
+  await api.ask(`(() => { const e = window.xlideBridge.workspace.activeEditor(); const m = e.getModel();
+    e.setPosition({ lineNumber: ${caseLine}, column: m.getLineMaxColumn(${caseLine}) }); e.focus();
+    for (const ch of "x = a.Value+1") { const c = m.getLineMaxColumn(${caseLine});
+      m.pushEditOperations([], [{ range: { startLineNumber: ${caseLine}, startColumn: c, endLineNumber: ${caseLine}, endColumn: c }, text: ch }], () => null);
+      e.setPosition({ lineNumber: ${caseLine}, column: m.getLineMaxColumn(${caseLine}) }); }
+    e.trigger("keyboard", "type", { text: "\\n" }); return true; })()`);
+  await wait(4000);
+  const kept = await editor(`return m.getLineContent(${caseLine}).trim();`);
+  check("a word the VBE recases keeps the editor's spelling, the spacing taken",
+    kept === "x = a.Value + 1", JSON.stringify(kept));
+  const writes = ((await api.log({ since: writesBefore, match: `write: ${MODULE} took`, max: 50 })).lines ?? []).length;
+  check("and the line settles: no write after write between the two sides", writes <= 3, `${writes} write(s)`);
+
   // The four copies still agree after all of it.
   await wait(2000);
   const page = await editor(`return m.getValue();`);

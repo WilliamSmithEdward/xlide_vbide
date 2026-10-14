@@ -1433,7 +1433,8 @@ internal sealed class EditorSurface : IDisposable
             return;
         }
 
-        Log.Info($"surface: {doc.Module}: showing the VBE's rewrite of {lines.Length} line(s)");
+        Log.Info($"surface: {doc.Module}: showing the VBE's rewrite of {lines.Length} line(s): "
+            + string.Join("; ", lines.Take(4).Select(one => $"{one.Line}: '{one.Expected}' -> '{one.Text}'")));
         Post(JsonSerializer.Serialize(
             new AdoptLinesMessage("adoptLines", doc.Module, doc.Project, doc.Seq, lines),
             EditorMessageContext.Default.AdoptLinesMessage));
@@ -1457,13 +1458,53 @@ internal sealed class EditorSurface : IDisposable
         var lines = new List<AdoptedLine>();
         for (var at = 0; at < count; at++)
         {
-            if (!string.Equals(before[at], after[at], StringComparison.Ordinal))
+            if (WithOurCasing(before[at], after[at]) is { } shown
+                && !string.Equals(before[at], shown, StringComparison.Ordinal))
             {
-                lines.Add(new AdoptedLine(at + 1, before[at], after[at]));
+                lines.Add(new AdoptedLine(at + 1, before[at], shown));
             }
         }
 
         return lines.Count is > 0 and <= 200 ? [.. lines] : null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex Word =
+        new(@"(?<![&\w])[A-Za-z_]\w*", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The VBE's line with the editor's spelling of each word kept. The VBE also recases an
+    /// identifier to match the same name anywhere in the project - `Value` becomes `value` when a
+    /// parameter somewhere is called that - while this editor recases to the declaration; showing
+    /// the VBE's casing started a tug of war, each side rewriting the line the other just wrote,
+    /// and every write cost the line its breakpoint (2026-10-13). So only the VBE's spacing and
+    /// literals are taken: when both lines hold the same words, ignoring case, each word is spelt as
+    /// the editor had it; when the words differ (`?` became `Print`, `endif` became `End If`), the
+    /// VBE's line is taken as it is. Digits after `&` are a literal's, not a word's.
+    /// </summary>
+    private static string WithOurCasing(string written, string stored)
+    {
+        var ours = Word.Matches(written);
+        var theirs = Word.Matches(stored);
+        if (ours.Count != theirs.Count)
+        {
+            return stored;
+        }
+
+        for (var at = 0; at < ours.Count; at++)
+        {
+            if (!string.Equals(ours[at].Value, theirs[at].Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return stored;
+            }
+        }
+
+        var shown = new System.Text.StringBuilder(stored);
+        for (var at = theirs.Count - 1; at >= 0; at--)
+        {
+            shown.Remove(theirs[at].Index, theirs[at].Length).Insert(theirs[at].Index, ours[at].Value);
+        }
+
+        return shown.ToString();
     }
 
     /// <summary>Asks the page for a document's whole text, the shadow having lost track of it.</summary>
