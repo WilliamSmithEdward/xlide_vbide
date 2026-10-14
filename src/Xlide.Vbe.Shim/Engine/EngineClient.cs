@@ -865,7 +865,7 @@ internal sealed class EngineClient : IAsyncDisposable
     /// use keeps it ordered among them, and the wait is registered before this returns, so a
     /// request made a moment later cannot overtake the text it is about.
     /// </summary>
-    public void NotifyDidChange(string projectId, string moduleName, string? source, EngineTextEdit[]? edits)
+    public void NotifyDidChange(string projectId, string moduleName, string? source, EngineTextEdit[]? edits, int? length = null)
     {
         var payload = new Dictionary<string, object>
         {
@@ -880,6 +880,13 @@ internal sealed class EngineClient : IAsyncDisposable
         else if (edits is not null && edits.Length > 0)
         {
             payload["edits"] = edits;
+
+            // The surface's length once these apply: the engine drops a mirror that disagrees
+            // rather than keep answering about text nobody holds (#105).
+            if (length is { } expected)
+            {
+                payload["length"] = expected;
+            }
         }
         else
         {
@@ -893,11 +900,10 @@ internal sealed class EngineClient : IAsyncDisposable
             ["params"] = payload,
         };
 
-        var line = JsonSerializer.Serialize(request, EngineJsonContext.Default.DictionaryStringObject);
-        _ = SendNotificationAsync(line);
+        _ = SendNotificationAsync(request);
     }
 
-    private async Task SendNotificationAsync(string line)
+    private async Task SendNotificationAsync(Dictionary<string, object> request)
     {
         var writer = _writer;
         if (writer is null)
@@ -908,10 +914,20 @@ internal sealed class EngineClient : IAsyncDisposable
         try
         {
             // A BARRIER, not a message in a queue: everything asked after this must be answered
-            // about the text it carries, so nothing may be let past it.
+            // about the text it carries, so nothing may be let past it. The place in line is
+            // taken here, synchronously, on the caller's thread - which is what orders it.
             await _oneCall.EnterAsync(CallKind.Barrier).ConfigureAwait(false);
             try
             {
+                // SERIALISED ON THE TURN, NOT ON THE CALLER. The caller is the host thread, and a
+                // whole module's text - the first edit to a module sends it (#105) - is 1.5MB of
+                // JSON escaping at VBA's per-module ceiling: 57ms of the developer's keystroke
+                // where it ran before the queue (measured 2026-10-13). Everything it reads is
+                // immutable, so serialising later says the same thing. On the pool explicitly: a
+                // free gate completes at once, and the await would go on running right here.
+                var line = await Task.Run(
+                    () => JsonSerializer.Serialize(request, EngineJsonContext.Default.DictionaryStringObject))
+                    .ConfigureAwait(false);
                 await writer.WriteLineAsync(line.AsMemory()).ConfigureAwait(false);
             }
             finally

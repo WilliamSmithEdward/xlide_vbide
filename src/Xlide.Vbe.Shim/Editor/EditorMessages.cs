@@ -12,7 +12,8 @@ public sealed record OpenDocumentMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("project")] string? Project,
-    [property: JsonPropertyName("text")] string Text);
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("seq")] int Seq);
 
 /// <summary>
 /// A form's design, answering the page's requestFormMarkup: the markup TEXT and the walked
@@ -520,7 +521,18 @@ public sealed record SyncDocumentMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("project")] string? Project,
-    [property: JsonPropertyName("text")] string Text);
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("seq")] int Seq);
+
+/// <summary>
+/// Asks the page for a module's whole text, when the shadow here can no longer be trusted to
+/// match it: an edit that arrived against text this side has since replaced, or a rebuild whose
+/// length disagrees with the page's (#105). The page answers with documentText.
+/// </summary>
+public sealed record ResendDocumentMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project);
 
 /// <summary>Asks the surface to run one of the editor's own commands.</summary>
 public sealed record EditorCommandMessage(
@@ -1117,6 +1129,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SetTestsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
+[JsonSerializable(typeof(ResendDocumentMessage))]
 [JsonSerializable(typeof(EditorCommandMessage))]
 [JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(ImmediateResultMessage))]

@@ -65,9 +65,10 @@ export interface HostMarker extends HostRange {
 }
 
 export type HostMessage =
-  | { type: "openDocument"; moduleName: string; project?: string | null; text: string }
+  | { type: "openDocument"; moduleName: string; project?: string | null; text: string; seq?: number }
   | { type: "clearDocuments" }
-  | { type: "syncDocument"; moduleName: string; project?: string | null; text: string }
+  | { type: "syncDocument"; moduleName: string; project?: string | null; text: string; seq?: number }
+  | { type: "resendDocument"; moduleName: string; project?: string | null }
   | { type: "notice"; text: string; sticky?: boolean }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
@@ -575,7 +576,8 @@ export type ClientMessage =
    * the host holds findings back about a line being typed, and a format that moves a single
    * line is indistinguishable from a keystroke by shape alone.
    */
-  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; source?: "format" }
+  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; source?: "format"; seq?: number }
+  | { type: "documentText"; moduleName: string; project?: string; seq: number; text: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   /**
@@ -851,6 +853,13 @@ export class EditorBridge {
 
   /** Monotonic counters over locally originated edits, one per document. */
   private readonly revisions = new Map<string, number>();
+
+  /**
+   * The number of the last text the host sent each document, an open or a sync. Every edit is
+   * stamped with it, so the host can tell an edit made against the text it holds from one typed
+   * while a newer text was on its way, whose ranges point into text it has replaced (#105).
+   */
+  private readonly hostSeqs = new Map<string, number>();
 
   /** The document the host says is active - the one its native active pane shows. */
   private hostActive: DocumentId | null = null;
@@ -2169,12 +2178,17 @@ export class EditorBridge {
     switch (message.type) {
       case "openDocument":
         this.openDocument(message.moduleName, message.project ?? null, message.text);
+        this.noteHostSeq(message.moduleName, message.project ?? null, message.seq);
+        return;
+      case "resendDocument":
+        this.resendDocument(message.moduleName, message.project ?? null);
         return;
       case "clearDocuments":
         this.clearDocuments();
         return;
       case "syncDocument":
         this.syncDocument(message.moduleName, message.project ?? null, message.text);
+        this.noteHostSeq(message.moduleName, message.project ?? null, message.seq);
         return;
       case "notice":
         this.shell?.notify(message.text, message.sticky === true);
@@ -2851,6 +2865,29 @@ export class EditorBridge {
     }
   }
 
+  private noteHostSeq(moduleName: string, project: string | null, seq: number | undefined): void {
+    if (typeof seq === "number") {
+      this.hostSeqs.set(docKeyOf(moduleName, project), seq);
+    }
+  }
+
+  /** The host has lost track of a document's text and asks for all of it. */
+  private resendDocument(moduleName: string, project: string | null): void {
+    const model = this.documents.get(moduleName, project);
+    const seq = this.hostSeqs.get(docKeyOf(moduleName, project));
+    if (!model || model.isDisposed() || seq === undefined) {
+      return;
+    }
+    this.trace(`resendDocument: ${moduleName}, ${model.getValueLength()} character(s) against text ${seq}`);
+    this.transport.post({
+      type: "documentText",
+      moduleName,
+      ...(project === null ? {} : { project }),
+      seq,
+      text: model.getValue(),
+    });
+  }
+
   private syncDocument(moduleName: string, project: string | null, text: string): void {
     const model = this.documents.get(moduleName, project);
     if (model && model.getValue() !== text) {
@@ -2865,6 +2902,7 @@ export class EditorBridge {
 
     const key = docKeyOf(id.module, id.project);
     const revision = (this.revisions.get(key) ?? 0) + 1;
+    const hostSeq = this.hostSeqs.get(key);
     this.revisions.set(key, revision);
 
     // The procedure under a still caret can change with the text above it.
@@ -2901,6 +2939,7 @@ export class EditorBridge {
       revision,
       changes,
       fullLength: model.getValueLength(),
+      ...(hostSeq === undefined ? {} : { seq: hostSeq }),
       ...(takeFormattingMark(model) ? { source: "format" as const } : {}),
     });
   }

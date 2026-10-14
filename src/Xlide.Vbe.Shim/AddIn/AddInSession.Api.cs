@@ -1953,6 +1953,7 @@ internal sealed partial class AddInSession
                 var (hostReadCount, hostReadChars, hostReadFull, hostReadSkipped, hostReadSamples) = PerfCounters.HostReadSnapshot();
                 _ = hostReadCount;
                 var (publishCount, publishSamples) = PerfCounters.PublishSnapshot();
+                var (editCount, editSamples) = PerfCounters.EditSnapshot();
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugPerfReply(
                         placementSamples,
@@ -1966,7 +1967,9 @@ internal sealed partial class AddInSession
                         hostReadFull,
                         hostReadSkipped,
                         publishSamples,
-                        publishCount),
+                        publishCount,
+                        editSamples,
+                        editCount),
                     DebugJsonContext.Default.DebugPerfReply));
             }
 

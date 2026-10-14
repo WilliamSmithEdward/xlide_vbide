@@ -477,7 +477,7 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// later is always about text the engine already holds. A caller who knows the module's
     /// project says so; the rest resolve by name, shown project first.
     /// </summary>
-    public void NotifyLiveText(string moduleName, string? source, EngineTextEdit[]? edits, string? projectId = null)
+    public void NotifyLiveText(string moduleName, string? source, EngineTextEdit[]? edits, string? projectId = null, int? length = null)
     {
         if (_engine is not { IsRunning: true } engine)
         {
@@ -496,7 +496,7 @@ internal sealed class AnalysisService : IAsyncDisposable
         // is half of what the colouring cache below is keyed on.
         _liveVersions.AddOrUpdate(TokenKey(home, moduleName), 1, (_, was) => was + 1);
 
-        engine.NotifyDidChange(home, moduleName, source, edits);
+        engine.NotifyDidChange(home, moduleName, source, edits, length);
     }
 
     /// <summary>How many times a module's live text has been streamed to the engine.</summary>
@@ -1713,6 +1713,10 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// complaints of an expression mid-edit. Null when there is no engine, no address for the
     /// module, or the engine has not been seeded yet.
     /// </summary>
+    /// <summary>Raised, off the host thread, when the engine says it holds no mirror of a module the
+    /// surface is analysing: the surface sends it the text again.</summary>
+    public Action<string>? LiveMirrorMissing { get; set; }
+
     public async Task<IReadOnlyList<Finding>?> DiagnoseLiveAsync(
         string moduleName,
         string source,
@@ -1750,6 +1754,13 @@ internal sealed class AnalysisService : IAsyncDisposable
                     caretOffset,
                     _severityOverrides)
                 .ConfigureAwait(false);
+
+            // An engine that holds no mirror of the module answered from the workbook's text as
+            // its last pass read it, and drops every edit until it is sent the text again (#105).
+            if (result?.LiveHeld == false)
+            {
+                LiveMirrorMissing?.Invoke(moduleName);
+            }
 
             return result is null ? null : [.. Convert(home.ProjectId, moduleName, source, result.Diagnostics)];
         }

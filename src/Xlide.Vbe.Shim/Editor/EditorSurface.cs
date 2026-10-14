@@ -49,6 +49,20 @@ internal sealed class EditorSurface : IDisposable
         public required string Text { get; set; }
         public bool Unwritten { get; set; }
         public bool WriteRefused { get; set; }
+
+        /// <summary>
+        /// Whether the engine mirrors this document's text, which is what makes an edit worth
+        /// sending as ranges: the engine applies ranges only to a mirror. The first edit sends the
+        /// whole text instead, so a module opened and only read costs the engine nothing.
+        /// </summary>
+        public bool Mirrored { get; set; }
+
+        /// <summary>
+        /// The number of the last text this side sent the page (an open or a sync). The page
+        /// stamps its edits with the one it holds; an edit stamped with an older number was made
+        /// against text the shadow no longer holds, and applying it would corrupt it (#105).
+        /// </summary>
+        public int Seq { get; set; }
     }
 
     /// <summary>
@@ -998,10 +1012,45 @@ internal sealed class EditorSurface : IDisposable
     public Action? LiveAnalysisDue { get; set; }
 
     /// <summary>
-    /// Raised on the host thread with each change to the shown module's text: (module, whole
-    /// text or null, edits or null). Whoever mirrors the text - the engine - listens here.
+    /// Raised on the host thread with each change to a document's text: (module, whole text or
+    /// null, edits or null, the text's length once the edits apply). Whoever mirrors the text -
+    /// the engine - listens here, and is told about EVERY change to the shadow, from the page or
+    /// from the host, in the order the shadow took them: the mirror is exact only while that holds
+    /// (#105, where a sync from the host replaced the shadow and the engine never heard).
     /// </summary>
-    public Action<string, string?, EngineTextEdit[]?>? LiveTextPushed { get; set; }
+    public Action<string, string?, EngineTextEdit[]?, int?>? LiveTextPushed { get; set; }
+
+    /// <summary>
+    /// Whether the engine's copy of a module is this surface's to keep: true once the document's
+    /// first edit sent it. A caller that changes the module from the host leaves the engine to the
+    /// surface then, which tells it in order with everything else; otherwise the caller does.
+    /// </summary>
+    public bool Mirrors(string moduleName, string? project) =>
+        _docs.TryGetValue(DocKey(moduleName, project), out var doc) && doc.Mirrored;
+
+    /// <summary>The shadow takes a whole new text, and the engine's mirror with it when there is one.</summary>
+    private void Replace(OpenDoc doc, string text)
+    {
+        doc.Text = text;
+        if (doc.Mirrored)
+        {
+            LiveTextPushed?.Invoke(doc.Module, text, null, null);
+        }
+    }
+
+    /// <summary>
+    /// Sends the engine a document's whole text again, for a mirror that has gone missing: the
+    /// engine drops one that an edit could not be applied to, and says so when asked to analyse.
+    /// </summary>
+    public void RepushLiveText(string moduleName, string? project)
+    {
+        if (_docs.TryGetValue(DocKey(moduleName, project), out var doc))
+        {
+            Log.Info($"surface: {moduleName}'s mirror is missing in the engine; resending its {doc.Text.Length} character(s)");
+            doc.Mirrored = true;
+            LiveTextPushed?.Invoke(doc.Module, doc.Text, null, null);
+        }
+    }
 
     /// <summary>
     /// Raised when a change event was plain typing confined to one line - no newline in it,
@@ -1113,8 +1162,9 @@ internal sealed class EditorSurface : IDisposable
 
         if (!_docs.TryGetValue(key, out var doc))
         {
-            _docs[key] = new OpenDoc { Module = moduleName, Project = project, Text = text };
-            PostOpenDocument(moduleName, project, text);
+            doc = new OpenDoc { Module = moduleName, Project = project, Text = text };
+            _docs[key] = doc;
+            PostOpenDocument(doc);
             return;
         }
 
@@ -1125,8 +1175,8 @@ internal sealed class EditorSurface : IDisposable
 
         if (!string.Equals(doc.Text, text, StringComparison.Ordinal))
         {
-            doc.Text = text;
-            PostSyncDocument(moduleName, project, text);
+            Replace(doc, text);
+            PostSyncDocument(doc);
         }
     }
 
@@ -1149,12 +1199,16 @@ internal sealed class EditorSurface : IDisposable
             return;
         }
 
-        _docs[key] = new OpenDoc { Module = moduleName, Project = project, Text = text };
-        PostOpenDocument(moduleName, project, text);
+        var doc = new OpenDoc { Module = moduleName, Project = project, Text = text };
+        _docs[key] = doc;
+        PostOpenDocument(doc);
     }
 
-    private void PostOpenDocument(string moduleName, string? project, string text)
+    private void PostOpenDocument(OpenDoc doc)
     {
+        // Numbered even when it is not sent: the ready handler re-opens every document from this
+        // table, and the page's edits are stamped with the number of the text it was given.
+        doc.Seq++;
         if (!_loaded)
         {
             // Not queued: the ready handler re-opens every live document, which also covers a
@@ -1163,7 +1217,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         Post(JsonSerializer.Serialize(
-            new OpenDocumentMessage("openDocument", moduleName, project, text),
+            new OpenDocumentMessage("openDocument", doc.Module, doc.Project, doc.Text, doc.Seq),
             EditorMessageContext.Default.OpenDocumentMessage));
     }
 
@@ -1315,16 +1369,32 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.FormMarkupAppliedMessage));
     }
 
-    private void PostSyncDocument(string moduleName, string? project, string text)
+    private void PostSyncDocument(OpenDoc doc)
     {
+        // Numbered whether or not it is sent, for the same reason an open is.
+        doc.Seq++;
         if (!_loaded)
         {
             return;
         }
 
         Post(JsonSerializer.Serialize(
-            new SyncDocumentMessage("syncDocument", moduleName, project, text),
+            new SyncDocumentMessage("syncDocument", doc.Module, doc.Project, doc.Text, doc.Seq),
             EditorMessageContext.Default.SyncDocumentMessage));
+    }
+
+    /// <summary>Asks the page for a document's whole text, the shadow having lost track of it.</summary>
+    private void RequestPageText(OpenDoc doc, string why)
+    {
+        Log.Warn($"surface: {doc.Module}: {why}; asking the page for its text");
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ResendDocumentMessage("resendDocument", doc.Module, doc.Project),
+            EditorMessageContext.Default.ResendDocumentMessage));
     }
 
     /// <summary>
@@ -1415,11 +1485,20 @@ internal sealed class EditorSurface : IDisposable
         }
 
         // A refused break-mode edit lives only in this model until Reset applies it. An
-        // unrelated native refresh must not replace the developer's only copy.
-        if (doc.WriteRefused) return;
+        // unrelated native refresh must not replace the developer's only copy. The caller may
+        // have handed the engine the workbook's text already; the engine mirrors this copy, so
+        // it is told this copy again.
+        if (doc.WriteRefused)
+        {
+            if (doc.Mirrored)
+            {
+                LiveTextPushed?.Invoke(doc.Module, doc.Text, null, null);
+            }
+            return;
+        }
 
-        doc.Text = text;
-        PostSyncDocument(moduleName, project, text);
+        Replace(doc, text);
+        PostSyncDocument(doc);
     }
 
     /// <summary>
@@ -2102,7 +2181,7 @@ internal sealed class EditorSurface : IDisposable
                     // page already has is adopted idempotently.
                     foreach (var doc in _docs.Values.ToArray())
                     {
-                        PostOpenDocument(doc.Module, doc.Project, doc.Text);
+                        PostOpenDocument(doc);
                     }
 
                     Flush();
@@ -2148,120 +2227,51 @@ internal sealed class EditorSurface : IDisposable
 
                 case "contentChanged":
                 {
-                    // The message names the document it edits (decision 12); the active one
-                    // stands in only for a page too old to say, which no shipped pairing is.
-                    var editedDoc = document.RootElement.TryGetProperty("moduleName", out var editedName)
-                        && editedName.GetString() is { Length: > 0 } editedModule
-                        ? (_docs.TryGetValue(
-                            DocKey(
-                                editedModule,
-                                document.RootElement.TryGetProperty("project", out var editedProject)
-                                    ? editedProject.GetString()
-                                    : null),
-                            out var addressed)
-                            ? addressed
-                            : null)
-                        : ActiveDoc;
-
-                    if (editedDoc is not null)
+                    var editTimer = System.Diagnostics.Stopwatch.StartNew();
+                    try
                     {
-                        // The changes ARE the message: the shadow is rebuilt by applying them,
-                        // for every module at every size. Small modules shipped their whole
-                        // text for years and this branch preferred that copy, which quietly
-                        // inverted the coverage - the rebuild, the path whose drift would
-                        // corrupt the write-back, ran only above 64,000 characters, where
-                        // nothing tested it (the audit's C14, measured 2026-08-12: the whole-
-                        // text copy also cost more than the rebuild it bypassed). Now every
-                        // keystroke exercises the one path, the parity suites watch it
-                        // continuously, and fullLength below stays as the tripwire.
-                        EngineTextEdit[]? parsedEdits = null;
-                        string? updated = null;
-                        if (document.RootElement.TryGetProperty("changes", out var changeSet)
-                            && changeSet.ValueKind == JsonValueKind.Array)
+                        HandleContentChanged(document);
+                    }
+                    finally
+                    {
+                        Diagnostics.PerfCounters.Edit(editTimer.Elapsed.Ticks / 10);
+                    }
+
+                    break;
+                }
+
+                case "documentText":
+                {
+                    // The page's whole text, asked for when the shadow lost track of it. Taken
+                    // only for the text this side last sent: an answer from before a later sync
+                    // describes a model the page has replaced since, and a fresh ask follows that.
+                    if (document.RootElement.TryGetProperty("moduleName", out var resentName)
+                        && resentName.GetString() is { Length: > 0 } resentModule
+                        && _docs.TryGetValue(
+                            DocKey(
+                                resentModule,
+                                document.RootElement.TryGetProperty("project", out var resentProject)
+                                    ? resentProject.GetString()
+                                    : null),
+                            out var resentDoc)
+                        && document.RootElement.TryGetProperty("text", out var resentText)
+                        && resentText.GetString() is { } pageText
+                        && document.RootElement.TryGetProperty("seq", out var resentSeq)
+                        && resentSeq.TryGetInt32(out var pageSeq)
+                        && pageSeq == resentDoc.Seq)
+                    {
+                        Log.Info($"surface: {resentModule}: took the page's {pageText.Length} character(s) over a copy of {resentDoc.Text.Length}");
+                        resentDoc.Text = pageText;
+                        resentDoc.Mirrored = true;
+                        LiveTextPushed?.Invoke(resentDoc.Module, pageText, null, null);
+                        if (!resentDoc.WriteRefused)
                         {
-                            parsedEdits = ParseChanges(editedDoc.Text, changeSet);
-                            updated = parsedEdits is null ? null : ApplyEdits(editedDoc.Text, parsedEdits);
+                            resentDoc.Unwritten = true;
+                            _overlay?.StartWriteTimer(WriteDelayMilliseconds);
                         }
 
-                        if (updated is not null)
-                        {
-                            if (document.RootElement.TryGetProperty("fullLength", out var lengthElement)
-                                && lengthElement.TryGetInt32(out var expectedLength)
-                                && updated.Length != expectedLength)
-                            {
-                                Log.Error($"surface: reconstructed {updated.Length} character(s) where the page holds {expectedLength}");
-                            }
-
-                            // Held, not written. Writing a module replaces its changed lines,
-                            // which resets the project, so doing it per keystroke would reset
-                            // the project on every keystroke. The edit is written once the
-                            // developer stops typing, and immediately before anything that has
-                            // to see it.
-                            editedDoc.Text = updated;
-                            editedDoc.Unwritten = true;
-
-                            // A DOCUMENT UNDER AUTOSAVE IS WRITTEN WHEN THE LINE IS LEFT, as the
-                            // native editor commits a line, not at every pause in typing. Each
-                            // write dirties the document and the host saves it on its own thread,
-                            // to the cloud: a hitch of about a second per pause, and the
-                            // completion asked for meanwhile waits behind it (#94). Only typing
-                            // on one line waits; a paste, a format or a fix writes as before.
-                            var typedOnOneLine = !document.RootElement.TryGetProperty("source", out _)
-                                && document.RootElement.TryGetProperty("changes", out var heldSet)
-                                && SingleLineTypedIn(heldSet) is not null;
-                            if (typedOnOneLine && CommitsOnLineLeave?.Invoke(editedDoc.Module, editedDoc.Project) == true)
-                            {
-                                _heldForLineLeave = true;
-                            }
-                            else
-                            {
-                                _overlay?.StartWriteTimer(WriteDelayMilliseconds);
-                            }
-
-                            // THE BREAKPOINT RECORD DOES NOT FOLLOW THE TYPING. It used to shift
-                            // with every edit that added or removed lines, and that is the record
-                            // of what the EDITOR holds, which moves only when the text is written
-                            // back - and moves by what the write did, not by what the text looks
-                            // like: a deleted statement takes its breakpoint with it, and the shift
-                            // put the dot on the next line instead (#84). The page's own margin
-                            // decorations ride the edit until the write, and the write-back
-                            // reconciles the record from the windows it put in.
-
-                            // The findings shown must describe this text, not the text as of
-                            // the last write: a deleted error must go, and it must go soon -
-                            // where soon costs little, and on the line's own goodbye otherwise.
-                            _changedSinceLiveAnalysis = true;
-                            _overlay?.StartAnalyseTimer(updated.Length >= LargeModuleCharacters
-                                ? LiveAnalysisDelayLargeMilliseconds
-                                : LiveAnalysisDelayMilliseconds);
-
-                            // The engine mirrors this text and answers requests from its copy,
-                            // so the change stream continues to it as the same edits the shadow
-                            // was rebuilt from, ordered ahead of any request about the text it
-                            // makes. An `updated` here always came from parsedEdits, so the
-                            // whole-text argument is never needed.
-                            LiveTextPushed?.Invoke(editedDoc.Module, null, parsedEdits);
-
-                            // Read from the raw change set rather than the parsed edits, because
-                            // small modules skip the parse and this must fire for them too.
-                            //
-                            // A change the page has named the source of is not typing, whatever
-                            // its shape. Formatting a module whose lines are already right except
-                            // one produces a one-line change with no newline in it, which is
-                            // exactly what a keystroke produces, and reading it as one armed the
-                            // hold and took the squiggle off that line until the caret was moved
-                            // away (2026-08-07). The page marks its formatter's edits because the
-                            // editor's change event carries no source of its own.
-                            var typedByHand = !document.RootElement.TryGetProperty("source", out var madeBy)
-                                || madeBy.ValueKind != JsonValueKind.String;
-
-                            if (typedByHand
-                                && document.RootElement.TryGetProperty("changes", out var typedSet)
-                                && SingleLineTypedIn(typedSet) is { } typedLine)
-                            {
-                                LineTyped?.Invoke(typedLine);
-                            }
-                        }
+                        _changedSinceLiveAnalysis = true;
+                        _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
                     }
 
                     break;
@@ -3342,6 +3352,166 @@ internal sealed class EditorSurface : IDisposable
         {
             Log.Warn("editor surface: a message from the page was not valid");
         }
+    }
+
+    /// <summary>One page edit: the shadow rebuilt from its ranges, the engine told, the write and
+    /// the analysis armed. Timed by its caller for the perf route.</summary>
+    private void HandleContentChanged(JsonDocument document)
+    {
+        // The message names the document it edits (decision 12); the active one
+        // stands in only for a page too old to say, which no shipped pairing is.
+        var editedDoc = document.RootElement.TryGetProperty("moduleName", out var editedName)
+            && editedName.GetString() is { Length: > 0 } editedModule
+            ? (_docs.TryGetValue(
+                DocKey(
+                    editedModule,
+                    document.RootElement.TryGetProperty("project", out var editedProject)
+                        ? editedProject.GetString()
+                        : null),
+                out var addressed)
+                ? addressed
+                : null)
+            : ActiveDoc;
+
+        if (editedDoc is not null)
+        {
+            // The changes ARE the message: the shadow is rebuilt by applying them,
+            // for every module at every size. Small modules shipped their whole
+            // text for years and this branch preferred that copy, which quietly
+            // inverted the coverage - the rebuild, the path whose drift would
+            // corrupt the write-back, ran only above 64,000 characters, where
+            // nothing tested it (the audit's C14, measured 2026-08-12: the whole-
+            // text copy also cost more than the rebuild it bypassed). Now every
+            // keystroke exercises the one path, the parity suites watch it
+            // continuously, and fullLength below stays as the tripwire.
+            // MADE AGAINST WHICH TEXT. The page stamps an edit with the number of the
+            // last text this side sent it. An older number is an edit typed while a
+            // sync was on its way: its ranges are offsets into text the shadow has
+            // since replaced, and applying them anyway is how characters went missing
+            // and others shifted, in the shadow and in the engine's mirror (#105). The
+            // page adopts the sync on arrival, which discards that typing on its side
+            // too, so dropping the edit here keeps the two the same.
+            if (document.RootElement.TryGetProperty("seq", out var seqElement)
+                && seqElement.TryGetInt32(out var editSeq)
+                && editSeq != editedDoc.Seq)
+            {
+                Log.Warn($"surface: {editedDoc.Module}: an edit made against text {editSeq} arrived after text {editedDoc.Seq} was sent; dropped");
+                return;
+            }
+
+            EngineTextEdit[]? parsedEdits = null;
+            string? updated = null;
+            if (document.RootElement.TryGetProperty("changes", out var changeSet)
+                && changeSet.ValueKind == JsonValueKind.Array)
+            {
+                parsedEdits = ParseChanges(editedDoc.Text, changeSet);
+                updated = parsedEdits is null ? null : ApplyEdits(editedDoc.Text, parsedEdits);
+            }
+
+            if (updated is null)
+            {
+                // Ranges that do not fit the shadow: it has lost track of the page.
+                RequestPageText(editedDoc, "an edit's ranges do not fit this side's copy");
+            }
+
+            if (updated is not null)
+            {
+                // THE TRIPWIRE HEALS. It used to log the divergence and keep the copy
+                // it had just proved wrong, which every later edit, write and answer
+                // then built on until Excel was restarted (#105). The page's own text
+                // replaces it instead, and is what gets written and analysed.
+                if (document.RootElement.TryGetProperty("fullLength", out var lengthElement)
+                    && lengthElement.TryGetInt32(out var expectedLength)
+                    && updated.Length != expectedLength)
+                {
+                    Log.Error($"surface: reconstructed {updated.Length} character(s) where the page holds {expectedLength}");
+                    RequestPageText(editedDoc, "the rebuilt copy's length disagrees with the page's");
+                    return;
+                }
+
+                // Held, not written. Writing a module replaces its changed lines,
+                // which resets the project, so doing it per keystroke would reset
+                // the project on every keystroke. The edit is written once the
+                // developer stops typing, and immediately before anything that has
+                // to see it.
+                editedDoc.Text = updated;
+                editedDoc.Unwritten = true;
+
+                // A DOCUMENT UNDER AUTOSAVE IS WRITTEN WHEN THE LINE IS LEFT, as the
+                // native editor commits a line, not at every pause in typing. Each
+                // write dirties the document and the host saves it on its own thread,
+                // to the cloud: a hitch of about a second per pause, and the
+                // completion asked for meanwhile waits behind it (#94). Only typing
+                // on one line waits; a paste, a format or a fix writes as before.
+                var typedOnOneLine = !document.RootElement.TryGetProperty("source", out _)
+                    && document.RootElement.TryGetProperty("changes", out var heldSet)
+                    && SingleLineTypedIn(heldSet) is not null;
+                if (typedOnOneLine && CommitsOnLineLeave?.Invoke(editedDoc.Module, editedDoc.Project) == true)
+                {
+                    _heldForLineLeave = true;
+                }
+                else
+                {
+                    _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+                }
+
+                // THE BREAKPOINT RECORD DOES NOT FOLLOW THE TYPING. It used to shift
+                // with every edit that added or removed lines, and that is the record
+                // of what the EDITOR holds, which moves only when the text is written
+                // back - and moves by what the write did, not by what the text looks
+                // like: a deleted statement takes its breakpoint with it, and the shift
+                // put the dot on the next line instead (#84). The page's own margin
+                // decorations ride the edit until the write, and the write-back
+                // reconciles the record from the windows it put in.
+
+                // The findings shown must describe this text, not the text as of
+                // the last write: a deleted error must go, and it must go soon -
+                // where soon costs little, and on the line's own goodbye otherwise.
+                _changedSinceLiveAnalysis = true;
+                _overlay?.StartAnalyseTimer(updated.Length >= LargeModuleCharacters
+                    ? LiveAnalysisDelayLargeMilliseconds
+                    : LiveAnalysisDelayMilliseconds);
+
+                // The engine mirrors this text and answers requests from its copy,
+                // so the change stream continues to it as the same edits the shadow
+                // was rebuilt from, ordered ahead of any request about the text it
+                // makes. An `updated` here always came from parsedEdits, so the
+                // whole-text argument is never needed.
+                if (editedDoc.Mirrored)
+                {
+                    LiveTextPushed?.Invoke(editedDoc.Module, null, parsedEdits, updated.Length);
+                }
+                else
+                {
+                    // The first edit sends the whole text: the engine applies ranges
+                    // only onto a mirror, never onto the workbook's text as its last
+                    // pass read it, which can be behind this copy.
+                    editedDoc.Mirrored = true;
+                    LiveTextPushed?.Invoke(editedDoc.Module, updated, null, null);
+                }
+
+                // Read from the raw change set rather than the parsed edits, because
+                // small modules skip the parse and this must fire for them too.
+                //
+                // A change the page has named the source of is not typing, whatever
+                // its shape. Formatting a module whose lines are already right except
+                // one produces a one-line change with no newline in it, which is
+                // exactly what a keystroke produces, and reading it as one armed the
+                // hold and took the squiggle off that line until the caret was moved
+                // away (2026-08-07). The page marks its formatter's edits because the
+                // editor's change event carries no source of its own.
+                var typedByHand = !document.RootElement.TryGetProperty("source", out var madeBy)
+                    || madeBy.ValueKind != JsonValueKind.String;
+
+                if (typedByHand
+                    && document.RootElement.TryGetProperty("changes", out var typedSet)
+                    && SingleLineTypedIn(typedSet) is { } typedLine)
+                {
+                    LineTyped?.Invoke(typedLine);
+                }
+            }
+        }
+
     }
 
     /// <summary>

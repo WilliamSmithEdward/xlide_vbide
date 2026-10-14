@@ -1496,7 +1496,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ApiRequested = OnApiRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
-        _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
+        _editorSurface.LiveTextPushed = (module, full, edits, length) => _analysis?.NotifyLiveText(module, full, edits, length: length);
 
         // The active-line hold: typing on a line hides the verdicts about it, and the caret
         // settling anywhere else brings them back. Both handlers run on the host thread, and
@@ -1870,6 +1870,11 @@ internal sealed partial class AddInSession : IDisposable
             // And the tree - with the two panes' file lists behind it - follows files opening
             // and closing in the host, which nothing in here would otherwise notice.
             _analysis.ProjectsObserved = OnProjectsObserved;
+
+            // An engine that has dropped its mirror of the module being analysed is sent the
+            // surface's text again, on the host thread so it goes in order with the typing (#105).
+            _analysis.LiveMirrorMissing = module => _editorSurface?.RunOnHostThread(
+                () => _editorSurface?.RepushLiveText(module, DisplayFromProjectId(_shownProject)));
 
             // The engine dying is not a crash and is not recoverable in this session: it is a
             // separate process and it is not restarted. Everything else keeps working, which is
@@ -2873,11 +2878,27 @@ internal sealed partial class AddInSession : IDisposable
             // So the module is asked what it holds instead: one read, about 40ms at that size,
             // against seconds of reparse. The import path has already read it for its
             // all-or-nothing check, and that copy is used rather than read again.
+            string? known = null;
+            var remembered = mode != BreakMode && _writtenModules.TryGetValue(writtenKey, out known);
             var baseline = mode == BreakMode
                 ? ProjectReader.ReadSource(found)
-                : _writtenModules.TryGetValue(writtenKey, out var known)
+                : remembered
                     ? known
                     : wasHoldingBefore ?? ProjectReader.ReadSource(found);
+
+            // THE REMEMBERED BASELINE IS A BELIEF, and a line diff writes into the module by line
+            // number on the strength of it. Something else that adds or removes lines - a macro or
+            // another add-in writing code, the object model from the Immediate window - moves
+            // every number below it, and the diff then overwrote the wrong lines: the module kept
+            // a stale copy of a line beside the new one and lost its last line (found 2026-10-13
+            // hunting #105). A line count that disagrees costs one read to get the truth.
+            if (remembered && baseline is not null && known is not null
+                && module.GetInt32("CountOfLines") is var holding
+                && holding != LineCount(baseline))
+            {
+                Log.Warn($"write: {component} holds {holding} line(s) where {LineCount(baseline)} were last written; reading it before the diff");
+                baseline = ProjectReader.ReadSource(found);
+            }
 
             // Declared out here because the call below is short-circuited: with no baseline there
             // is no diff to attempt and no window to hear about.
@@ -3050,7 +3071,13 @@ internal sealed partial class AddInSession : IDisposable
                 // the write. A host rewrite bypasses the page, so the live copy is corrected
                 // here, or the engine keeps diagnosing text that no longer exists - the
                 // problems of a discarded edit survived the close and the reopen (2026-08-05).
-                _analysis?.NotifyLiveText(component, stored ?? text, null, owner);
+                //
+                // Unless the surface mirrors the module: then the Sync below tells the engine, in
+                // order with the typing, and telling it here as well would send a large module twice.
+                if (_editorSurface?.Mirrors(component, DisplayFromProjectId(foundOwner ?? owner)) != true)
+                {
+                    _analysis?.NotifyLiveText(component, stored ?? text, null, owner);
+                }
 
                 // AND THE SURFACE, which this used to leave behind entirely.
                 //
@@ -3062,8 +3089,11 @@ internal sealed partial class AddInSession : IDisposable
                 // every breakpoint on it was refused as "not an executable statement" because
                 // the line being asked about did not exist on the surface.
                 //
-                // Sync only touches a document the surface actually holds, and leaves an
-                // unwritten one alone, so this cannot overwrite an edit in flight.
+                // Sync only touches a document the surface actually holds, and leaves one whose
+                // break-mode write was refused alone. It does replace a document with unwritten
+                // edits, so a host rewrite flushes first. An edit still on its way from the page
+                // is stamped with the text it was made against, and the surface drops it once
+                // this sync has replaced that text (#105), rather than apply it to the new one.
                 _editorSurface?.Sync(component, DisplayFromProjectId(foundOwner ?? owner), stored ?? text);
 
                 // AND THE FOLDER, from the same text (#23). Typing moves a module on the typing
@@ -3355,6 +3385,23 @@ internal sealed partial class AddInSession : IDisposable
 
         wrote = placed;
         return true;
+    }
+
+    /// <summary>
+    /// The lines a text makes in a code module, as CountOfLines counts them: one more than its
+    /// line breaks, a final break included - the VBE keeps the empty line after it. Measured on
+    /// PerfFixture's Massive module (2026-10-13): text ending in a break, 64,802 breaks, and
+    /// CountOfLines 64,803. Counting the final break as the end of the last line instead made the
+    /// write's stale-baseline check fire on every write and read the whole module each time.
+    /// </summary>
+    private static int LineCount(string text)
+    {
+        if (text.Length == 0)
+        {
+            return 0;
+        }
+
+        return text.AsSpan().Count('\n') + 1;
     }
 
     private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out IReadOnlyList<LineWindow>? wrote)
@@ -4360,7 +4407,10 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     var display = DisplayFromProjectId(group.Key.ProjectId);
                     _writtenModules[WrittenKey(group.Key.Module, display)] = adopted;
-                    _analysis?.NotifyLiveText(group.Key.Module, adopted, null, group.Key.ProjectId);
+                    if (_editorSurface?.Mirrors(group.Key.Module, display) != true)
+                    {
+                        _analysis?.NotifyLiveText(group.Key.Module, adopted, null, group.Key.ProjectId);
+                    }
 
                     // AND THE SURFACE, which is the copy the developer is looking at.
                     //
@@ -7175,6 +7225,11 @@ internal sealed partial class AddInSession : IDisposable
 
         surface.RunOnHostThread(() =>
         {
+            // The form's code edits first: the stub is written onto the module as the workbook
+            // holds it, and the sync that follows replaces the page's copy - typing in the code
+            // tab that had not reached the workbook yet would have gone with it (#105's hunt).
+            surface.FlushEdits();
+
             try
             {
                 using var component = FindComponent(moduleName, projectId, out _);
@@ -10452,7 +10507,11 @@ internal sealed partial class AddInSession : IDisposable
         // two to three seconds, reported twice by the owner (2026-08-21); the same switch is
         // under a tenth of that when the text has not changed. The surface's own Show above
         // already worked this way, and posts nothing when the page's copy matches.
-        if (!string.Equals(toldBefore, source, StringComparison.Ordinal))
+        //
+        // And not when the surface mirrors it: Show above has told the engine whatever the
+        // surface took, and the surface's copy, unwritten edits included, is the one it mirrors.
+        if (!string.Equals(toldBefore, source, StringComparison.Ordinal)
+            && _editorSurface?.Mirrors(component, display) != true)
         {
             _analysis?.NotifyLiveText(component, source, null);
         }
