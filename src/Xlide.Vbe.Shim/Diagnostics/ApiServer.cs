@@ -1386,7 +1386,11 @@ public sealed record DebugPerfReply(
     /// run before the change-key can say nothing changed (the audit's B23).
     /// </summary>
     [property: JsonPropertyName("publishUs")] long[] PublishUs,
-    [property: JsonPropertyName("publishCount")] long PublishCount);
+    [property: JsonPropertyName("publishCount")] long PublishCount,
+    /// One page edit handled on the host thread, in MICROSECONDS: the shadow rebuilt and the
+    /// engine told. The first edit to a module carries its whole text to the engine (#105).
+    [property: JsonPropertyName("editUs")] long[] EditUs,
+    [property: JsonPropertyName("editCount")] long EditCount);
 
 /// <summary>
 /// What a script run in the page answered with.

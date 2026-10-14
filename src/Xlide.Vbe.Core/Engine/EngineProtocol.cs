@@ -67,7 +67,8 @@ public sealed record EnginePosition(
 
 public sealed record EngineDiagnostics(
     [property: JsonPropertyName("diagnostics")] EngineDiagnostic[] Diagnostics,
-    [property: JsonPropertyName("mode")] string? Mode);
+    [property: JsonPropertyName("mode")] string? Mode,
+    [property: JsonPropertyName("liveHeld")] bool? LiveHeld = null);
 
 /// <summary>
 /// One analyzer rule as `analysis/rules` lists it: its stable code, its words, and the severity

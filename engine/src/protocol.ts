@@ -205,6 +205,8 @@ export interface DiagnosticsResult {
     diagnostics: DiagnosticPayload[];
     /** Whether the analyser reused per-procedure work or ran a full pass. */
     mode?: 'full' | 'incremental';
+    /** For a request naming no source: whether the engine holds a live copy of the module. */
+    liveHeld?: boolean;
 }
 
 /**
@@ -989,6 +991,8 @@ export interface DidChangeParams {
     moduleName: string;
     source?: string;
     edits?: TextEditPayload[];
+    /** The module's length on the surface once the edits apply; a live copy that disagrees is dropped. */
+    length?: number;
 }
 
 /**

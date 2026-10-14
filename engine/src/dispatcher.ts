@@ -439,8 +439,16 @@ export class Dispatcher {
             case 'project/close':
                 return this.closeProject(this.require<{ projectId: string }>(params));
 
-            case 'textDocument/diagnostics':
-                return this.diagnostics(this.require<DiagnosticsParams>(params));
+            case 'textDocument/diagnostics': {
+                const asked = this.require<DiagnosticsParams>(params);
+                const answer = this.diagnostics(asked);
+                // Whether a live copy stands behind the answer, for a request that named none:
+                // the host resends the module's text when it does not (#105), because edits
+                // only ever apply to a live copy and a module without one answers from its seed.
+                return asked.projectId !== undefined && asked.source === undefined
+                    ? { ...answer, liveHeld: this.liveSources.has(liveKey(asked.projectId, asked.moduleName)) }
+                    : answer;
+            }
 
             case 'textDocument/completion':
                 return this.completion(this.require<CompletionParams>(params));
@@ -1229,7 +1237,14 @@ export class Dispatcher {
             return null;
         }
 
-        const current = this.liveSources.get(key) ?? this.seededSourceOf(params.projectId, params.moduleName);
+        // ONLY ONTO A LIVE COPY. Edits are offsets into the text the surface holds, and the seeded
+        // copy is the workbook as the last pass read it: behind the surface by every edit not yet
+        // written, and by whatever the VBE respaced. Applying them there produced text neither
+        // side ever held - characters dropped, others shifted - which every answer then described
+        // and a rename wrote back into the module (#105). With no live copy the edits are dropped
+        // and the module answers from its seed, stale but true, until the host sends the text;
+        // the diagnostics answer says so (liveHeld), and the host does.
+        const current = this.liveSources.get(key);
         if (current === undefined || !params.edits) {
             return null;
         }
@@ -1269,7 +1284,17 @@ export class Dispatcher {
         pieces.push(current.slice(0, read));
         pieces.reverse();
 
-        this.liveSources.set(key, pieces.join(''));
+        // The length the surface holds after these edits, when the host sends it. Edits that
+        // fit the ranges can still have been computed against another text; a length that
+        // disagrees is the cheap proof, and a copy that cannot be trusted is not kept.
+        const updated = pieces.join('');
+        if (params.length !== undefined && updated.length !== params.length) {
+            process.stderr.write(`didChange: ${params.moduleName} would hold ${updated.length} character(s) where the surface holds ${params.length}; dropping the live copy\n`);
+            this.liveSources.delete(key);
+            return null;
+        }
+
+        this.liveSources.set(key, updated);
         return null;
     }
 

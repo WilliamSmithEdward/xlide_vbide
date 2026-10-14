@@ -128,6 +128,28 @@ internal static class PerfCounters
 
     private static long _publishCount;
 
+    /// <summary>
+    /// One page edit handled on the host thread - the shadow rebuilt, the engine told - timed in
+    /// MICROSECONDS, since a keystroke should cost well under a millisecond and a ring that drops
+    /// zeros hides it. The first edit to a module sends the engine its whole text (#105), the one
+    /// sample that grows with the module, so a regression there shows here as a tall first sample.
+    /// </summary>
+    public static void Edit(long microseconds)
+    {
+        Interlocked.Increment(ref _editCount);
+        Sample(EditSamples, ref _editCursor, microseconds);
+    }
+
+    public static (long Count, long[] Samples) EditSnapshot()
+    {
+        lock (SampleGate)
+        {
+            return (Interlocked.Read(ref _editCount), Ordered(EditSamples, _editCursor));
+        }
+    }
+
+    private static long _editCount;
+
     /// <summary>One window event heard from the hook, whether or not it led anywhere.</summary>
     public static void WindowEvent() => Interlocked.Increment(ref _windowEvents);
 
@@ -205,6 +227,8 @@ internal static class PerfCounters
     private static readonly long[] MarshalSamples = new long[SampleCount];
     private static readonly long[] HostReadSamples = new long[SampleCount];
     private static readonly long[] PublishSamples = new long[SampleCount];
+    private static readonly long[] EditSamples = new long[SampleCount];
+    private static int _editCursor;
     private static int _placementCursor;
     private static int _marshalCursor;
     private static int _hostReadCursor;
@@ -241,6 +265,8 @@ internal static class PerfCounters
             Array.Clear(MarshalSamples);
             Array.Clear(HostReadSamples);
             Array.Clear(PublishSamples);
+            Array.Clear(EditSamples);
+            _editCursor = 0;
             _placementCursor = 0;
             _marshalCursor = 0;
             _hostReadCursor = 0;
@@ -261,6 +287,7 @@ internal static class PerfCounters
         Interlocked.Exchange(ref _hostReadFullLast, 0);
         Interlocked.Exchange(ref _hostReadSkipped, 0);
         Interlocked.Exchange(ref _publishCount, 0);
+        Interlocked.Exchange(ref _editCount, 0);
         Interlocked.Exchange(ref _refreshPasses, 0);
         Interlocked.Exchange(ref _refreshTotalMs, 0);
         Interlocked.Exchange(ref _refreshMaxMs, 0);

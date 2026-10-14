@@ -939,6 +939,9 @@ if ($Live) {
                                      # editor-keys presses Enter, Up and Down as real keys in the
                                      # code editor and the Immediate entry line (#103).
                                      'editor-keys.mjs',
+                                     # text-mirror holds the page, the shadow, the engine's mirror and
+                                     # the workbook to one text through the paths that split them (#105).
+                                     'text-mirror.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
