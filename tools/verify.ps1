@@ -1080,8 +1080,12 @@ if ($Live) {
             # worked in, nothing republished it when the developer moved, and the session's answer
             # counted only files holding tests, which with none open is vacuously satisfied
             # (2026-08-21).
+            #
+            # bookmarks-pane drives the toolbar's Bookmarks group and the Bookmarks pane with real
+            # pointer and keys (#111). It is here because the pane's file filter is only there with
+            # two or more files open, and DebugFixture brings the Helper and Runner it marks.
             @{ Fixture = 'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm'
-               Suites  = @('multi-file.mjs', 'tests-support.mjs') }
+               Suites  = @('multi-file.mjs', 'tests-support.mjs', 'bookmarks-pane.mjs') }
             # THE ATTRIBUTE ANNOTATIONS GET A WORKBOOK OF THEIR OWN (tools\New-AttributesFixture.ps1),
             # because the suite re-imports modules and saves the file to prove the saved package
             # carries what was written, and no other fixture may be saved with attributes it did

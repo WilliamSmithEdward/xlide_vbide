@@ -37,6 +37,9 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
   parent.insertBefore(back, strip);
   parent.insertBefore(forward, strip.nextSibling);
 
+  /** Whether the strip was showing its far end at the last update; see the content watch below. */
+  let atEnd = false;
+
   const update = (): void => {
     const furthest = strip.scrollWidth - strip.clientWidth;
     // Slack at both ends, because none of these numbers are whole. At fractional zoom the
@@ -48,6 +51,7 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
     // sliver nobody can read anyway.
     back.hidden = strip.scrollLeft <= 1;
     forward.hidden = Math.ceil(strip.scrollLeft) + 1 >= furthest;
+    atEnd = furthest > 0 && forward.hidden;
   };
 
   const slide = (direction: -1 | 1): void => {
@@ -103,12 +107,26 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
   });
   observer.observe(strip);
 
+  // WHAT IS IN THE STRIP CHANGES TOO, and the strip's own box does not: a count appearing on a
+  // tab widens the tab, not the strip, so neither the size watch nor a scroll event fires. A
+  // strip scrolled to its end then had its last tab grow past the edge, the new count cut off
+  // with no edge to say more was there (the owner, 2026-10-16: the Bookmarks tab's first count).
+  // A strip that was at its end stays at its end; any other just has its edges re-read.
+  const contents = new MutationObserver(() => {
+    if (atEnd) {
+      strip.scrollLeft = strip.scrollWidth;
+    }
+    update();
+  });
+  contents.observe(strip, { childList: true, subtree: true, characterData: true });
+
   update();
 
   return {
     update,
     dispose(): void {
       observer.disconnect();
+      contents.disconnect();
       if (pendingFrame !== 0) {
         cancelAnimationFrame(pendingFrame);
         pendingFrame = 0;

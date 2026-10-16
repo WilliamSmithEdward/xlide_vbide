@@ -28,6 +28,7 @@ import {
   type TreeSplit,
 } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
+import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { installSplitterDrag } from "./livedrag.js";
 import { readUiPreference, watchUiPreference, writeUiPreference } from "./preferences.js";
 
@@ -128,6 +129,9 @@ export class PanelDocks {
 
   /** Rendered strip/body hosts per group, rebuilt with the layout, indexed by side+path. */
   private groupHosts: { side: DockSide; path: number[]; group: Group; strip: HTMLElement; body: HTMLElement }[] = [];
+
+  /** Each group's tab strip edges, replaced on every render with the strips they sit beside. */
+  private tabScrollers: EdgeScroll[] = [];
 
   /** What each pane's visibility was last told, so echoes are not restated. */
   private readonly toldVisibility = new Map<string, boolean>();
@@ -417,6 +421,10 @@ export class PanelDocks {
 
   private render(): void {
     this.groupHosts = [];
+    for (const scroller of this.tabScrollers) {
+      scroller.dispose();
+    }
+    this.tabScrollers = [];
 
     for (const side of ["left", "right", "top", "bottom"] as DockSide[]) {
       const dock = this.dockElements[side];
@@ -431,6 +439,30 @@ export class PanelDocks {
       if (node) {
         dock.appendChild(this.buildNode(side, node, []));
       }
+    }
+
+    // The strips were rebuilt at the start, so each group's shown tab is brought into view: a
+    // tab chosen past the edge would otherwise be active and off screen after its own click.
+    // Twice, because scrolling shows an edge and an edge narrows the strip it was measured in.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const scroller of this.tabScrollers) {
+        scroller.update();
+      }
+      for (const host of this.groupHosts) {
+        const tab = host.strip.querySelector<HTMLElement>(".panel-tab.active");
+        if (tab) {
+          const start = tab.offsetLeft;
+          const end = start + tab.offsetWidth;
+          if (start < host.strip.scrollLeft) {
+            host.strip.scrollLeft = start;
+          } else if (end > host.strip.scrollLeft + host.strip.clientWidth) {
+            host.strip.scrollLeft = end - host.strip.clientWidth;
+          }
+        }
+      }
+    }
+    for (const scroller of this.tabScrollers) {
+      scroller.update();
     }
 
     this.handlers.layoutChanged();
@@ -492,6 +524,8 @@ export class PanelDocks {
     }
 
     head.appendChild(strip);
+    // Edges at each end once the tabs outgrow the group, the way the editor's own tab strip has.
+    this.tabScrollers.push(installEdgeScroll(strip, "tab-edge"));
 
     // The close box acts on the SHOWN pane, at the group's top right, the way every docked
     // pane closes. A permanent pane has none: the explorer is the only route back to a

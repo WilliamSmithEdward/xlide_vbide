@@ -205,6 +205,9 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  /* A grid item's minimum is its content's by default, so a row of tabs wider than the group
+     stretched the whole group past the window rather than scrolling inside it. */
+  min-width: 0;
   /* The close box keeps a margin off the right edge, so it reads as sitting in the header
      rather than pressed against the frame (developer, 2026-08-06). */
   padding: 2px 8px 2px 6px;
@@ -212,11 +215,20 @@ body {
 }
 
 .dock-tabs {
+  /* Positioned so a tab's offsetLeft is measured from the strip, which is what keeping the
+     shown tab in view reads. */
+  position: relative;
   display: flex;
   gap: 2px;
   flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  /* The edges are the way across, as on the editor's tab strip and the toolbar. */
+  scrollbar-width: none;
+}
+
+.dock-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 /* The close box of the shown pane, at the group's top right. */
@@ -1691,6 +1703,59 @@ body.live-resize .minimap {
   line-height: 1;
 }
 
+/* A command group's face: a small corner mark says more is under it, the way grouped tools are
+   marked in most editors, without spending the width a chevron would. */
+.toolbar-group {
+  position: relative;
+}
+
+.toolbar-group::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  border-style: solid;
+  border-width: 0 0 4px 4px;
+  border-color: transparent transparent currentColor transparent;
+  opacity: 0.7;
+}
+
+.toolbar-group.open {
+  opacity: 1;
+  background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.3));
+}
+
+.toolbar-flyout {
+  min-width: 0;
+}
+
+.toolbar-flyout .toolbar-flyout-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toolbar-flyout .toolbar-flyout-item:focus {
+  outline: none;
+  background: var(--vscode-menu-selectionBackground, #04395e);
+  color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+.toolbar-flyout .toolbar-flyout-item:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
+}
+
+.toolbar-flyout-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  font-size: 14px;
+}
+
 .toolbar-divider {
   flex: 0 0 auto;
   width: 1px;
@@ -2872,6 +2937,85 @@ body.live-resize .minimap {
 
 #tests[hidden] {
   display: none;
+}
+
+/* The Bookmarks pane: a bar like the Tests pane's over a list like the Problems pane's. */
+#bookmarks {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+#bookmarks[hidden] {
+  display: none;
+}
+
+#bookmarks-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 4px 10px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#bookmarks-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+#bookmarks-actions button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+#bookmarks-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#bookmarks-summary {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+#bookmarks-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.bookmark-row .mark {
+  color: var(--vscode-charts-blue, #3794ff);
+  font-weight: 400;
+  align-self: center;
+}
+
+.bookmark-row .message {
+  font-family: var(--vscode-editor-font-family, Consolas, "Courier New", monospace);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bookmark-row .body {
+  min-width: 0;
+}
+
+.bookmark-row .bookmark-blank {
+  font-family: inherit;
+  font-style: italic;
+  opacity: 0.6;
 }
 
 #tests-actions {

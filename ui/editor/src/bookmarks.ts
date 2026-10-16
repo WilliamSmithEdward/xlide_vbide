@@ -11,10 +11,37 @@
  *
  * One store serves every editor group: the marks belong to the DOCUMENT, and jumping walks
  * the marks of whichever document the acting editor shows. Like the native editor's, they
- * last as long as the session; nothing persists them.
+ * last as long as the session; nothing persists them. The Bookmarks pane lists every module's
+ * marks at once (bookmarkspane.ts), which the native editor never had.
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
+
+/** The scheme of a live module's model (documents.ts docUriOf). */
+const LIVE_SCHEME = "xlide";
+
+interface HeldMark {
+  line: number;
+  text: string;
+}
+
+/** One mark, wherever it is. `projectKey` is the project as the model URI carries it, lowercased. */
+export interface BookmarkEntry {
+  uri: string;
+  module: string;
+  projectKey: string;
+  line: number;
+  text: string;
+}
+
+/**
+ * The module and project a live model URI names: `xlide:/<project>/<module>`. Uri.parse has
+ * already decoded the path, and neither a VBA module name nor a file name holds a slash.
+ */
+function nameOf(uri: monaco.Uri): { module: string; projectKey: string } {
+  const [projectKey = "", module = ""] = uri.path.replace(/^\//, "").split("/");
+  return { module, projectKey };
+}
 
 export class Bookmarks {
   /**
@@ -25,14 +52,90 @@ export class Bookmarks {
    */
   private static readonly menuGroup = "2_xlide_bookmarks";
 
-  /** Lines by model URI, for models that have been disposed. */
-  private readonly held = new Map<string, number[]>();
+  /**
+   * Marks by model URI, for models that have been disposed: the line, and its text as it stood
+   * when the model went, so the Bookmarks pane can still say what is there.
+   */
+  private readonly held = new Map<string, HeldMark[]>();
 
   /** Live decoration ids per model URI. */
   private readonly ids = new Map<string, string[]>();
 
   /** Models already being watched for disposal, so an editor swap does not double-register. */
   private readonly watched = new WeakSet<monaco.editor.ITextModel>();
+
+  /** Told whenever a mark is set, cleared, or moved by an edit: the Bookmarks pane. */
+  private readonly listeners = new Set<() => void>();
+
+  /** Subscribes to changes in any module's marks. Answers the unsubscribe. */
+  onDidChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private changed(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
+  /**
+   * Every module's marks, for the Bookmarks pane: the live ones read from their decorations, the
+   * held ones as they were left. Past versions of a module (another URI scheme) are left out;
+   * a mark there is on text that no longer exists.
+   */
+  everywhere(): BookmarkEntry[] {
+    const entries: BookmarkEntry[] = [];
+    for (const model of monaco.editor.getModels()) {
+      const key = model.uri.toString();
+      if (model.uri.scheme !== LIVE_SCHEME || !this.ids.has(key)) {
+        continue;
+      }
+      for (const line of this.lines(model)) {
+        entries.push({ ...nameOf(model.uri), uri: key, line, text: model.getLineContent(line) });
+      }
+    }
+    for (const [key, marks] of this.held) {
+      const uri = monaco.Uri.parse(key);
+      if (uri.scheme !== LIVE_SCHEME) {
+        continue;
+      }
+      for (const mark of marks) {
+        entries.push({ ...nameOf(uri), uri: key, line: mark.line, text: mark.text });
+      }
+    }
+    return entries;
+  }
+
+  /** Takes one mark away, on a live module or a closed one. */
+  remove(uri: string, line: number): void {
+    const model = monaco.editor.getModels().find((one) => one.uri.toString() === uri);
+    if (model && this.ids.has(uri)) {
+      this.decorate(model, this.lines(model).filter((one) => one !== line));
+      return;
+    }
+    const held = this.held.get(uri);
+    if (held) {
+      const left = held.filter((mark) => mark.line !== line);
+      if (left.length > 0) {
+        this.held.set(uri, left);
+      } else {
+        this.held.delete(uri);
+      }
+      this.changed();
+    }
+  }
+
+  /** Every module's marks gone, the way the native command clears them. */
+  clearAll(): void {
+    this.held.clear();
+    for (const model of monaco.editor.getModels()) {
+      if (this.ids.has(model.uri.toString())) {
+        this.decorate(model, []);
+      }
+    }
+    this.changed();
+  }
 
   /** Current bookmark lines of a model, read from its live decorations. */
   private lines(model: monaco.editor.ITextModel): number[] {
@@ -52,6 +155,7 @@ export class Bookmarks {
         stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
       },
     }))));
+    this.changed();
   }
 
   /**
@@ -78,13 +182,20 @@ export class Bookmarks {
     const restored = this.held.get(key);
     if (restored && restored.length > 0) {
       this.held.delete(key);
-      this.decorate(model, restored);
+      this.decorate(model, restored.map((mark) => mark.line));
     }
+
+    // An edit moves marks with their lines and changes what they say; the pane reads both.
+    model.onDidChangeContent(() => {
+      if ((this.ids.get(key)?.length ?? 0) > 0) {
+        this.changed();
+      }
+    });
 
     model.onWillDispose(() => {
       const marks = this.lines(model);
       if (marks.length > 0) {
-        this.held.set(key, marks);
+        this.held.set(key, marks.map((line) => ({ line, text: model.getLineContent(line) })));
       }
       this.ids.delete(key);
     });
@@ -175,16 +286,7 @@ export class Bookmarks {
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
       contextMenuGroupId: Bookmarks.menuGroup,
       contextMenuOrder: 4,
-      run: () => {
-        // Every module's, the way the native command cleared them: the held map, and the
-        // marks on every model that still lives.
-        this.held.clear();
-        for (const model of monaco.editor.getModels()) {
-          if (this.ids.has(model.uri.toString())) {
-            this.decorate(model, []);
-          }
-        }
-      },
+      run: () => this.clearAll(),
     });
   }
 }
