@@ -17,6 +17,14 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 
 export class Bookmarks {
+  /**
+   * The context menu group all four commands share. The native editor reached bookmarks only
+   * through its Edit menu and Edit toolbar, with no keys, and the surface hides both, so the
+   * context menu is where a VBA developer finds them (#111). Their own group keeps the four
+   * together between separators.
+   */
+  private static readonly menuGroup = "2_xlide_bookmarks";
+
   /** Lines by model URI, for models that have been disposed. */
   private readonly held = new Map<string, number[]>();
 
@@ -105,8 +113,8 @@ export class Bookmarks {
       id: "xlide.bookmark.toggle",
       label: "Toggle Bookmark",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK],
-      contextMenuGroupId: "1_xlide",
-      contextMenuOrder: 2,
+      contextMenuGroupId: Bookmarks.menuGroup,
+      contextMenuOrder: 1,
       run: () => {
         const target = editor.getModel();
         const at = editor.getPosition()?.lineNumber;
@@ -123,6 +131,8 @@ export class Bookmarks {
       id: "xlide.bookmark.next",
       label: "Next Bookmark",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyN],
+      contextMenuGroupId: Bookmarks.menuGroup,
+      contextMenuOrder: 2,
       run: () => {
         const target = editor.getModel();
         if (!target) {
@@ -142,6 +152,8 @@ export class Bookmarks {
       id: "xlide.bookmark.previous",
       label: "Previous Bookmark",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyP],
+      contextMenuGroupId: Bookmarks.menuGroup,
+      contextMenuOrder: 3,
       run: () => {
         const target = editor.getModel();
         if (!target) {
@@ -161,6 +173,8 @@ export class Bookmarks {
       id: "xlide.bookmark.clearAll",
       label: "Clear All Bookmarks",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
+      contextMenuGroupId: Bookmarks.menuGroup,
+      contextMenuOrder: 4,
       run: () => {
         // Every module's, the way the native command cleared them: the held map, and the
         // marks on every model that still lives.

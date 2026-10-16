@@ -11932,7 +11932,8 @@ internal sealed partial class AddInSession : IDisposable
         RestoreGhostPalette(WatchWindowType, "watch", ref _watchPalette, _watchPaletteExStyle);
 
     /// <summary>
-    /// Hides every docked native toolbar, which the surface's toolbar and menus replace.
+    /// Hides every native toolbar, docked or floating, which the surface's toolbar and menus
+    /// replace.
     ///
     /// Hidden only because everything on them is somewhere else now: each button is a menu
     /// command, the menus are all on the surface's bar, and every run and step command keeps the
@@ -11941,13 +11942,15 @@ internal sealed partial class AddInSession : IDisposable
     /// rows the surface covers - since it stopped retreating for chrome, that is a toolbar on
     /// screen that cannot be pressed.
     ///
-    /// Floating bars are left alone: they float above the surface and contest nothing. So is the
-    /// menu bar object, whose commands back the surface's own menus.
+    /// Floating bars go too (#111). They float above the surface and can be pressed, but what
+    /// they press acts on the native pane underneath it: the Edit bar's Toggle Bookmark set a
+    /// bookmark the surface never showed (2026-10-15), and the bar's other buttons answer to
+    /// that same hidden pane. The menu bar object stays, because its commands back
+    /// the surface's own menus, and so do context menus.
     /// </summary>
     private void HideNativeToolbars()
     {
         const int menuBarType = 1;
-        const int floating = 4;
         const int popup = 5;
 
         try
@@ -11964,13 +11967,13 @@ internal sealed partial class AddInSession : IDisposable
                 }
 
                 var position = bar.GetInt32("Position");
-                if (position == floating || position == popup)
+                if (position == popup)
                 {
                     continue;
                 }
 
                 bar.SetBool("Visible", false);
-                Log.Info($"window: hid the editor's docked '{bar.GetString("Name")}' toolbar");
+                Log.Info($"window: hid the editor's '{bar.GetString("Name")}' toolbar (position {position})");
             }
         }
         catch (Exception ex)
