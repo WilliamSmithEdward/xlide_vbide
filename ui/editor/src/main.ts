@@ -102,6 +102,7 @@ import { openAgentDialog } from "./agentdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
+import { BookmarksPane } from "./bookmarkspane.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
 import { registerTestDirectiveCompletion } from "./testdirectives.js";
@@ -1259,6 +1260,15 @@ function boot(): void {
   });
   bridge.testsChanged = (tests) => testsPane.paint(tests);
 
+  // The Bookmarks pane: every module's marks, drawn from the store whenever one moves.
+  const bookmarksPane = new BookmarksPane(document.querySelector("#bookmarks") as HTMLElement, bookmarks, {
+    navigate: (module, line, project) => bridge.navigate(module, line, 1, false, project ?? undefined),
+    projectName: (key) =>
+      shell?.currentProjects().find((one) => namesTheSameProject(one.name, key))?.name ?? null,
+    files: () => (shell?.currentProjects() ?? []).map((one) => one.name).filter((name) => name.length > 0),
+    badge: (count) => shell?.setTabBadge("bookmarks", "Bookmarks", count),
+  });
+
   // The Changes pane: the change log, read when the pane is looked at and at no other time.
   // Its request goes through the same channel the xlide api's `changes` route answers, so the
   // pane and a driver are reading one reply rather than two shapes that can drift.
@@ -1518,6 +1528,7 @@ function boot(): void {
   shell.projectsChanged = () => {
     changesPane?.filesChanged();
     scmPane?.filesChanged();
+    bookmarksPane.render();
   };
 
   // Asked once at boot, so a pane restored open by the saved layout holds its state - the
@@ -2377,6 +2388,7 @@ function boot(): void {
     },
     search: searchWidget,
     bookmarks,
+    bookmarksPane,
     blame,
     providers: {
       hover: hoverProvider,
@@ -2404,6 +2416,7 @@ function boot(): void {
     statusProcedure: () => shell.currentProcedure(),
     pressToolbar: (id) => shell.pressToolbarCommand(id),
     toolbarCommands: () => shell.toolbarCommandsShown(),
+    openToolbarGroup: (name) => shell.openToolbarGroup(name),
     properties: () => shell.propertiesShown(),
     editProperty: (name, value) => shell.editPropertyByName(name, value),
     openSponsors: () => openSponsorDialog(

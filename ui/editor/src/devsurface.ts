@@ -36,6 +36,7 @@ import { scmPaneProbe, type ScmPaneProbe } from "./scmpane.js";
 import { agentDialogProbe } from "./agentdialog.js";
 import { extractDialogProbe } from "./extractdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
+import type { BookmarkRow, BookmarksPaneState } from "./bookmarkspane.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
 interface DialogSnapshot {
@@ -195,6 +196,8 @@ export interface UiSnapshot {
   };
   /** The bookmark lines of the model on screen, read from its live decorations. */
   bookmarks: number[];
+  /** The Bookmarks pane: its file filter (null while it shows every file), the files it offers, and its rows as drawn. */
+  bookmarksPane: BookmarksPaneState;
   /**
    * What is at a position, when `ui` was asked with `line`/`column` or `word`.
    *
@@ -318,6 +321,7 @@ export interface DevSurfaceParts {
     goToPreviousMatch(): void;
   };
   bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
+  bookmarksPane: { rows(): BookmarkRow[]; state(): BookmarksPaneState; showFile(file: string | null): boolean; goTo(i: number): boolean; removeAt(i: number): boolean; clearAll(): void };
   blame: {
     blameOn(model: monaco.editor.ITextModel): {
       on: boolean; lines: number; uncommitted: number; painted: number; refused: string | null;
@@ -367,10 +371,12 @@ export interface DevSurfaceParts {
   statusModule(): string;
   /** The status bar's procedure readout, read the same way. */
   statusProcedure(): string;
-  /** Presses a toolbar command by id, through the button's own click. */
+  /** Presses a toolbar command by id, through the button's own click, or its group's row. */
   pressToolbar(id: string): { did: boolean; detail: string };
-  /** Every command the strip is currently drawing, and whether each is pressable. */
-  toolbarCommands(): { id: string; label: string; disabled: boolean }[];
+  /** Every command the strip is currently drawing, grouped ones named with their group. */
+  toolbarCommands(): { id: string; label: string; disabled: boolean; group?: string }[];
+  /** Opens a toolbar group as a hover would, and answers its rows. */
+  openToolbarGroup(name: string): { did: boolean; detail: string; rows: string[] };
   /**
    * The Properties panel: what it is showing, and the one way to change a value.
    *
@@ -798,6 +804,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       const model = workspace.activeEditor().getModel();
       return model ? parts.bookmarks.marksOn(model) : [];
     })(),
+    bookmarksPane: parts.bookmarksPane.state(),
     at: at ? describeAt(at) : null,
   });
 
@@ -2045,6 +2052,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * the DOM to find that out.
      */
     toolbar: (args) => {
+      // `{group}` opens a command group as a hover does and answers its rows, the read side of a
+      // grouped command; `{command}` presses one through its group the same way.
+      if (args.group !== undefined) {
+        const opened = parts.openToolbarGroup(String(args.group));
+        return { did: opened.did, detail: opened.detail, data: { rows: opened.rows } };
+      }
+
       const wanted = args.command === undefined ? null : String(args.command);
       if (wanted === null) {
         const shown = parts.toolbarCommands();
@@ -3523,6 +3537,48 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       void found.run();
       return { did: true, detail: `ran ${action}` };
+    },
+
+    /**
+     * Drives the Bookmarks pane through its own controls: `{row, press: "goto"}` is a click on
+     * the row, `{row, press: "remove"}` is Delete on it, and `{press: "clear"}` is the bar's
+     * Clear All. `row` is the 0-based index into `ui.bookmarksPane.rows`, the rows as drawn.
+     * `{file}` picks a file in the bar's filter, `{file: "all"}` every file again.
+     */
+    bookmarksPane: (args) => {
+      if (args.file !== undefined) {
+        const file = String(args.file);
+        const all = file.toLowerCase() === "all";
+        const picked = parts.bookmarksPane.showFile(all ? null : file);
+        return picked
+          ? { did: true, detail: all ? "showing every file" : `showing ${file} only` }
+          : { did: false, detail: `the filter does not offer ${file}; it offers ${parts.bookmarksPane.state().files.join(", ") || "nothing while one file is open"}` };
+      }
+
+      const press = String(args.press ?? "goto").toLowerCase();
+      if (press === "clear") {
+        const narrowed = parts.bookmarksPane.state().file;
+        parts.bookmarksPane.clearAll();
+        return { did: true, detail: narrowed ? `pressed Clear File on ${narrowed}` : "pressed Clear All" };
+      }
+
+      const row = Number(args.row);
+      const rows = parts.bookmarksPane.rows();
+      if (!Number.isInteger(row) || row < 0 || row >= rows.length) {
+        return { did: false, detail: `row must be 0 to ${rows.length - 1}; the pane has ${rows.length} row(s)` };
+      }
+      const target = rows[row]!;
+      const named = `${target.module} line ${target.line}`;
+
+      if (press === "goto") {
+        parts.bookmarksPane.goTo(row);
+        return { did: true, detail: `went to ${named}` };
+      }
+      if (press === "remove") {
+        parts.bookmarksPane.removeAt(row);
+        return { did: true, detail: `removed the bookmark on ${named}` };
+      }
+      return { did: false, detail: `press must be goto, remove or clear; got ${press}` };
     },
 
     /**

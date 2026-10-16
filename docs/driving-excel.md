@@ -548,6 +548,10 @@ ui.sync;                          // the sync dialog while open, null otherwise:
                                   // mode, busy, status, and every row with its tick - the statuses
                                   // in the same vocabulary the sync route's plan speaks
 ui.bookmarks;                     // the marked lines of the model on screen
+ui.bookmarksPane;                 // the Bookmarks pane: file (its filter, null = every file), files
+                                  // (what the filter offers; [] while one file is open), and rows,
+                                  // the marks it shows as {project, module, line, text}; a closed
+                                  // module's stay listed
 ui.longTasks;                     // main-thread stalls over 50ms, worst first
 
 await api.act("closeActive");
@@ -555,6 +559,12 @@ await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-cha
 await api.act("search", { query: "Recalculate", scope: "project", run: "findAll" });
 ui.search.scopedMatches;          // the project/workbook answer. `matches` is MODULE SCOPE ONLY
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
+await api.act("bookmarksPane", { row: 0, press: "goto" });  // a click on the pane's row; "remove"
+                                                //   is Delete on it, { press: "clear" } the bar's
+                                                //   Clear All (Clear File while narrowed). `row`
+                                                //   indexes ui.bookmarksPane.rows
+await api.act("bookmarksPane", { file: "TestFixture.xlsm" });  // the bar's file filter; "all"
+                                                //   shows every file again
 await api.act("format");                        // Format Module; {selection: true} for the selection
 await api.act("changesPane", { press: "refresh" });   // refresh, snapshot, accept, rail
 await api.act("changesPane", { round: 3, module: "Ledger" });  // open one module's comparison
@@ -583,6 +593,10 @@ await api.act("scmPane", { width: 320 });        // the rows' width, as a drag o
 await api.act("scmPane", { url: "https://github.com/ada/book.git" });  // type the remote URL;
                                                 //   press remote attaches or re-points origin
 await api.act("blame", { which: "toggle" });     // the editor's blame layer: toggle, on, off
+await api.act("toolbar", { group: "bookmarks" });    // open a command group as a hover does;
+                                                //   data.rows: the commands its rows offer
+await api.act("toolbar", { command: "xlide.bookmark.next" });  // a grouped command: its group
+                                                //   opens and the row is clicked, as by hand
 await api.act("toolbar", { command: "openAgent" });  // the agent card: the api's own switch
 await api.act("agentCard", { press: "toggle" }); // OPENS OR SHUTS THE API DOOR, for real, and
                                                 //   writes the choice to the settings file. The

@@ -19,7 +19,9 @@ import { PanelDocks, type PanelSeat } from "./paneldocks.js";
 import { ScopeSelect, type ScopeEntry } from "./scopeselect.js";
 import type { PaneVisibilityControl } from "./settingsdialog.js";
 import { describeProcedure, type ProcedureRange } from "./procedureat.js";
-import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
+import {
+  buildToolbar, openToolbarGroup, pressGroupedCommand, toolbarEntries, type ToolbarCommand,
+} from "./toolbar.js";
 
 export type FindingSeverity = "error" | "warning" | "info" | "hint";
 
@@ -420,6 +422,8 @@ export class Shell {
       // Source control runs git, which is seconds rather than milliseconds: read when the pane
       // is looked at and when the host taps it, never on the write path.
       seat("scm", "Source Control", [root.querySelector("#scm") as HTMLElement], () => handlers.scmShown()),
+      // Every module's bookmarks at once (#111), drawn by bookmarkspane.ts from the store.
+      seat("bookmarks", "Bookmarks", [root.querySelector("#bookmarks") as HTMLElement]),
     ];
 
     const dockOf = (side: string) => root.querySelector(`#dock-${side}`) as HTMLElement;
@@ -585,14 +589,19 @@ export class Shell {
    * and the element they move is this one.
    */
   private setProblemsTabBadge(count: number): void {
-    const tab = document.querySelector<HTMLElement>('.panel-tab[data-panel="problems"]');
+    this.setTabBadge("problems", "Problems", count);
+  }
+
+  /** A pane tab's count, the way Problems wears one; zero takes it off. */
+  setTabBadge(panel: string, title: string, count: number): void {
+    const tab = document.querySelector<HTMLElement>(`.panel-tab[data-panel="${panel}"]`);
     if (!tab) {
       return;
     }
     let badge = tab.querySelector<HTMLElement>(".tab-badge");
     if (count === 0) {
       badge?.remove();
-      tab.setAttribute("aria-label", "Problems");
+      tab.setAttribute("aria-label", title);
       return;
     }
     if (!badge) {
@@ -602,7 +611,7 @@ export class Shell {
       tab.appendChild(badge);
     }
     badge.textContent = String(count);
-    tab.setAttribute("aria-label", `Problems, ${count} shown`);
+    tab.setAttribute("aria-label", `${title}, ${count} shown`);
   }
 
   /**
@@ -1423,7 +1432,13 @@ export class Shell {
     const button = buttons.find((one) => (one.dataset.command ?? "").toLowerCase() === wanted);
 
     if (!button) {
-      const drawn = buttons.map((one) => one.dataset.command).filter(Boolean);
+      // A grouped command has no button of its own: its group is opened and its row clicked.
+      const grouped = pressGroupedCommand(this.toolbarRoot, id);
+      if (grouped) {
+        return grouped;
+      }
+
+      const drawn = toolbarEntries(this.toolbarRoot).map((one) => one.id).filter(Boolean);
       return {
         did: false,
         detail: `the toolbar has no ${id}. A command whose editor action was not bundled is left `
@@ -1450,13 +1465,13 @@ export class Shell {
    * left out and named in the console rather than drawn dead, so the list is the honest answer to
    * "what can this build actually do" - which menu-bar.mjs was scraping the DOM for.
    */
-  toolbarCommandsShown(): { id: string; label: string; disabled: boolean }[] {
-    return [...this.toolbarRoot.querySelectorAll<HTMLButtonElement>("button[data-command]")]
-      .map((button) => ({
-        id: button.dataset.command ?? "",
-        label: button.title,
-        disabled: button.disabled,
-      }));
+  toolbarCommandsShown(): { id: string; label: string; disabled: boolean; group?: string }[] {
+    return toolbarEntries(this.toolbarRoot);
+  }
+
+  /** Opens a toolbar group as a hover would, and answers the commands its rows offer. */
+  openToolbarGroup(name: string): { did: boolean; detail: string; rows: string[] } {
+    return openToolbarGroup(this.toolbarRoot, name);
   }
 
   /** What the status line is saying, for the snapshot. Empty when it is showing nothing. */
