@@ -58,9 +58,21 @@ const key = async (k, code, keyCode, text) => {
   }
   await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: keyCode });
 };
-const centre = (selector) => js(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null;
-  e.scrollIntoView({ block: 'nearest', inline: 'center' }); const r = e.getBoundingClientRect();
-  return { x: r.x + Math.min(40, r.width / 2), y: r.y + r.height / 2 }; })()`);
+// The selector travels as an ARGUMENT, never spliced into the source: callFunctionOn hands the
+// page the value itself, so no string of ours is ever read as code there.
+const pageGlobal = (await cdp("Runtime.evaluate", { expression: "globalThis" })).result.objectId;
+const centre = async (selector) => (await cdp("Runtime.callFunctionOn", {
+  objectId: pageGlobal,
+  functionDeclaration: `function (selector) {
+    const e = document.querySelector(selector);
+    if (!e) return null;
+    e.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const r = e.getBoundingClientRect();
+    return { x: r.x + Math.min(40, r.width / 2), y: r.y + r.height / 2 };
+  }`,
+  arguments: [{ value: selector }],
+  returnByValue: true,
+})).result.value;
 const away = () => move(5, 400);
 
 const pane = async () => (await api.ui()).bookmarksPane.rows;
