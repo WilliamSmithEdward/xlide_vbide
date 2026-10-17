@@ -68,13 +68,38 @@ internal partial interface IUIAutomationElement
     [PreserveSig] int BuildUpdatedCache(nint request, out nint updated);
     [PreserveSig] int GetCurrentPropertyValue(int propertyId, out UiVariant value);
     [PreserveSig] int GetCurrentPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
-    [PreserveSig] int GetCachedPropertyValue(int propertyId, out ComVariantBlock value);
+    [PreserveSig] int GetCachedPropertyValue(int propertyId, out UiVariant value);
     [PreserveSig] int GetCachedPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
     [PreserveSig] int GetCurrentPatternAs(int patternId, in Guid interfaceId, out nint pattern);
     [PreserveSig] int GetCachedPatternAs(int patternId, in Guid interfaceId, out nint pattern);
 
     // 14
     [PreserveSig] int GetCurrentPattern(int patternId, out nint pattern);
+
+    // 15..17
+    [PreserveSig] int GetCachedPattern(int patternId, out nint pattern);
+    [PreserveSig] int GetCachedParent(out nint parent);
+    [PreserveSig] int GetCachedChildren(out nint children);
+}
+
+/// <summary>
+/// IUIAutomationCacheRequest. Fetches a whole subtree's properties in one call, so a reading
+/// of a long Locals tree crosses to the host thread once instead of once per property.
+/// </summary>
+[GeneratedComInterface]
+[Guid("b32a92b5-bc25-4078-9c08-d7ee95c48e03")]
+internal partial interface IUIAutomationCacheRequest
+{
+    // 1..9
+    [PreserveSig] int AddProperty(int propertyId);
+    [PreserveSig] int AddPattern(int patternId);
+    [PreserveSig] int Clone(out nint cloned);
+    [PreserveSig] int GetTreeScope(out int scope);
+    [PreserveSig] int SetTreeScope(int scope);
+    [PreserveSig] int GetTreeFilter(out nint filter);
+    [PreserveSig] int SetTreeFilter(nint filter);
+    [PreserveSig] int GetAutomationElementMode(out int mode);
+    [PreserveSig] int SetAutomationElementMode(int mode);
 }
 
 /// <summary>IUIAutomationTextPattern. Only the whole-document range is needed.</summary>
@@ -128,12 +153,55 @@ internal partial interface IUIAutomationElementArray
     [PreserveSig] int GetElement(int index, out nint element);
 }
 
-/// <summary>The raw tree walker lets Locals retain VBE's parent/child row structure.</summary>
+/// <summary>
+/// IUIAutomationTreeWalker. The parent link, which the Locals provider gets right, and the next
+/// row, each with the asked properties fetched in the same call.
+/// </summary>
 [GeneratedComInterface]
 [Guid("4042c624-389c-4afc-a630-9df854a541fc")]
 internal partial interface IUIAutomationTreeWalker
 {
+    // 1..10
     [PreserveSig] int GetParentElement(nint element, out nint parent);
+    [PreserveSig] int GetFirstChildElement(nint element, out nint first);
+    [PreserveSig] int GetLastChildElement(nint element, out nint last);
+    [PreserveSig] int GetNextSiblingElement(nint element, out nint next);
+    [PreserveSig] int GetPreviousSiblingElement(nint element, out nint previous);
+    [PreserveSig] int NormalizeElement(nint element, out nint normalized);
+    [PreserveSig] int GetParentElementBuildCache(nint element, nint request, out nint parent);
+    [PreserveSig] int GetFirstChildElementBuildCache(nint element, nint request, out nint first);
+    [PreserveSig] int GetLastChildElementBuildCache(nint element, nint request, out nint last);
+    [PreserveSig] int GetNextSiblingElementBuildCache(nint element, nint request, out nint next);
+}
+
+/// <summary>IUIAutomationSelectionPattern. Which row a list has selected.</summary>
+[GeneratedComInterface]
+[Guid("5ed5202e-b2ac-47a6-b638-4b0bf140d78e")]
+internal partial interface IUIAutomationSelectionPattern
+{
+    // 1
+    [PreserveSig] int GetCurrentSelection(out nint elements);
+}
+
+/// <summary>IUIAutomationSelectionItemPattern. Selecting a row, which also scrolls it into view.</summary>
+[GeneratedComInterface]
+[Guid("a8efa66a-0fda-421a-9194-38021f3578ea")]
+internal partial interface IUIAutomationSelectionItemPattern
+{
+    // 1
+    [PreserveSig] int Select();
+}
+
+/// <summary>IUIAutomationScrollPattern. Moving a list by a line, and putting it back.</summary>
+[GeneratedComInterface]
+[Guid("88f4d42a-e881-459d-a77c-73bbbb7e02dc")]
+internal partial interface IUIAutomationScrollPattern
+{
+    // 1..4
+    [PreserveSig] int Scroll(int horizontalAmount, int verticalAmount);
+    [PreserveSig] int SetScrollPercent(double horizontalPercent, double verticalPercent);
+    [PreserveSig] int GetCurrentHorizontalScrollPercent(out double percent);
+    [PreserveSig] int GetCurrentVerticalScrollPercent(out double percent);
 }
 
 /// <summary>
@@ -169,6 +237,7 @@ internal struct UiVariant
 
     public const ushort TypeBstr = 8;
     public const ushort TypeInt32 = 3;
+    public const ushort TypeInt32Array = 0x2003;
     public const ushort TypeDoubleArray = 0x2005;
 
     /// <summary>The integer inside, or zero when the variant holds something else.</summary>
@@ -216,8 +285,55 @@ internal struct UiVariant
         }
     }
 
+    /// <summary>
+    /// UIA_RuntimeIdPropertyId is a SAFEARRAY of integers; answered joined with dots, the array
+    /// freed, or null for anything else.
+    /// </summary>
+    public string? TakeRuntimeId()
+    {
+        if (Type != TypeInt32Array || Value == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (SafeArrayGetLBound(Value, 1, out var lower) < 0 || SafeArrayGetUBound(Value, 1, out var upper) < 0)
+            {
+                return null;
+            }
+
+            var parts = new string[Math.Max(0, upper - lower + 1)];
+            for (var index = lower; index <= upper; index++)
+            {
+                if (SafeArrayGetElement(Value, in index, out int part) < 0)
+                {
+                    return null;
+                }
+
+                parts[index - lower] = part.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return string.Join('.', parts);
+        }
+        finally
+        {
+            _ = SafeArrayDestroy(Value);
+            Value = 0;
+        }
+    }
+
     [DllImport("oleaut32.dll")]
     private static extern int SafeArrayGetElement(nint array, in int index, out double value);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SafeArrayGetElement(nint array, in int index, out int value);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SafeArrayGetLBound(nint array, uint dimension, out int bound);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SafeArrayGetUBound(nint array, uint dimension, out int bound);
 
     [DllImport("oleaut32.dll")]
     private static extern int SafeArrayDestroy(nint array);
@@ -241,13 +357,42 @@ internal static class UiAutomationIds
     /// <summary>TreeScope_Descendants.</summary>
     public const int Descendants = 4;
 
+    /// <summary>TreeScope_Subtree: the element, its children and all their descendants.</summary>
+    public const int Subtree = 7;
+
+    /// <summary>TreeScope_Element: the element alone.</summary>
+    public const int ElementScope = 1;
+
+    /// <summary>AutomationElementMode_None: cached values only, no live element behind them.</summary>
+    public const int ElementModeNone = 0;
+    public const int ElementModeFull = 1;
+
+    /// <summary>The selection, selection item and scroll patterns, and their interfaces.</summary>
+    public const int SelectionPatternId = 10001;
+    public const int ScrollPatternId = 10004;
+    public const int SelectionItemPatternId = 10010;
+    public static readonly Guid SelectionPattern = new("5ed5202e-b2ac-47a6-b638-4b0bf140d78e");
+    public static readonly Guid SelectionItemPattern = new("a8efa66a-0fda-421a-9194-38021f3578ea");
+    public static readonly Guid ScrollPattern = new("88f4d42a-e881-459d-a77c-73bbbb7e02dc");
+
+    /// <summary>ScrollAmount_NoAmount and ScrollAmount_SmallIncrement; UIA_ScrollPatternNoScroll.</summary>
+    public const int ScrollNoAmount = 2;
+    public const int ScrollSmallIncrement = 4;
+    public const double NoScroll = -1;
+
     /// <summary>The whole range, however long it is.</summary>
     public const int WholeRange = -1;
 
     /// <summary>UIA_NamePropertyId.</summary>
     public const int NameProperty = 30005;
+    public const int RuntimeIdProperty = 30000;
     public const int BoundingRectangleProperty = 30001;
     public const int NativeWindowHandleProperty = 30020;
+
+    /// <summary>UIA_ExpandCollapsePatternId, its state property, and the state's Expanded value.</summary>
+    public const int ExpandCollapsePatternId = 10005;
+    public const int ExpandCollapseStateProperty = 30070;
+    public const int Expanded = 1;
 
     /// <summary>UIA_ControlTypePropertyId.</summary>
     public const int ControlTypeProperty = 30003;
