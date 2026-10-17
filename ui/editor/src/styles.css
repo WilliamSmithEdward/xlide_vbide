@@ -73,19 +73,20 @@ body {
     --vscode-menu-separatorBackground: #d9d9de;
 
     --vscode-editorError-foreground: #b3121a;
-    /* The dark theme's amber is 1.9:1 on white; this one is 5.3:1. */
-    --vscode-editorWarning-foreground: #8a5a00;
+    /* The dark theme's amber is 1.9:1 on white. The status colours below hold 5:1 or better even
+       on a selected row's blue, which is where a chip or a glyph is often read. */
+    --vscode-editorWarning-foreground: #7a4f00;
     --vscode-problemsErrorIcon-foreground: #b3121a;
-    --vscode-problemsWarningIcon-foreground: #8a5a00;
+    --vscode-problemsWarningIcon-foreground: #7a4f00;
     --vscode-problemsInfoIcon-foreground: #005fb8;
-    --vscode-testing-iconPassed: #2d7d32;
+    --vscode-testing-iconPassed: #1f6b26;
     --vscode-testing-iconFailed: #b3121a;
     --vscode-testing-message-error-decorationForeground: #b3121a;
-    --vscode-gitDecoration-addedResourceForeground: #2d7d32;
-    --vscode-gitDecoration-modifiedResourceForeground: #8a5a00;
+    --vscode-gitDecoration-addedResourceForeground: #1f6b26;
+    --vscode-gitDecoration-modifiedResourceForeground: #7a4f00;
     --vscode-gitDecoration-deletedResourceForeground: #b3121a;
     --vscode-charts-blue: #005fb8;
-    --vscode-charts-green: #2d7d32;
+    --vscode-charts-green: #1f6b26;
     --vscode-charts-purple: #6b2fa0;
 
     --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.4);
