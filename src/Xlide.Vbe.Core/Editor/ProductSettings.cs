@@ -151,6 +151,14 @@ public sealed record ProductSettings
     public int DesignerGridSize { get; set; } = 6;
 
     /// <summary>
+    /// The editor's colours: "system" follows Windows' app mode (Settings, Personalization,
+    /// Colors), "light" and "dark" hold one whatever Windows says (#114). The title bar follows
+    /// the same choice as the page.
+    /// </summary>
+    [JsonPropertyName("appearance.theme")]
+    public string Theme { get; set; } = "system";
+
+    /// <summary>
     /// Which code decides what an import or export will do: "xlide" or "builtIn".
     ///
     /// "xlide" runs the companion editor's own planner inside the engine, so both products make
@@ -225,6 +233,12 @@ public sealed record ProductSettings
             "objects" => "objects",
             "off" => "off",
             _ => "grid",
+        },
+        Theme = Theme?.ToLowerInvariant() switch
+        {
+            "light" => "light",
+            "dark" => "dark",
+            _ => "system",
         },
         SyncEngine = string.Equals(SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase)
             ? "builtIn"

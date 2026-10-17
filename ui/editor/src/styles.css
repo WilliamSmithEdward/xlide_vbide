@@ -16,6 +16,84 @@ body {
   background: var(--vscode-editor-background, #1e1e1e);
 }
 
+/* THE LIGHT SURFACE (#114). Every colour below is read through a theme variable whose fallback is
+   the dark value, so dark needs nothing defined and light is these definitions alone, under the
+   root's data-theme="light" - which theme.ts sets from the Theme setting, and under "system" from
+   Windows' app mode. Nothing here can reach the dark rendering. Text pairs hold 4.5:1 on the
+   ground they sit on and controls' edges 3:1 (WCAG 2.x AA); the ratio is noted where it is close. */
+:root[data-theme="light"] {
+    color-scheme: light;
+
+    --vscode-foreground: #1b1b1f;
+    --vscode-editor-foreground: #1b1b1f;
+    --vscode-editor-background: #ffffff;
+    --vscode-descriptionForeground: #5c5c66;
+    --vscode-errorForeground: #b3121a;
+    --vscode-textLink-foreground: #005fb8;
+    --vscode-focusBorder: #005fb8;
+    --vscode-editorLineNumber-foreground: #6b6b75;
+
+    --vscode-sideBar-background: #f7f7f8;
+    --vscode-panel-background: #f7f7f8;
+    --vscode-panel-border: #d4d4d9;
+    --vscode-editorGroup-border: #d4d4d9;
+    --vscode-editorGroupHeader-tabsBackground: #f0f0f2;
+
+    --vscode-toolbar-hoverBackground: rgba(0, 0, 0, 0.08);
+    --vscode-toolbar-activeBackground: rgba(0, 0, 0, 0.14);
+    --vscode-list-hoverBackground: #e8e8ec;
+    --vscode-list-activeSelectionBackground: #cce4f7;
+    --vscode-list-activeSelectionForeground: #1b1b1f;
+
+    --vscode-input-background: #ffffff;
+    --vscode-input-foreground: #1b1b1f;
+    /* 3.5:1 on white: an input's edge is the control. */
+    --vscode-input-border: #858590;
+    --vscode-inputOption-activeBackground: rgba(0, 95, 184, 0.12);
+    --vscode-inputOption-activeBorder: #005fb8;
+    --vscode-inputValidation-errorBorder: #b3121a;
+    --vscode-dropdown-background: #ffffff;
+    --vscode-dropdown-foreground: #1b1b1f;
+    --vscode-dropdown-border: #858590;
+
+    --vscode-button-background: #005fb8;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #0258a8;
+    --vscode-button-border: rgba(0, 0, 0, 0.1);
+    --vscode-button-secondaryBackground: #e4e4e9;
+    --vscode-button-secondaryForeground: #1b1b1f;
+    --vscode-button-secondaryHoverBackground: #d4d4da;
+
+    --vscode-editorWidget-background: #f5f5f7;
+    --vscode-editorWidget-border: #c8c8cf;
+
+    --vscode-menu-background: #ffffff;
+    --vscode-menu-foreground: #1b1b1f;
+    --vscode-menu-border: #858c96;
+    --vscode-menu-separatorBackground: #d9d9de;
+
+    --vscode-editorError-foreground: #b3121a;
+    /* The dark theme's amber is 1.9:1 on white. The status colours below hold 5:1 or better even
+       on a selected row's blue, which is where a chip or a glyph is often read. */
+    --vscode-editorWarning-foreground: #7a4f00;
+    --vscode-problemsErrorIcon-foreground: #b3121a;
+    --vscode-problemsWarningIcon-foreground: #7a4f00;
+    --vscode-problemsInfoIcon-foreground: #005fb8;
+    --vscode-testing-iconPassed: #1f6b26;
+    --vscode-testing-iconFailed: #b3121a;
+    --vscode-testing-message-error-decorationForeground: #b3121a;
+    --vscode-gitDecoration-addedResourceForeground: #1f6b26;
+    --vscode-gitDecoration-modifiedResourceForeground: #7a4f00;
+    --vscode-gitDecoration-deletedResourceForeground: #b3121a;
+    --vscode-charts-blue: #005fb8;
+    --vscode-charts-green: #1f6b26;
+    --vscode-charts-purple: #6b2fa0;
+
+    --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.4);
+    --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.6);
+    --vscode-scrollbarSlider-activeBackground: rgba(80, 80, 80, 0.7);
+}
+
 /* Scrollbars in the shell's own panels, drawn to the theme. The editor draws its own and is not
    affected; everything else was showing the browser's stock light bars. */
 
@@ -1485,13 +1563,14 @@ body.live-resize .minimap {
   --vscode-list-hoverForeground: #ffffff;
 }
 
-@media (prefers-color-scheme: light) {
-  .menu-dropdown {
+/* Keyed on the document's theme rather than the system's, so a menu matches the editor it opens
+   over when the Theme setting holds one that Windows does not (#114). */
+:root[data-theme="light"] .menu-dropdown {
     --vscode-menu-selectionBackground: #cce8ff;
     --vscode-menu-selectionForeground: #1b1b1f;
-  }
+}
 
-  .shadow-root-host {
+:root[data-theme="light"] .shadow-root-host {
     --vscode-menu-background: #ffffff;
     --vscode-menu-foreground: #1b1b1f;
     --vscode-menu-border: #858c96;
@@ -1501,7 +1580,6 @@ body.live-resize .minimap {
     --vscode-menu-separatorBackground: #d9d9de;
     --vscode-list-hoverBackground: #cce8ff;
     --vscode-list-hoverForeground: #1b1b1f;
-  }
 }
 
 .menu-item {
@@ -7399,4 +7477,82 @@ body.objbrowser-page #objbrowser-card {
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+/* DIMMED TEXT, ON THE LIGHT SURFACE (#114). These rules de-emphasise text with opacity, which
+   holds 4.5:1 against the dark ground and falls to 3.6:1 on the light greys and the selected-row
+   blue. Seventy percent holds 5.5:1 or better on every light ground. :where() gives the theme test
+   no weight, so each rule keeps exactly its own: a hovered, active or selected state that sets
+   opacity still wins, and so does a disabled one, which these selectors leave out (WCAG exempts
+   it). Last in the file so equal weight falls to this side. */
+:where(:root[data-theme="light"]) #brand-name,
+:where(:root[data-theme="light"]) #brand-version,
+:where(:root[data-theme="light"]) #changes-full-toggle[aria-pressed="false"],
+:where(:root[data-theme="light"]) #empty-view-message,
+:where(:root[data-theme="light"]) #help-version,
+:where(:root[data-theme="light"]) #immediate-prompt,
+:where(:root[data-theme="light"]) #objbrowser-detail-context,
+:where(:root[data-theme="light"]) #tests-actions .tests-filter[aria-pressed="false"],
+:where(:root[data-theme="light"]) #tests-ran,
+:where(:root[data-theme="light"]) .agent-lit-off,
+:where(:root[data-theme="light"]) .agent-paste-shut #agent-text,
+:where(:root[data-theme="light"]) .bookmark-row .bookmark-blank,
+:where(:root[data-theme="light"]) .changes-gone,
+:where(:root[data-theme="light"]) .changes-kind,
+:where(:root[data-theme="light"]) .changes-more,
+:where(:root[data-theme="light"]) .changes-number,
+:where(:root[data-theme="light"]) .changes-when,
+:where(:root[data-theme="light"]) .colour-system-css,
+:where(:root[data-theme="light"]) .designer-snap,
+:where(:root[data-theme="light"]) .designer-taborder,
+:where(:root[data-theme="light"]) .dock-close,
+:where(:root[data-theme="light"]) .help-facts dt,
+:where(:root[data-theme="light"]) .help-keys dt,
+:where(:root[data-theme="light"]) .help-kind,
+:where(:root[data-theme="light"]) .immediate-line.echo,
+:where(:root[data-theme="light"]) .locals-empty,
+:where(:root[data-theme="light"]) .menu-empty,
+:where(:root[data-theme="light"]) .menu-shortcut,
+:where(:root[data-theme="light"]) .objbrowser-context,
+:where(:root[data-theme="light"]) .objbrowser-empty,
+:where(:root[data-theme="light"]) .panel-tab,
+:where(:root[data-theme="light"]) .problems-filter,
+:where(:root[data-theme="light"]) .prop-empty,
+:where(:root[data-theme="light"]) .prop-object-kind,
+:where(:root[data-theme="light"]) .prop-object-none,
+:where(:root[data-theme="light"]) .references-line,
+:where(:root[data-theme="light"]) .row .where,
+:where(:root[data-theme="light"]) .scm-author,
+:where(:root[data-theme="light"]) .scm-section,
+:where(:root[data-theme="light"]) .scm-short,
+:where(:root[data-theme="light"]) .scm-state-detail,
+:where(:root[data-theme="light"]) .scm-when,
+:where(:root[data-theme="light"]) .search-line,
+:where(:root[data-theme="light"]) .search-note,
+:where(:root[data-theme="light"]) .settings-more,
+:where(:root[data-theme="light"]) .sponsor-away,
+:where(:root[data-theme="light"]) .sponsor-detail,
+:where(:root[data-theme="light"]) .sponsor-thanks,
+:where(:root[data-theme="light"]) .sync-chip[data-tone="muted"],
+:where(:root[data-theme="light"]) .sync-empty,
+:where(:root[data-theme="light"]) .sync-gap,
+:where(:root[data-theme="light"]) .sync-gutter,
+:where(:root[data-theme="light"]) .sync-item-detail,
+:where(:root[data-theme="light"]) .sync-row-hint,
+:where(:root[data-theme="light"]) .taborder-kind,
+:where(:root[data-theme="light"]) .taborder-row.passed-over .taborder-kind,
+:where(:root[data-theme="light"]) .taborder-row.passed-over .taborder-name,
+:where(:root[data-theme="light"]) .tag-select-count,
+:where(:root[data-theme="light"]) .tests-file,
+:where(:root[data-theme="light"]) .tests-meta,
+:where(:root[data-theme="light"]) .tests-none .tests-glyph,
+:where(:root[data-theme="light"]) .tests-skipped .tests-glyph,
+:where(:root[data-theme="light"]) .tests-time,
+:where(:root[data-theme="light"]) .tree-folder .tree-kind,
+:where(:root[data-theme="light"]) .tree-folder .tree-twisty,
+:where(:root[data-theme="light"]) .tree-item .tree-kind,
+:where(:root[data-theme="light"]) .tree-item .tree-twisty,
+:where(:root[data-theme="light"]) span.prop-value.readonly
+ {
+  opacity: 0.7;
 }

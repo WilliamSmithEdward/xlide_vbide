@@ -1200,7 +1200,9 @@ public sealed record DebugSettingsReply(
     /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
     [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true,
     /// <summary>How an unfolded module lists its members: "code", "name" or "kind".</summary>
-    [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code");
+    [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code",
+    /// <summary>The editor's colours: "system", "light" or "dark".</summary>
+    [property: JsonPropertyName("theme")] string Theme = "system");
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

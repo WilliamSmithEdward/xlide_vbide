@@ -1530,6 +1530,7 @@ internal sealed partial class AddInSession : IDisposable
         _settings = LoadSettings();
         _editorSurface.SettingsChangeRequested = OnSettingsChanged;
         _editorSurface.UiStateChangeRequested = SaveUiState;
+        _editorSurface.ThemeShown = OnPageThemeShown;
         _editorSurface.Ready = () =>
         {
             _framePreferences?.Restore(host);
@@ -1610,7 +1611,7 @@ internal sealed partial class AddInSession : IDisposable
         // native faults - GhostReaderThread carries the story.
         _ghostReaders = GhostReaderThread.Start(_localsPalette, _watchPalette);
 
-        DarkenTitleBar(host);
+        DressTitleBar(host, FramesLight());
 
         return true;
     }
@@ -3993,7 +3994,8 @@ internal sealed partial class AddInSession : IDisposable
             GoTo(module, line, 1, project);
         };
 
-        DarkenTitleBar(palette.Handle);
+        DressTitleBar(palette.Handle, FramesLight());
+        palette.ShowTheme(FramesLight());
         _browserPalette = palette;
     }
 
@@ -11991,8 +11993,66 @@ internal sealed partial class AddInSession : IDisposable
     private static readonly int CaptionColour = 0x001E1E1E;
     private static readonly int CaptionTextColour = 0x00D4D4D4;
 
+    // The light surface's (#114): its white ground, its text, and its pane border.
+    private static readonly int LightBorderColour = 0x00D9D4D4;
+    private static readonly int LightCaptionColour = 0x00FFFFFF;
+    private static readonly int LightCaptionTextColour = 0x001F1B1B;
+
+    /// <summary>The page's last word on which theme it is showing; null until it has said.</summary>
+    private bool? _pageShowsLight;
+
     /// <summary>
-    /// Asks the system to draw the editor's title bar dark.
+    /// Whether the frames should be light: what the page last reported, or before it has, what the
+    /// setting says - with "system" read from Windows' app mode, as the page reads it.
+    /// </summary>
+    private bool FramesLight() => _pageShowsLight ?? _settings.Theme switch
+    {
+        "light" => true,
+        "dark" => false,
+        _ => WindowsAppsUseLightTheme(),
+    };
+
+    private static bool WindowsAppsUseLightTheme()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("AppsUseLightTheme") is int value && value != 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"window: Windows' app mode could not be read ({ex.GetType().Name}); dark");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The page switched theme - the setting changed, or Windows did under "system" - so every
+    /// frame the add-in dresses follows it.
+    /// </summary>
+    private void OnPageThemeShown(bool light)
+    {
+        if (_pageShowsLight == light)
+        {
+            return;
+        }
+
+        _pageShowsLight = light;
+        if (_frame != 0)
+        {
+            DressTitleBar(_frame, light);
+        }
+
+        if (_browserPalette is not null)
+        {
+            DressTitleBar(_browserPalette.Handle, light);
+            _browserPalette.ShowTheme(light);
+        }
+    }
+
+    /// <summary>
+    /// Asks the system to draw the editor's title bar in the surface's theme, dark or light.
     ///
     /// The title bar is drawn by the desktop compositor, not by the editor, so nothing the editor
     /// or this add-in paints can reach it. The compositor will draw it dark on request, and that
@@ -12001,8 +12061,14 @@ internal sealed partial class AddInSession : IDisposable
     /// The attribute was renumbered once, before it was documented. Both numbers are tried because
     /// which one works depends on the build of Windows rather than on anything observable here.
     /// </summary>
-    private static void DarkenTitleBar(nint frame)
+    private static void DressTitleBar(nint frame, bool light)
     {
+        if (light)
+        {
+            DressLightTitleBar(frame);
+            return;
+        }
+
         var dark = 1;
 
         if (Win32.DwmSetWindowAttribute(frame, Win32.UseDarkTitleBar, in dark, sizeof(int)) < 0)
@@ -12029,6 +12095,36 @@ internal sealed partial class AddInSession : IDisposable
             Win32.SwpNoMove | Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate | Win32.SwpFrameChanged);
 
         Log.Info("window: asked for a dark title bar");
+    }
+
+    /// <summary>
+    /// The light frame: dark mode off, and the light surface's own colours, given explicitly for
+    /// the reason the dark ones are - so the frame is the surface's rather than whatever accent
+    /// colour Windows would choose for a title bar.
+    /// </summary>
+    private static void DressLightTitleBar(nint frame)
+    {
+        var dark = 0;
+
+        if (Win32.DwmSetWindowAttribute(frame, Win32.UseDarkTitleBar, in dark, sizeof(int)) < 0)
+        {
+            Win32.DwmSetWindowAttribute(frame, Win32.UseDarkTitleBarLegacy, in dark, sizeof(int));
+        }
+
+        Win32.DwmSetWindowAttribute(frame, Win32.BorderColor, in LightBorderColour, sizeof(int));
+        Win32.DwmSetWindowAttribute(frame, Win32.CaptionColor, in LightCaptionColour, sizeof(int));
+        Win32.DwmSetWindowAttribute(frame, Win32.CaptionTextColor, in LightCaptionTextColour, sizeof(int));
+
+        Win32.SetWindowPos(
+            frame,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Win32.SwpNoMove | Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate | Win32.SwpFrameChanged);
+
+        Log.Info("window: asked for a light title bar");
     }
 
     /// <summary>

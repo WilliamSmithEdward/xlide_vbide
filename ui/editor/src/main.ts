@@ -2482,7 +2482,15 @@ function boot(): void {
     { keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyI, command: "editor.action.triggerParameterHints" },
   ]);
 
-  watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
+  // The theme follows the Theme setting, and under "system" Windows' app mode as it changes
+  // (#114). Applied once now, from the settings the page holds before the host's arrive.
+  let settingsArrived = false;
+  bridge.applyTheme(currentSettings().theme, { report: false });
+  onSettingsApplied((next) => {
+    settingsArrived = true;
+    bridge.applyTheme(next.theme);
+  });
+  watchPreferredTheme(() => bridge.applyTheme(currentSettings().theme, { report: settingsArrived }));
 
   if (!transport) {
     console.log("[xlide demo] window.chrome.webview absent, running the loopback demo");

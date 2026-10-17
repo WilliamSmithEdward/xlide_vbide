@@ -16,6 +16,7 @@
 
 import { webView2Transport } from "./bridge.js";
 import type { HostTransport, ObLibrary, ObMember, ObType } from "./bridge.js";
+import { showTheme, THEME_DARK, THEME_LIGHT } from "./theme.js";
 
 const TYPE_ICONS: Record<string, string> = {
   class: "symbol-class",
@@ -57,6 +58,11 @@ class PaletteHost {
 
   constructor(private readonly transport: HostTransport) {
     transport.subscribe((message) => {
+      // The editor's theme, which the host passes on: this page never sees the settings (#114).
+      if (message.type === "setTheme") {
+        showTheme(message.light ? THEME_LIGHT : THEME_DARK);
+        return;
+      }
       if (message.type === "obLibrariesResult" || message.type === "obTypesResult"
         || message.type === "obMembersResult") {
         const waiter = this.pending.get(message.id);

@@ -40,6 +40,8 @@ native code, so Excel never loads a .NET runtime on its account.
 
 - Monaco editing over every code pane, with VBA syntax highlighting, folding, multi-cursor, and
   bookmarks that stay with the module.
+- Light and dark themes for the whole editor, title bar included. It follows Windows' app mode by
+  default, or holds one from Settings.
 - Diagnostics as you type, with severity filters and a Problems panel that navigates to the line.
 - Completion, hover, and signature help from the analyzer, plus typing that follows VBA's own
   conventions: auto-casing, block closers, smart Enter and Tab, and auto-indent.
