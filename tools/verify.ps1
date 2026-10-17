@@ -955,6 +955,10 @@ if ($Live) {
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
+                                     # locals-hidden-rows expands the objects whose members the
+                                     # Locals window's accessibility tree loses the rows after,
+                                     # and holds every row and depth to what the window paints.
+                                     'locals-hidden-rows.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
                                      'pane-scope.mjs',

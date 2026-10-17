@@ -132,11 +132,16 @@ internal sealed class GhostReaderThread : IDisposable
                     && previous.Rows[toggle.Index] is { } row
                     && row.Expression == toggle.Expression && row.Depth == toggle.Depth)
                 {
+                    var toggleStarted = Environment.TickCount64;
                     locals?.Toggle(toggle.Index, toggle.Expression, toggle.Depth);
+                    Log.Verbose($"locals: toggle '{toggle.Expression}' row {toggle.Index} posted in {Environment.TickCount64 - toggleStarted}ms");
                 }
 
+                var readStarted = Environment.TickCount64;
                 if (locals?.Read() is { } snapshot)
                 {
+                    var elapsed = Environment.TickCount64 - readStarted;
+                    if (elapsed > 100) Log.Verbose($"locals: read {snapshot.Rows.Count} row(s) in {elapsed}ms");
                     Volatile.Write(ref _locals, snapshot);
                 }
 

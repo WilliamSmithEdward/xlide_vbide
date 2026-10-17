@@ -1080,6 +1080,7 @@ text does not agree with.
 
 ```bash
 node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at every stage
+node tools\harness\locals-hidden-rows.mjs  # Locals rows below an expanded object, and their depths
 node tools\harness\format-positions.mjs    # where a squiggle lands after Format Module
 node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
 node tools\harness\analysis-freshness.mjs  # findings stay true while the work behind them is skipped

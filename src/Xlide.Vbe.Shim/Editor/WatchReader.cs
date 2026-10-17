@@ -49,9 +49,9 @@ internal sealed class WatchReader : GhostWindowReader
 
         var walked = TryWalk(
             type => type == UiAutomationIds.ListItemControl,
-            (_, text) =>
+            element =>
             {
-                if (ParseRow(text) is { } row)
+                if (ParseRow(element.Text) is { } row)
                 {
                     (rows ??= []).Add(row);
                 }

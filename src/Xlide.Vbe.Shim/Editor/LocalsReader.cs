@@ -1,4 +1,5 @@
 using Xlide.Vbe.Shim.Com;
+using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Interop;
 
 namespace Xlide.Vbe.Shim.Editor;
@@ -60,37 +61,144 @@ internal sealed class LocalsReader : GhostWindowReader
     /// </summary>
     public LocalsSnapshot? Read()
     {
-        string? context = null;
-        List<LocalRow>? rows = null;
-        HashSet<string> seen = new(StringComparer.Ordinal);
+        if (ReadAll(tailDue: TailDue) is not { } reading)
+        {
+            return null;
+        }
 
-        using var walker = RawWalker();
+        List<LocalRow> rows;
+        using (reading)
+        {
+            rows = reading.Rows.Select(row => row.Row).ToList();
+            if (reading.Truncated && reading.TailRead)
+            {
+                _tail = rows.Skip(reading.Reachable).ToList();
+                _tailFor = reading.Structure;
+                _tailAt = Environment.TickCount64;
+            }
+            else if (reading.Truncated)
+            {
+                rows.AddRange(_tail ?? []);
+            }
+            else
+            {
+                _tail = null;
+                _tailFor = null;
+            }
+        }
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var expanded = i + 1 < rows.Count && rows[i + 1].Depth > row.Depth;
+            rows[i] = row with { Expanded = expanded, Expandable = expanded || row.Value.Length == 0 };
+        }
+
+        return new LocalsSnapshot(reading.Context, rows);
+    }
+
+    /// <summary>
+    /// The rows recovered below an expanded block at the last recovery, and the structure of
+    /// the reachable rows they were recovered against. A step that changes only a value in the
+    /// tail leaves that structure as it was, so the tail is also read again once a second.
+    /// </summary>
+    private List<LocalRow>? _tail;
+    private string? _tailFor;
+    private long _tailAt;
+    private const int TailRefreshMs = 1000;
+
+    private Func<string, bool> TailDue => structure =>
+        _tail is null || structure != _tailFor || Environment.TickCount64 - _tailAt > TailRefreshMs;
+
+    /// <summary>More rows below an expanded block than any procedure declares.</summary>
+    private const int MaxTailRows = 256;
+
+    private ComHandle<IUIAutomationTreeWalker>? _walker;
+
+    /// <summary>A row as a walk found it: parsed, its identity and expand state, its live element.</summary>
+    private sealed record WalkedRow(LocalRow Row, string Text, string? Identity, int State, ComHandle<IUIAutomationElement>? Element);
+
+    /// <summary>One reading's rows, context and list element; owns every live element it holds.</summary>
+    private sealed class RowsReading : IDisposable
+    {
+        public string? Context;
+        public List<WalkedRow> Rows = [];
+        public ComHandle<IUIAutomationElement>? List;
+        public nint ListWindow;
+
+        /// <summary>The rows the list itself reaches; any after them were recovered by selection.</summary>
+        public int Reachable;
+
+        /// <summary>The reachable rows end inside an expanded block, so rows may be missing after them.</summary>
+        public bool Truncated;
+
+        /// <summary>Whether this reading recovered the rows below the block itself.</summary>
+        public bool TailRead;
+
+        public string Structure = string.Empty;
+
+        /// <summary>The identities of the rows read so far, so a recovery stops where it meets one.</summary>
+        public HashSet<string> Seen = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The rows that enclose the last row read, outermost first, each with its place among
+        /// its parent's rows; and how many rows each open level has had so far.
+        /// </summary>
+        public List<(int Row, int Place)> Path = [];
+        public List<int> Counts = [];
+
+        public void Dispose()
+        {
+            foreach (var row in Rows) row.Element?.Dispose();
+            Rows.Clear();
+            List?.Dispose();
+            List = null;
+        }
+    }
+
+    /// <summary>
+    /// Every row in display order with its depth: the rows the list reaches, and when they end
+    /// inside an expanded block and `tailDue` says so, the rows recovered below it.
+    ///
+    /// The provider's own child lists cannot give the nesting (mapped 2026-10-17): an expanded
+    /// row lists its members, or lists nothing at all once it has been collapsed and expanded
+    /// again, and a collapsed row may list the row after it. Its parent links name the wrong
+    /// row too, below an expanded block. What holds is the list's chain, which runs through
+    /// every row in display order and stops at the first fall in depth. Inside a chain, then,
+    /// a row is one deeper than an expanded row above it and level with any other.
+    /// </summary>
+    private RowsReading? ReadAll(Func<string, bool> tailDue)
+    {
+        var reading = new RowsReading();
         var walked = TryWalk(
             type => type is UiAutomationIds.ListItemControl
+                or UiAutomationIds.ListControl
                 or UiAutomationIds.EditControl
                 or UiAutomationIds.PaneControl,
-            (type, text, element) =>
+            element =>
             {
-                if (type == UiAutomationIds.ListItemControl)
+                var text = element.Text;
+                if (element.ControlType == UiAutomationIds.ListItemControl)
                 {
                     if (ParseRow(text) is { } row)
                     {
-                        var depth = RowDepth(element, walker?.Target);
-                        using var item = ComHandle<IUIAutomationElement>.Borrow(element);
-                        var bounds = item is null ? null : ReadBounds(item.Target);
-                        // VBE's provider can return the same child twice at the same rectangle
-                        // after an object is expanded. It is one visible row, not two variables.
-                        if (bounds is null || seen.Add(RowKey(text, depth, bounds.Value)))
-                        {
-                            (rows ??= []).Add(row with { Depth = depth });
-                        }
+                        reading.Rows.Add(new WalkedRow(row, text, element.Identity, element.State,
+                            ComHandle<IUIAutomationElement>.Borrow(element.Element)));
                     }
                 }
-                else if (type == UiAutomationIds.EditControl && text.Length > 0)
+                else if (element.ControlType == UiAutomationIds.ListControl)
                 {
-                    context = text;
+                    if (reading.List is null)
+                    {
+                        reading.List = ComHandle<IUIAutomationElement>.Borrow(element.Element);
+                        reading.ListWindow = element.Window;
+                    }
                 }
-                else if (context is null && IsContextText(text))
+                else if (element.ControlType == UiAutomationIds.EditControl && text.Length > 0)
+                {
+                    reading.Context = text;
+                }
+                else if (reading.Context is null && IsContextText(text))
                 {
                     // The context box reaches the accessibility tree as a bare pane, not an
                     // edit (measured 2026-08-05: pane named "VBAProject.BreakProbe.BreakHere"
@@ -98,117 +206,300 @@ internal sealed class LocalsReader : GhostWindowReader
                     // never outranks a real edit. An empty edit does not count as a context:
                     // the panel hides its strip on null, and an empty non-null string would
                     // show a blank strip instead.
-                    context = text;
+                    reading.Context = text;
                 }
-            });
+            },
+            live: true,
+            descendRows: false);
 
         if (!walked)
         {
+            reading.Dispose();
             return null;
         }
 
-        if (rows is not null)
+        try
         {
-            for (var i = 0; i < rows.Count; i++)
+            reading.Structure = string.Join('\n', reading.Rows.Select(row => $"{row.Identity} {row.State} {row.Row.Expression}"));
+            for (var i = 0; i < reading.Rows.Count; i++)
             {
-                var row = rows[i];
-                var expanded = i + 1 < rows.Count && rows[i + 1].Depth > row.Depth;
-                rows[i] = row with { Expanded = expanded, Expandable = expanded || row.Value.Length == 0 };
+                Place(reading, i, i == 0 ? 0 : ChainDepth(reading.Rows[i - 1]));
+            }
+
+            reading.Reachable = reading.Rows.Count;
+            reading.Truncated = reading.Rows.Count > 0 && reading.Rows[^1].Row.Depth > 0;
+            if (reading.Truncated && tailDue(reading.Structure))
+            {
+                RecoverTail(reading);
+                reading.TailRead = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"locals: the rows' nesting could not be read: {ex.Message}");
+        }
+
+        return reading;
+    }
+
+    /// <summary>The depth of the row after this one in the same chain.</summary>
+    private static int ChainDepth(WalkedRow previous) =>
+        previous.Row.Depth + (previous.State == UiAutomationIds.Expanded ? 1 : 0);
+
+    /// <summary>
+    /// Sets a row's depth and moves the reading's path to it: the rows enclosing it, each with
+    /// its place among its parent's rows.
+    /// </summary>
+    private static void Place(RowsReading reading, int index, int depth)
+    {
+        var rows = reading.Rows;
+        depth = Math.Clamp(depth, 0, reading.Path.Count);
+        rows[index] = rows[index] with { Row = rows[index].Row with { Depth = depth } };
+        if (rows[index].Identity is { } identity) reading.Seen.Add(identity);
+
+        // A row one deeper than the path opens a new block, whose count starts again.
+        var keep = depth < reading.Path.Count ? depth + 1 : depth;
+        if (reading.Path.Count > depth) reading.Path.RemoveRange(depth, reading.Path.Count - depth);
+        if (reading.Counts.Count > keep) reading.Counts.RemoveRange(keep, reading.Counts.Count - keep);
+        while (reading.Counts.Count <= depth) reading.Counts.Add(0);
+        reading.Path.Add((index, reading.Counts[depth]++));
+    }
+
+    /// <summary>
+    /// The depth of a row recovered below an expanded block, the first of its chain.
+    ///
+    /// Its parent link does not name its parent: the provider builds the parent from the
+    /// parent's place among ITS parent's rows and returns whichever row is shown at that place
+    /// (measured 2026-10-17: c's members, below an expanded Workbook, named the row at 4.5 - c
+    /// is the sixth local - which was one of the Workbook's members). That place is enough. The
+    /// parent is one of the rows enclosing the row above, and the one whose place matches is
+    /// it. A parent that is the list itself makes the row top-level.
+    /// </summary>
+    private int RecoveredDepth(RowsReading reading, ComHandle<IUIAutomationElement> element)
+    {
+        if (Walker() is not { } walker
+            || walker.Target.GetParentElementBuildCache(element.Pointer, ElementRequest, out var parentPointer) < 0
+            || parentPointer == 0)
+        {
+            return Math.Max(0, reading.Path.Count - 2);
+        }
+
+        using var parent = ComHandle<IUIAutomationElement>.Own(parentPointer);
+        if (parent is null) return Math.Max(0, reading.Path.Count - 2);
+        var controlType = parent.Target.GetCachedPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) >= 0
+            ? kind.AsInt32() : 0;
+        if (controlType != UiAutomationIds.ListItemControl) return 0;
+
+        var place = parent.Target.GetCachedPropertyValue(UiAutomationIds.RuntimeIdProperty, out var runtimeId) >= 0
+            ? DisplayIndex(runtimeId.TakeRuntimeId()) : null;
+        // A row that can head a block reads Expanded, or - recovered through the selection,
+        // where the provider reports every row as a leaf - is an object, whose value is empty.
+        for (var level = reading.Path.Count - 1; level >= 0 && place is not null; level--)
+        {
+            var (row, at) = reading.Path[level];
+            var candidate = reading.Rows[row];
+            if (at == place && (candidate.State == UiAutomationIds.Expanded || candidate.Row.Value.Length == 0))
+            {
+                return level + 1;
             }
         }
 
-        return new LocalsSnapshot(context, rows is null ? [] : rows);
+        // Unmatched, the likeliest answer: one level up from the row above.
+        return Math.Max(0, reading.Path.Count - 2);
     }
 
-    private ComHandle<IUIAutomationTreeWalker>? RawWalker()
+    /// <summary>The last part of a row's runtime identity: its place on screen, or for a parent link, its place among its parent's rows.</summary>
+    private static int? DisplayIndex(string? identity) =>
+        identity is not null && identity.LastIndexOf('.') is var dot and >= 0
+        && int.TryParse(identity.AsSpan(dot + 1), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var index)
+            ? index : null;
+
+    private ComHandle<IUIAutomationTreeWalker>? Walker()
     {
-        try
+        if (_walker is null && Automation is { } automation
+            && automation.GetRawViewWalker(out var pointer) >= 0 && pointer != 0)
         {
-            return Automation is { } automation && automation.GetRawViewWalker(out var pointer) >= 0 && pointer != 0
-                ? ComHandle<IUIAutomationTreeWalker>.Own(pointer) : null;
+            _walker = ComHandle<IUIAutomationTreeWalker>.Own(pointer);
         }
-        catch
-        {
-            // The flat reading still works when an accessibility provider refuses a walker.
-            return null;
-        }
+
+        return _walker;
     }
 
-    private static int RowDepth(nint element, IUIAutomationTreeWalker? walker)
+    /// <summary>
+    /// The rows the provider loses below an expanded block, found by selecting them.
+    ///
+    /// From the last member of an expanded object nothing links onward, though the native
+    /// list paints every row after it. A selected row is reachable all the same, through the
+    /// list's selection. So the lost row is selected the way a person would select it: the row
+    /// above is selected, which scrolls it into view, the list moves down a line, and a click
+    /// lands on the row below, in its Type column, which edits nothing and holds no expander.
+    /// The selection then names the lost row, and the rows the provider chains after it come
+    /// with it, up to the next fall in depth, where the same step repeats. When a click selects
+    /// nothing new, the list has ended. The ghost is invisible, so the selection and the
+    /// scrolling are seen by nobody; the scroll position is put back.
+    /// </summary>
+    private void RecoverTail(RowsReading reading)
     {
-        if (walker is null) return 0;
-        var depth = 0;
-        var current = ComHandle<IUIAutomationElement>.Borrow(element);
+        if (reading.List is not { } list || reading.ListWindow == 0 || reading.Rows.Count == 0
+            || reading.Rows[^1].Element is not { } last || Walker() is not { } walker)
+        {
+            return;
+        }
+
+        using var selection = Pattern<IUIAutomationSelectionPattern>(list,
+            UiAutomationIds.SelectionPatternId, UiAutomationIds.SelectionPattern);
+        using var scroll = Pattern<IUIAutomationScrollPattern>(list,
+            UiAutomationIds.ScrollPatternId, UiAutomationIds.ScrollPattern);
+        if (selection is null || scroll is null || CurrentBounds(list.Target) is not { } box)
+        {
+            return;
+        }
+
+        var restore = scroll.Target.GetCurrentVerticalScrollPercent(out var percent) >= 0 ? percent : (double?)null;
+        var anchor = ComHandle<IUIAutomationElement>.Borrow(last.Pointer);
+        var recovered = 0;
         try
         {
-            for (var i = 0; i < 16; i++)
+            while (anchor is not null && recovered < MaxTailRows)
             {
-                if (current is null || walker.GetParentElement(current.Pointer, out var parentPointer) < 0 || parentPointer == 0) break;
-                var parent = ComHandle<IUIAutomationElement>.Own(parentPointer);
-                if (parent is null || parent.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0
-                    || kind.AsInt32() != UiAutomationIds.ListItemControl)
+                using (var item = Pattern<IUIAutomationSelectionItemPattern>(anchor,
+                    UiAutomationIds.SelectionItemPatternId, UiAutomationIds.SelectionItemPattern))
                 {
-                    parent?.Dispose();
+                    if (item is null || item.Target.Select() < 0) break;
+                }
+
+                // Select scrolls a row only as far as the edge; one more line makes room below.
+                _ = scroll.Target.Scroll(UiAutomationIds.ScrollNoAmount, UiAutomationIds.ScrollSmallIncrement);
+                if (CurrentBounds(anchor.Target) is not { } row || double.IsInfinity(row.Y)) break;
+
+                var x = (int)(row.X - box.X + row.Width * 0.85);
+                var y = (int)(row.Y - box.Y + row.Height * 1.5);
+                if (x < 0 || y < 0 || x >= box.Width || y >= box.Height) break;
+                var point = (nint)((y << 16) | (x & 0xffff));
+                Win32.PostMessage(reading.ListWindow, 0x0201, 1, point);
+                Win32.PostMessage(reading.ListWindow, 0x0202, 0, point);
+
+                // The question below is answered on the host thread after the click it queued
+                // behind, so the selection it reads is the click's.
+                using var selected = SelectedRow(selection);
+                if (selected is null
+                    || selected.Target.BuildUpdatedCache(ElementRequest, out var currentPointer) < 0 || currentPointer == 0)
+                {
                     break;
                 }
-                depth++;
-                current.Dispose();
-                current = parent;
+
+                var before = reading.Rows.Count;
+                var current = ComHandle<IUIAutomationElement>.Own(currentPointer);
+                while (current is not null && recovered < MaxTailRows)
+                {
+                    // A chain is taken only while it runs to the next row on screen.
+                    var first = reading.Rows.Count == before;
+                    if (Describe(current.Pointer, 0) is not { } found || found.Identity is null
+                        || reading.Seen.Contains(found.Identity) || ParseRow(found.Text) is not { } parsed
+                        || (!first && DisplayIndex(found.Identity) != DisplayIndex(reading.Rows[^1].Identity) + 1))
+                    {
+                        current.Dispose();
+                        break;
+                    }
+
+                    var depth = first ? RecoveredDepth(reading, current) : ChainDepth(reading.Rows[^1]);
+                    reading.Rows.Add(new WalkedRow(parsed, found.Text, found.Identity, found.State, current));
+                    Place(reading, reading.Rows.Count - 1, depth);
+                    recovered++;
+
+                    current = walker.Target.GetNextSiblingElementBuildCache(current.Pointer, ElementRequest, out var nextPointer) >= 0
+                        ? ComHandle<IUIAutomationElement>.Own(nextPointer) : null;
+                }
+
+                if (reading.Rows.Count == before) break;
+                anchor.Dispose();
+                anchor = ComHandle<IUIAutomationElement>.Borrow(reading.Rows[^1].Element!.Pointer);
             }
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"locals: recovering the rows below an expanded object stopped: {ex.Message}");
         }
         finally
         {
-            current?.Dispose();
+            anchor?.Dispose();
+            if (restore is { } back) _ = scroll.Target.SetScrollPercent(UiAutomationIds.NoScroll, back);
         }
-        return depth;
+
+        Log.Verbose($"locals: recovered {recovered} row(s) below an expanded object");
     }
 
-    private static (double X, double Y, double Width, double Height)? ReadBounds(IUIAutomationElement item) =>
-        item.GetCurrentPropertyValue(UiAutomationIds.BoundingRectangleProperty, out var bounds) >= 0
+    private static ComHandle<TPattern>? Pattern<TPattern>(ComHandle<IUIAutomationElement> element, int patternId, in Guid interfaceId)
+        where TPattern : class =>
+        element.Target.GetCurrentPatternAs(patternId, in interfaceId, out var pointer) >= 0 && pointer != 0
+            ? ComHandle<TPattern>.Own(pointer) : null;
+
+    private static (double X, double Y, double Width, double Height)? CurrentBounds(IUIAutomationElement element) =>
+        element.GetCurrentPropertyValue(UiAutomationIds.BoundingRectangleProperty, out var bounds) >= 0
             ? bounds.TakeRectangle() : null;
 
-    private static string RowKey(string text, int depth, (double X, double Y, double Width, double Height) bounds) =>
-        $"{depth}\u001f{bounds.X}\u001f{bounds.Y}\u001f{bounds.Width}\u001f{bounds.Height}\u001f{text}";
+    private static ComHandle<IUIAutomationElement>? SelectedRow(ComHandle<IUIAutomationSelectionPattern> selection)
+    {
+        if (selection.Target.GetCurrentSelection(out var arrayPointer) < 0 || arrayPointer == 0) return null;
+        using var array = ComHandle<IUIAutomationElementArray>.Own(arrayPointer);
+        return array is not null && array.Target.GetLength(out var count) >= 0 && count > 0
+            && array.Target.GetElement(0, out var pointer) >= 0
+            ? ComHandle<IUIAutomationElement>.Own(pointer) : null;
+    }
 
-    /// <summary>Ask VBE's own Locals control to expand/collapse a row at the break.</summary>
+    /// <summary>
+    /// Ask VBE's own Locals control to expand or collapse a row at the break: a click on the
+    /// row's expander, the row first selected into view when the list has it scrolled away.
+    /// The row index counts the rows recovered below an expanded block too.
+    /// </summary>
     public void Toggle(int rowIndex, string expression, int depth)
     {
         if (rowIndex < 0 || rowIndex > 10000) return;
-        var current = -1;
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        using var walker = RawWalker();
-        nint listWindow = 0;
-        (double X, double Y, double Width, double Height)? listRect = null;
-        (double X, double Y, double Width, double Height)? rowRect = null;
-        _ = TryWalk(type => type is UiAutomationIds.ListControl or UiAutomationIds.ListItemControl,
-            (type, text, element) =>
-            {
-                using var item = ComHandle<IUIAutomationElement>.Borrow(element);
-                if (item is null) return;
-                if (type == UiAutomationIds.ListControl)
-                {
-                    if (item.Target.GetCurrentPropertyValue(UiAutomationIds.NativeWindowHandleProperty, out var handle) >= 0)
-                        listWindow = handle.AsInt32();
-                    listRect = ReadBounds(item.Target);
-                }
-                else if (ParseRow(text) is { } row)
-                {
-                    var bounds = ReadBounds(item.Target);
-                    var rowDepth = RowDepth(element, walker?.Target);
-                    if (bounds is not null && !seen.Add(RowKey(text, rowDepth, bounds.Value))) return;
-                    if (++current == rowIndex && rowDepth == depth
-                        && string.Equals(row.Expression, expression, StringComparison.Ordinal))
-                        rowRect = bounds;
-                }
-            });
+        using var reading = ReadAll(tailDue: _ => false);
+        if (reading is null) return;
 
-        if (listWindow == 0 || listRect is null || rowRect is null) return;
-        var x = (int)(rowRect.Value.X - listRect.Value.X) + 6 + Math.Clamp(depth, 0, 10) * 14;
-        var y = (int)(rowRect.Value.Y - listRect.Value.Y + rowRect.Value.Height / 2);
-        if (x < 0 || y < 0 || x >= listRect.Value.Width || y >= listRect.Value.Height) return;
+        // The tail is recovered only when the row asked for lies in it.
+        if (rowIndex >= reading.Rows.Count && reading.Truncated)
+        {
+            RecoverTail(reading);
+        }
+
+        if (rowIndex >= reading.Rows.Count || reading.List is not { } list || reading.ListWindow == 0) return;
+        var target = reading.Rows[rowIndex];
+        if (target.Element is not { } element || target.Row.Depth != depth
+            || !string.Equals(target.Row.Expression, expression, StringComparison.Ordinal)
+            || CurrentBounds(list.Target) is not { } box)
+        {
+            return;
+        }
+
+        var row = CurrentBounds(element.Target);
+        if (row is not { } seen || double.IsInfinity(seen.Y) || seen.Y < box.Y || seen.Y + seen.Height > box.Y + box.Height)
+        {
+            using var item = Pattern<IUIAutomationSelectionItemPattern>(element,
+                UiAutomationIds.SelectionItemPatternId, UiAutomationIds.SelectionItemPattern);
+            _ = item?.Target.Select();
+            row = CurrentBounds(element.Target);
+        }
+
+        if (row is not { } rect || double.IsInfinity(rect.Y)) return;
+        var x = (int)(rect.X - box.X) + 6 + Math.Clamp(depth, 0, 10) * 14;
+        var y = (int)(rect.Y - box.Y + rect.Height / 2);
+        if (x < 0 || y < 0 || x >= box.Width || y >= box.Height) return;
         var point = (nint)((y << 16) | (x & 0xffff));
-        Win32.PostMessage(listWindow, 0x0201, 1, point);
-        Win32.PostMessage(listWindow, 0x0202, 0, point);
+        Win32.PostMessage(reading.ListWindow, 0x0201, 1, point);
+        Win32.PostMessage(reading.ListWindow, 0x0202, 0, point);
+
+        // The rows below an expanded block are read again at once, not a second from now.
+        _tail = null;
+    }
+
+    public override void Dispose()
+    {
+        _walker?.Dispose();
+        _walker = null;
+        base.Dispose();
     }
 
     /// <summary>
