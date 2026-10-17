@@ -93,7 +93,8 @@ check("editor context menu ships opaque, contrasting surfaces in both themes (#5
   assert.match(hosts[0][1], /--vscode-menu-selectionBackground:\s*#094771/i);
   assert.match(hosts[0][1], /--vscode-list-hoverBackground:\s*#094771/i);
   assert.match(hosts[0][1], /--vscode-menu-selectionBorder:\s*#8ac8f5/i);
-  assert.match(css, /@media\s*\(prefers-color-scheme:\s*light\)\s*\{/i);
+  // The light values key on the document's theme, which the Theme setting decides (#114).
+  assert.match(css, /:root\[data-theme=(?:"light"|light)\]\s*\.shadow-root-host\s*\{/i);
   assert.match(hosts[1][1], /--vscode-menu-background:\s*(?:#fff|#ffffff)/i);
   assert.match(hosts[1][1], /--vscode-menu-foreground:\s*#1b1b1f/i);
   assert.match(hosts[1][1], /--vscode-menu-border:\s*#858c96/i);

@@ -201,6 +201,12 @@ internal sealed unsafe class BrowserPalette : IDisposable
         // is no flash to hide.
         _browser?.Reveal();
 
+        if (!_pageSpoke)
+        {
+            _pageSpoke = true;
+            PostTheme();
+        }
+
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -291,6 +297,27 @@ internal sealed unsafe class BrowserPalette : IDisposable
     }
 
     private void Post(string json) => _browser?.PostMessage(json);
+
+    /// <summary>The theme the page should show, and whether the page has spoken yet.</summary>
+    private bool _light;
+    private bool _pageSpoke;
+
+    /// <summary>
+    /// Shows the editor's theme here too (#114): told now if the page is listening, otherwise on
+    /// its first word, which is its first question.
+    /// </summary>
+    public void ShowTheme(bool light)
+    {
+        _light = light;
+        if (_pageSpoke)
+        {
+            PostTheme();
+        }
+    }
+
+    private void PostTheme() => Post(JsonSerializer.Serialize(
+        new SetThemeMessage("setTheme", _light),
+        EditorMessageContext.Default.SetThemeMessage));
 
     private void FitBrowser()
     {

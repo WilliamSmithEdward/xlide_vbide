@@ -291,7 +291,9 @@ public sealed record SetSettingsMessage(
     /// <summary>Whether a save first writes every module's attribute annotations into its attributes.</summary>
     [property: JsonPropertyName("applyAttributesOnSave")] bool ApplyAttributesOnSave = true,
     /// <summary>How an unfolded module lists its members: "code", "name" or "kind".</summary>
-    [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code");
+    [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code",
+    /// <summary>The editor's colours: "system", "light" or "dark".</summary>
+    [property: JsonPropertyName("theme")] string Theme = "system");
 
 /// <summary>One search hit, as the results list draws it. Project is the display name.</summary>
 public sealed record SurfaceSearchMatch(
@@ -359,6 +361,11 @@ public sealed record ObMembersResultMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("members")] ObMemberRow[] Members);
+
+/// <summary>The Object Browser palette's theme: the editor's, passed on (#114).</summary>
+public sealed record SetThemeMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("light")] bool Light);
 
 /// <summary>Which debug mode the editor is in: design, run, or break.</summary>
 public sealed record SetDebugStateMessage(
@@ -1141,6 +1148,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ObLibrariesResultMessage))]
 [JsonSerializable(typeof(ObTypesResultMessage))]
 [JsonSerializable(typeof(ObMembersResultMessage))]
+[JsonSerializable(typeof(SetThemeMessage))]
 [JsonSerializable(typeof(SearchResultMessage))]
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]

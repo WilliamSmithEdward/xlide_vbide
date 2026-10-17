@@ -4858,6 +4858,9 @@ internal sealed partial class AddInSession
                             ? sort
                             : settings.ExplorerSort,
                         ApplyAttributesOnSave = Flag("applyAttributesOnSave", settings.ApplyAttributesOnSave),
+                        Theme = request.Query.TryGetValue("theme", out var theme)
+                            ? theme
+                            : settings.Theme,
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4876,7 +4879,8 @@ internal sealed partial class AddInSession
                         settings.DesignerGridSize,
                         settings.ExplorerView,
                         settings.ApplyAttributesOnSave,
-                        settings.ExplorerSort),
+                        settings.ExplorerSort,
+                        settings.Theme),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

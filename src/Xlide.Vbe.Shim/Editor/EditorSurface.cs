@@ -256,6 +256,12 @@ internal sealed class EditorSurface : IDisposable
     public Action<string, string>? UiStateChangeRequested { get; set; }
 
     /// <summary>
+    /// Raised when the page starts showing a theme: at load, when the setting changes, and when
+    /// Windows changes mode under "system". True is light. The frames follow it (#114).
+    /// </summary>
+    public Action<bool>? ThemeShown { get; set; }
+
+    /// <summary>
     /// Raised when the developer asks for a new component: (kind, workbook). Kind is 1 module,
     /// 2 class, 3 form; the workbook names the project whose menu asked, or null for the active
     /// one.
@@ -1864,7 +1870,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.DesignerGridSize,
                 settings.ExplorerView,
                 settings.ApplyAttributesOnSave,
-                settings.ExplorerSort),
+                settings.ExplorerSort,
+                settings.Theme),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2282,6 +2289,13 @@ internal sealed class EditorSurface : IDisposable
                         using var checkedState = JsonDocument.Parse(jsonState);
                         if (checkedState.RootElement.ValueKind == JsonValueKind.Object)
                             UiStateChangeRequested?.Invoke(stateKey.GetString()!, jsonState);
+                    }
+                    break;
+                case "themeShown":
+                    if (document.RootElement.TryGetProperty("light", out var lightValue)
+                        && lightValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        ThemeShown?.Invoke(lightValue.GetBoolean());
                     }
                     break;
                 case "ready":
@@ -2773,6 +2787,10 @@ internal sealed class EditorSurface : IDisposable
                     var applyOnSave = document.RootElement.TryGetProperty("applyAttributesOnSave", out var applyValue)
                         ? applyValue.ValueKind is not JsonValueKind.False
                         : held.ApplyAttributesOnSave;
+                    var theme = document.RootElement.TryGetProperty("theme", out var themeValue)
+                        && themeValue.ValueKind == JsonValueKind.String
+                            ? themeValue.GetString() ?? held.Theme
+                            : held.Theme;
 
                     // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
                     // names eight fields and zeroes the rest, so a page settings change silently
@@ -2794,6 +2812,7 @@ internal sealed class EditorSurface : IDisposable
                         ExplorerView = explorerView,
                         ExplorerSort = explorerSort,
                         ApplyAttributesOnSave = applyOnSave,
+                        Theme = theme,
                     }).Normalized());
                     break;
                 }

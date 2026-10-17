@@ -13,7 +13,7 @@ import { markNotTyped, takeFormattingMark } from "./format.js";
 import { applySettings, type EditorSettings, type IncomingSettings } from "./settings.js";
 import { procedureAt, scanProcedures, type ProcedureRange } from "./procedureat.js";
 import { widenIfEmpty } from "./markerspan.js";
-import { type XlideTheme } from "./theme.js";
+import { effectiveTheme, showTheme, THEME_LIGHT, type ThemeSetting } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
 import { restoreUiPreferences } from "./preferences.js";
 
@@ -126,6 +126,8 @@ export type HostMessage =
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "setDebugState"; mode: string }
   | { type: "obLibrariesResult"; id: number; libraries: ObLibrary[] }
+  /** The Object Browser palette's theme, from the host, which hears it from the editor (#114). */
+  | { type: "setTheme"; light: boolean }
   | { type: "obTypesResult"; id: number; types: ObType[] }
   | { type: "obMembersResult"; id: number; members: ObMember[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
@@ -654,6 +656,7 @@ export type ClientMessage =
   // payload with no syncEngine in it, and the host read the absence as the default.
   | ({ type: "updateSettings" } & EditorSettings)
   | { type: "uiStateChanged"; key: string; value: string }
+  | { type: "themeShown"; light: boolean }
   | { type: "analysisRules"; id: number }
   | { type: "setRuleSeverity"; code: string; severity: string }
   | { type: "suppressFinding"; module: string; project: string | null; line: number; code: string }
@@ -2560,8 +2563,9 @@ export class EditorBridge {
       case "obLibrariesResult":
       case "obTypesResult":
       case "obMembersResult":
+      case "setTheme":
         // The Object Browser is its own page in its own window now; its answers never
-        // arrive on the editor's transport.
+        // arrive on the editor's transport. Its theme is told to it, not to the editor.
         return;
       case "setSettings":
         // Handed over whole. Coercing here as well as in applySettings meant two normalisations
@@ -2580,15 +2584,25 @@ export class EditorBridge {
   }
 
   /**
-   * The theme follows the operating system, and nothing overrides it.
-   *
-   * There used to be a pin here for a host-sent `setTheme` to set. Nothing ever sent one - not the
-   * shim, not the page, not a probe - so the flag was read false on every branch that read it, and
-   * the whole path was a protocol the README described and the product did not have.
+   * Shows the theme the developer's Theme setting comes to: the code editor's colours, the
+   * document's `data-theme` (the light surface keys on it), and the host, which dresses the title
+   * bar to match (#114). Called at boot, when the setting changes, and when Windows changes mode -
+   * which only moves anything under "system".
    */
-  applyOsTheme(theme: XlideTheme): void {
+  applyTheme(setting: ThemeSetting, { report = true }: { report?: boolean } = {}): void {
+    const theme = effectiveTheme(setting);
     monaco.editor.setTheme(theme);
+    const changed = showTheme(theme);
+    // Not before the host's settings have arrived: the boot guess is the shipped "system", and a
+    // developer who chose dark under a light Windows would see the title bar flip twice.
+    if (report && (changed || !this.themeReported)) {
+      this.themeReported = true;
+      this.transport.post({ type: "themeShown", light: theme === THEME_LIGHT });
+    }
   }
+
+  /** Whether the host has been told a theme yet: the first one goes whether or not it moved. */
+  private themeReported = false;
 
   /**
    * Runs a command the host named: one of Monaco's actions, or one of the surface's own.
@@ -4086,6 +4100,7 @@ export function demoTransport(): HostTransport {
           explorerView: message.explorerView,
           explorerSort: message.explorerSort,
           applyAttributesOnSave: message.applyAttributesOnSave !== false,
+          theme: message.theme,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

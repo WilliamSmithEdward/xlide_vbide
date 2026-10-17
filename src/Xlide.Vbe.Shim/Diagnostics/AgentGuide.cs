@@ -281,7 +281,7 @@ internal static class AgentGuide
             "Re-applies the remembered window placement to the editor frame.",
             "POST placement", true, DoorPolicy.Open),
         new("settings", "GET|POST",
-            "blockLayout=? continueCommentOnNewline=? mirrorCommentSpacing=? insertOptionExplicit=? treeFollowsEditor=? formatIndentSize=? syncEngine=? designerSnap=? designerGridSize=? explorerView=? explorerSort=? applyAttributesOnSave=?",
+            "blockLayout=? continueCommentOnNewline=? mirrorCommentSpacing=? insertOptionExplicit=? treeFollowsEditor=? formatIndentSize=? syncEngine=? designerSnap=? designerGridSize=? explorerView=? explorerSort=? applyAttributesOnSave=? theme=?",
             "Reads the product settings, or writes the ones named. insertOptionExplicit (default true) makes every module xlide creates start with Option Explicit; restore never seeds, it recreates what was recorded. explorerView (tree|folders) is which layout the Explorer pane shows. explorerSort (code|name|kind) is how an unfolded module lists its members. applyAttributesOnSave (default true) makes a save write every module's attribute annotations into its attributes first.",
             "GET settings", true, DoorPolicy.Open),
         new("command", "POST", "name=<command>",

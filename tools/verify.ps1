@@ -948,6 +948,10 @@ if ($Live) {
                                      # closer-typeover types a closer over the one Smart Enter wrote
                                      # and holds the code to one, or to both where it needs both.
                                      'closer-typeover.mjs',
+                                     # theme drives the Theme setting through every choice under
+                                     # both Windows modes, and reads the light surface for AA
+                                     # contrast (#114).
+                                     'theme.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',

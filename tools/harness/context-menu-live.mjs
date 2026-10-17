@@ -78,6 +78,12 @@ try {
       'rgb(133, 140, 150)', 'rgb(204, 232, 255)', 'rgb(27, 27, 31)', 'rgb(49, 120, 184)'],
   ]) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+    // The theme lands on the document's data-theme from a media-change listener (#114), which
+    // the browser delivers at its next rendering step rather than in the same style pass.
+    for (let tries = 0; tries < 40; tries++) {
+      if (await api.ask('document.documentElement.dataset.theme') === scheme) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     const found = await api.ask(inspect);
     if (!found?.visible || found.background !== background || found.foreground !== foreground
       || found.borderWidth !== '1px' || found.borderColor !== border) {

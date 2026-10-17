@@ -47,6 +47,8 @@ export interface EditorSettings {
   designerSnap: "grid" | "objects" | "off";
   /** The grid's spacing in points, the designer's own unit. */
   designerGridSize: number;
+  /** The colours: "system" follows Windows' app mode; "light" and "dark" hold one (#114). */
+  theme: "system" | "light" | "dark";
 }
 
 /** What ships: the companion editor's own defaults. */
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   syncEngine: "xlide",
   designerSnap: "grid",
   designerGridSize: 6,
+  theme: "system",
 };
 
 let current: EditorSettings = { ...DEFAULT_SETTINGS };
@@ -97,6 +100,7 @@ export function applySettings(next: IncomingSettings): void {
     designerSnap: next.designerSnap === "objects" ? "objects"
       : next.designerSnap === "off" ? "off" : "grid",
     designerGridSize: Math.min(24, Math.max(2, Math.round(next.designerGridSize ?? 6) || 6)),
+    theme: next.theme === "light" ? "light" : next.theme === "dark" ? "dark" : "system",
   };
 
   for (const listener of listeners) {

@@ -38,6 +38,18 @@ public class ProductSettingsTests
     }
 
     [Theory]
+    [InlineData("light", "light")]
+    [InlineData("DARK", "dark")]
+    [InlineData("system", "system")]
+    [InlineData("sepia", "system")]
+    public void TheThemeIsOneOfThreeAndAnythingElseFollowsWindows(string asked, string kept)
+    {
+        var settings = ProductSettings.Parse($"{{ \"appearance.theme\": \"{asked}\" }}");
+
+        Assert.Equal(kept, settings.Theme);
+    }
+
+    [Theory]
     [InlineData(0, 2)]
     [InlineData(1, 2)]
     [InlineData(-4, 2)]
@@ -71,6 +83,7 @@ public class ProductSettingsTests
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.Equal("xlide", settings.SyncEngine);
         Assert.Equal("tree", settings.ExplorerView);
+        Assert.Equal("system", settings.Theme);
     }
 
     [Theory]

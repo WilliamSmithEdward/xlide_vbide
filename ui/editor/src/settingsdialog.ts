@@ -10,6 +10,19 @@ import { openModal } from "./modal.js";
 /** The rows, spelled the way the companion editor's own settings describe themselves. */
 const OPTIONS = [
   {
+    key: "theme" as const,
+    kind: "choice" as const,
+    label: "Theme",
+    description:
+      "'Use system' follows Windows' app mode (Settings, Personalization, Colors) and changes with "
+      + "it. 'Light' and 'Dark' keep one whatever Windows says. The title bar follows too.",
+    choices: [
+      { value: "system", label: "Use system" },
+      { value: "light", label: "Light" },
+      { value: "dark", label: "Dark" },
+    ],
+  },
+  {
     key: "blockLayout" as const,
     kind: "choice" as const,
     label: "Smart Enter block layout",

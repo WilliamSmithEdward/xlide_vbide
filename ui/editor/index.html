@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self'">
 <title>xlide editor</title>
-<!-- Before the stylesheet arrives, the page is already the editor's dark ground: the host holds
-     the browser hidden until ready, and this keeps even a reload from ever flashing white. -->
-<style>html,body{margin:0;height:100%;background:#1e1e1e}</style>
+<!-- Before the stylesheet arrives, the page is already the editor's ground: the host holds the
+     browser hidden until ready, and this keeps even a reload from flashing the other colour.
+     Windows' own mode decides it here, which is the shipped "system" setting (#114). -->
+<style>html,body{margin:0;height:100%;background:#1e1e1e}@media (prefers-color-scheme:light){html,body{background:#fff}}</style>
 <link rel="stylesheet" href="./editor.css">
 <!-- THE FIRST THING THAT RUNS, and it has to be, because what it catches is the bundle failing
      to run at all. A classic script tag in the head executes synchronously before ./editor.js,

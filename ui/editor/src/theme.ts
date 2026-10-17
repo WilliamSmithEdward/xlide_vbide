@@ -106,9 +106,12 @@ const lightTheme: monaco.editor.IStandaloneThemeData = {
   colors: {
     "editor.background": "#ffffff",
     "editor.foreground": "#1b1b1f",
-    "editorLineNumber.foreground": "#9a9aa6",
+    // 5.2:1 on white. The first light value (#9a9aa6) was 2.7:1, below what text needs (#114).
+    "editorLineNumber.foreground": "#6b6b75",
     "editorLineNumber.activeForeground": "#3b3b42",
     "editorCursor.foreground": "#1b1b1f",
+    // The Immediate entry line's hint. Monaco's light default is rgba(0,0,0,0.47), 3.6:1 (#114).
+    "editor.placeholder.foreground": "#6b6b75",
     "editor.selectionBackground": "#add6ff",
     "editor.inactiveSelectionBackground": "#e5ebf1",
     "editor.lineHighlightBackground": "#f3f3f5",
@@ -146,4 +149,27 @@ export function watchPreferredTheme(onChange: (theme: XlideTheme) => void): void
   query?.addEventListener("change", (event) => {
     onChange(event.matches ? THEME_LIGHT : THEME_DARK);
   });
+}
+
+/** The developer's Theme setting (#114). */
+export type ThemeSetting = "system" | "light" | "dark";
+
+/** The theme a setting comes to: "system" asks Windows, through the page's colour scheme. */
+export function effectiveTheme(setting: ThemeSetting): XlideTheme {
+  return setting === "light" ? THEME_LIGHT : setting === "dark" ? THEME_DARK : preferredTheme();
+}
+
+/**
+ * Puts a theme on the whole document, not only the code editor: `data-theme` on the root is what
+ * the stylesheet's light surface keys on, so the frame, panes and dialogs change with the text.
+ * Answers whether that changed anything.
+ */
+export function showTheme(theme: XlideTheme): boolean {
+  const name = theme === THEME_LIGHT ? "light" : "dark";
+  const root = document.documentElement;
+  if (root.dataset.theme === name) {
+    return false;
+  }
+  root.dataset.theme = name;
+  return true;
 }
