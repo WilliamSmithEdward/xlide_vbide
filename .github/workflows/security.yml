@@ -43,7 +43,7 @@ jobs:
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -51,7 +51,7 @@ jobs:
       - name: Build C# with source generators for extraction
         if: matrix.language == 'csharp'
         run: dotnet build xlide_vbide.slnx --configuration Release --no-incremental -p:UseSharedCompilation=false
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           output: security-results/codeql-${{ matrix.language }}
           category: /language:${{ matrix.language }}
@@ -89,7 +89,7 @@ jobs:
             --sarif-output security-results/semgrep/semgrep.sarif .
       - name: Upload to code scanning
         if: always() && github.ref_type != 'tag' && hashFiles('security-results/semgrep/*.sarif') != ''
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: security-results/semgrep/semgrep.sarif
           category: semgrep
@@ -193,7 +193,7 @@ jobs:
           zizmor --format plain .github/workflows || true
           exit "$status"
 
-      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: ${{ !cancelled() }}
         with:
           sarif_file: zizmor.sarif
