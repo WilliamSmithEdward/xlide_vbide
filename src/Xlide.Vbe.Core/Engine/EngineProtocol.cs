@@ -25,7 +25,15 @@ public sealed record EngineModule(
     /// the file cannot answer for stays null. A null sent as false would put a red squiggle under
     /// every use of every predeclared singleton in the project.
     /// </summary>
-    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null);
+    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null,
+    /// <summary>
+    /// What a document module's object is - `worksheet`, `chart` or `workbook` in Excel,
+    /// `document` in Word - so the analyzer knows the class it derives from. A sheet sent
+    /// without it is held only to what a worksheet and a chart share, and a renamed ThisWorkbook
+    /// reads as a sheet (member-exists-in-base-class, xlide_vscode 11.1.19). Null, and absent on
+    /// the wire, for every other kind and for a document the host could not classify.
+    /// </summary>
+    [property: JsonPropertyName("documentType")] string? DocumentType = null);
 
 /// <summary>One implicit member: the control's name, and the type completion resolves it as.</summary>
 public sealed record EngineImplicitMember(

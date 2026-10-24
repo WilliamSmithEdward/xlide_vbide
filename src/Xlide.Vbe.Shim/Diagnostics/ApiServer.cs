@@ -1014,7 +1014,14 @@ public sealed record DebugComponentRow(
     /// The folder the module's <c>'@Folder("Parent.Child")</c> annotation names, normalized, or
     /// null for a module carrying none. The same answer the explorer's folder view draws.
     /// </summary>
-    [property: JsonPropertyName("folder")] string? Folder = null);
+    [property: JsonPropertyName("folder")] string? Folder = null,
+    /// <summary>
+    /// For a DOCUMENT module, what its object is as the analyzer is told: `worksheet`, `chart`
+    /// or `workbook` in Excel, `document` in Word. Null for every other kind and for a document
+    /// that could not be classified, which the analyzer then holds only to what a worksheet and
+    /// a chart share - so this is WHY `Public Sub Calculate()` in a sheet is or is not reported.
+    /// </summary>
+    [property: JsonPropertyName("documentType")] string? DocumentType = null);
 
 /// <summary>
 /// What a workbook's VBA project actually contains, read from the object model.
@@ -1037,7 +1044,13 @@ public sealed record DebugProjectReply(
     /// nowhere in the text, so without this a caller looking at the finding has nothing to look
     /// at. Read from the same walk the engine's seed is built from, so the two cannot disagree.
     /// </summary>
-    [property: JsonPropertyName("references")] DebugReferenceRow[]? References = null);
+    [property: JsonPropertyName("references")] DebugReferenceRow[]? References = null,
+    /// <summary>
+    /// Whether every reference was read. Only then are their NAMES sent, and only then does the
+    /// analyzer report a type qualified by a library the project does not reference
+    /// (`Dim c As ADODB.Connection` without ADO); false keeps that silent.
+    /// </summary>
+    [property: JsonPropertyName("referencesComplete")] bool ReferencesComplete = false);
 
 /// <summary>
 /// What adding a library reference came to: which library, and whether it went on.

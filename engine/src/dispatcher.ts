@@ -274,6 +274,21 @@ function seededMembersOf(
         (module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.implicitMembers;
 }
 
+/**
+ * The document type a module was seeded with: worksheet, chart or workbook. The host reads it
+ * once off the object model and sends it with the project, so a request that carries none is
+ * analysed under the seeded one, as completion already is (moduleContext.ts). Without it a sheet
+ * reaches the rules untyped and member-exists-in-base-class can hold it only to what a
+ * worksheet and a chart share.
+ */
+function seededDocumentTypeOf(
+    seeded: readonly ModulePayload[] | undefined,
+    moduleName: string,
+): string | undefined {
+    return seeded?.find(
+        (module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.documentType;
+}
+
 /** Thrown to answer a request with a JSON-RPC error rather than a result. */
 export class RpcError extends Error {
     constructor(
@@ -300,6 +315,12 @@ export class Dispatcher {
      * per seed, and every request for a project has to carry the same answer.
      */
     private readonly referencedHosts = new Map<string, readonly string[]>();
+
+    /**
+     * The names of the libraries each project references, and its own name, kept beside the
+     * hosts for the same reason. Absent for a project whose references were not all readable.
+     */
+    private readonly referencedLibraries = new Map<string, { names: readonly string[]; projectName: string | undefined }>();
 
     /**
      * The modules each project was last seeded with, kept for completion contexts. The analysis
@@ -624,6 +645,11 @@ export class Dispatcher {
         this.referencedHosts.set(
             params.projectId,
             referencedHostsFor(hostApp(), params.referenceGuids, customLibraries));
+        if (params.referenceNames) {
+            this.referencedLibraries.set(params.projectId, { names: params.referenceNames, projectName: params.projectName });
+        } else {
+            this.referencedLibraries.delete(params.projectId);
+        }
 
         this.generations.set(params.projectId, params.generation);
         this.seededModules.set(params.projectId, modules.map((module) => ({ ...module })));
@@ -685,6 +711,7 @@ export class Dispatcher {
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
         this.referencedHosts.delete(params.projectId);
+        this.referencedLibraries.delete(params.projectId);
 
         // THE ANALYZER'S OWN PER-DOCUMENT STATE, which nothing else here releases.
         //
@@ -1137,7 +1164,8 @@ export class Dispatcher {
             moduleName: params.moduleName,
             moduleType: params.moduleType ?? memo?.request.moduleType,
             moduleKind: moduleKindFromType(params.moduleType ?? memo?.request.moduleType),
-            documentType: params.documentType ?? memo?.request.documentType,
+            documentType: params.documentType ?? memo?.request.documentType
+                ?? seededDocumentTypeOf(this.seededModules.get(params.projectId), params.moduleName),
             // The analyzer resolves the token to a host model itself (issue #24); for excel
             // the resolution is a no-op, so this is only ever additive.
             host: hostApp(),
@@ -1147,6 +1175,8 @@ export class Dispatcher {
             // fix offered under different knowledge than the squiggle was drawn under is how
             // the two disagree (the 2026-08-19 hunt, one host set and not the other).
             referencedHosts: this.referencedHosts.get(params.projectId),
+            referencedLibraries: this.referencedLibraries.get(params.projectId)?.names,
+            projectName: this.referencedLibraries.get(params.projectId)?.projectName,
             implicitMembers: seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
             // Inherited rather than sent: a fix must be offered under the same rules that drew
             // the squiggle, and the last analysis of this module is what drew it.
@@ -1400,7 +1430,7 @@ export class Dispatcher {
         // callers use it differently and one of them can accept the other's answer.
         const shape = JSON.stringify([
             params.moduleType ?? null,
-            params.documentType ?? null,
+            params.documentType ?? seededDocumentTypeOf(seeded, params.moduleName) ?? null,
             params.severityOverrides ?? null,
             // THE PROJECT'S REFERENCED APPLICATIONS, for the same reason the overrides are here:
             // they decide findings and they are not in the text. Tick Word in the References
@@ -1412,6 +1442,11 @@ export class Dispatcher {
             params.projectId === undefined
                 ? null
                 : this.referencedHosts.get(params.projectId) ?? null,
+            // And the libraries' names, for the same reason: adding ADO to the references clears
+            // `Dim c As ADODB.Connection` without one byte of the module changing.
+            params.projectId === undefined
+                ? null
+                : this.referencedLibraries.get(params.projectId) ?? null,
         ]);
 
         const caret = params.activeIncompleteExpressionOffset ?? null;
@@ -1478,7 +1513,10 @@ export class Dispatcher {
             // analysed as a standard one and every Me, Friend, and event declaration in it is
             // reported as an error. The extension's own client always sends both.
             moduleKind: moduleKindFromType(params.moduleType),
-            documentType: params.documentType,
+            documentType: params.documentType
+                ?? (params.projectId === undefined
+                    ? undefined
+                    : seededDocumentTypeOf(this.seededModules.get(params.projectId), params.moduleName)),
             // The analyzer resolves the token to a host model itself (issue #24). This is the
             // DIAGNOSTICS request; the fix path below builds its own, and setting the host on
             // only one of the two was the 2026-08-19 hunt's find - in Word, completion knew
@@ -1489,6 +1527,12 @@ export class Dispatcher {
             referencedHosts: params.projectId === undefined
                 ? undefined
                 : this.referencedHosts.get(params.projectId),
+            referencedLibraries: params.projectId === undefined
+                ? undefined
+                : this.referencedLibraries.get(params.projectId)?.names,
+            projectName: params.projectId === undefined
+                ? undefined
+                : this.referencedLibraries.get(params.projectId)?.projectName,
             // The request's own members win at the worker (live designer truth when the host
             // sends them); the seeded copy answers otherwise, so a form is analysable without
             // a per-request supply. The .frm header fallback below both is dead for Excel

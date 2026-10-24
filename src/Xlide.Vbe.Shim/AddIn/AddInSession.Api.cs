@@ -5063,7 +5063,9 @@ internal sealed partial class AddInSession
                         // here, and answering it for the others would invite reading it as one.
                         type == 2 ? savedHeaders?.PredeclaredIdOf(name) : null,
                         // The folder its annotation names, the same answer the tree draws (#23).
-                        FolderOf(projectIdentity, component, name)));
+                        FolderOf(projectIdentity, component, name),
+                        // What the seed calls a document module's object, from the same cache.
+                        type == 100 ? ProjectReader.DocumentTypeOf(projectIdentity, name, component) : null));
                 });
 
                 // The identity of the project THIS REPLY DESCRIBES, read off that project.
@@ -5083,6 +5085,7 @@ internal sealed partial class AddInSession
                 // The raw identity is a full path, and handing that back would fix the wrong
                 // project only to make the value unusable.
                 var identity = ProjectReader.Identity(project);
+                var references = ProjectReader.ReferencesOf(project, out var referencesComplete);
 
                 return System.Text.Json.JsonSerializer.Serialize(
                     new DebugProjectReply(
@@ -5093,8 +5096,8 @@ internal sealed partial class AddInSession
                         // The seed's own reader, not a second walk: what a caller is shown here
                         // is what the analyzer was told, which is the only version of this fact
                         // worth having when the question is why a finding is on screen.
-                        [.. ProjectReader.ReferencesOf(project)
-                            .Select(one => new DebugReferenceRow(one.Name, one.LibraryId, one.Broken))]),
+                        [.. references.Select(one => new DebugReferenceRow(one.Name, one.LibraryId, one.Broken))],
+                        referencesComplete),
                     DebugJsonContext.Default.DebugProjectReply);
             }
 

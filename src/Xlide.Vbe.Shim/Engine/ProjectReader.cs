@@ -23,6 +23,12 @@ namespace Xlide.Vbe.Shim.Engine;
 /// against that application's model. Without the list it knows only the host and reports a
 /// compile error on code that compiles (#21's release, 2026-09-21).
 /// </param>
+/// <param name="ReferenceNames">
+/// The name of every reference, broken ones included, as each calls itself, and null unless
+/// every one of them was read: the analyzer reports a type qualified by a library not among
+/// them, so a list missing one would report code that compiles.
+/// </param>
+/// <param name="ProjectName">The project's own name, which qualifies its types like a library's.</param>
 internal sealed record ProjectSnapshot(
     string ProjectId,
     string DisplayName,
@@ -30,7 +36,9 @@ internal sealed record ProjectSnapshot(
     EngineModule[] Modules,
     string? ConditionalConstants = null,
     string[]? ReferenceGuids = null,
-    EngineReferenceLibrary[]? ReferenceLibraries = null);
+    EngineReferenceLibrary[]? ReferenceLibraries = null,
+    string[]? ReferenceNames = null,
+    string? ProjectName = null);
 
 /// <summary>
 /// One of a project's type library references, as the reference declares itself.
@@ -431,6 +439,9 @@ internal static class ProjectReader
             var count = components.GetInt32("Count");
             var modules = new List<EngineModule>(count);
 
+            // Asked before the walk now, because each document module's kind is remembered under it.
+            var identity = Identity(project);
+
             // A DESIGNER IS A DESIGN-TIME OBJECT, and the editor says so by refusing: asked for
             // one while the project is stopped in the debugger, it answers E_NOINTERFACE and
             // raises its own modal to say it - "System Error &H80004002. No such interface
@@ -499,7 +510,11 @@ internal static class ProjectReader
                     classNames.Add(moduleName);
                 }
 
-                modules.Add(new EngineModule(moduleName, source, TypeName(componentType), members));
+                var documentType = componentType == DocumentComponent
+                    ? DocumentTypeOf(identity.Id, moduleName, component)
+                    : null;
+
+                modules.Add(new EngineModule(moduleName, source, TypeName(componentType), members, DocumentType: documentType));
             }
 
             FillInPredeclaredIds(project, modules, classNames);
@@ -508,11 +523,11 @@ internal static class ProjectReader
             // open and cached by the time this runs.
             var constants = SavedModules.For(SavedPathOf(project))?.ConditionalConstants;
 
-            var (id, displayName) = Identity(project);
-            var references = ReferencesOf(project);
+            var references = ReferencesOf(project, out var referencesComplete);
             return new ProjectSnapshot(
-                id, displayName, generation, [.. modules], constants,
-                ReferenceGuidsOf(references), ReferenceTypeLibraryModels.For(references));
+                identity.Id, identity.DisplayName, generation, [.. modules], constants,
+                ReferenceGuidsOf(references), ReferenceTypeLibraryModels.For(references),
+                ReferenceNamesOf(references, referencesComplete), name);
         }
         catch (Exception ex)
         {
@@ -537,8 +552,17 @@ internal static class ProjectReader
     /// The api's `project` route answers from here too, so what a caller is shown is what the
     /// seed was built from rather than a second walk that can disagree with it.
     /// </summary>
-    internal static ProjectReference[] ReferencesOf(DispatchObject project)
+    internal static ProjectReference[] ReferencesOf(DispatchObject project) => ReferencesOf(project, out _);
+
+    /// <summary>
+    /// The same walk, saying whether it read every reference. A project always references at
+    /// least VBA, so a walk that found none, failed to enumerate, or skipped one it could not
+    /// read is INCOMPLETE - and an incomplete list must not be offered as the whole set, which
+    /// is what the reference names are judged as.
+    /// </summary>
+    internal static ProjectReference[] ReferencesOf(DispatchObject project, out bool complete)
     {
+        complete = false;
         try
         {
             using var references = project.GetObject("References");
@@ -548,6 +572,8 @@ internal static class ProjectReader
                 return [];
             }
 
+            var unread = 0;
+
             var found = new List<ProjectReference>(count);
             for (var index = 1; index <= count; index++)
             {
@@ -556,6 +582,7 @@ internal static class ProjectReader
                     using var reference = references!.GetItem(index);
                     if (reference is null)
                     {
+                        unread++;
                         continue;
                     }
 
@@ -578,10 +605,12 @@ internal static class ProjectReader
                 }
                 catch (Exception ex)
                 {
+                    unread++;
                     Log.Verbose($"project: a reference could not be read ({ex.GetType().Name})");
                 }
             }
 
+            complete = unread == 0 && found.All(one => one.Name.Length > 0);
             return [.. found];
         }
         catch (Exception ex)
@@ -609,6 +638,93 @@ internal static class ProjectReader
 
         return guids.Length == 0 ? null : guids;
     }
+
+    /// <summary>
+    /// The name of every reference, broken ones included, for the analyzer's check of a type
+    /// qualified by a library the project does not reference. Broken ones count because the
+    /// VBE refuses their types for another reason ("Can't find project or library"), not as
+    /// undefined. Null unless the walk read every reference: absent keeps that check silent, an
+    /// incomplete list would make it report code that compiles.
+    /// </summary>
+    private static string[]? ReferenceNamesOf(ProjectReference[] references, bool complete) =>
+        complete ? [.. references.Select(one => one.Name)] : null;
+
+    /// <summary>Component types, as the editor numbers them: a workbook, sheet or document's own module.</summary>
+    private const int DocumentComponent = 100;
+
+    /// <summary>
+    /// What each document module was classified as, by project and module name, for the session.
+    /// A sheet does not change kind, a renamed module is a new name, and the classification walks
+    /// over a hundred property names, so it is done once rather than on every analysis pass.
+    /// </summary>
+    private static readonly Dictionary<string, string?> DocumentTypes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What a document module's object is, as the analyzer names it: `worksheet`, `chart` or
+    /// `workbook` in Excel, `document` in Word, null where it cannot be told.
+    ///
+    /// Told from the NAMES its Properties collection carries, as the Properties panel tells it
+    /// (AddInSession.ClassifyDocument): enumerating names runs no getter, where reading a value
+    /// can. Only Excel's document modules come in kinds; Word's one is the document, and the
+    /// other hosts' document surfaces are not ones the analyzer models, so they stay unsent.
+    /// </summary>
+    internal static string? DocumentTypeOf(string projectId, string moduleName, DispatchObject component)
+    {
+        switch (HostApp.Name)
+        {
+            case "word":
+                return "document";
+            case "excel":
+                break;
+            default:
+                return null;
+        }
+
+        var key = $"{projectId}\0{moduleName}";
+        if (DocumentTypes.TryGetValue(key, out var known))
+        {
+            return known;
+        }
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var properties = component.GetObject("Properties");
+            var count = properties?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var property = properties!.GetItem(i);
+                try
+                {
+                    if (property?.GetString("Name") is { Length: > 0 } propertyName)
+                    {
+                        names.Add(propertyName);
+                    }
+                }
+                catch (Exception)
+                {
+                    // A property that will not say its name says nothing about the kind.
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Not remembered: a document the editor would not describe this pass may next pass.
+            Log.Verbose($"project: {moduleName} could not be classified ({ex.GetType().Name})");
+            return null;
+        }
+
+        var kind = names.Contains("StandardWidth") ? "worksheet"
+            : names.Contains("Date1904") ? "workbook"
+            : names.Contains(ChartMarker) ? "chart"
+            : null;
+        DocumentTypes[key] = kind;
+        Log.Verbose($"project: {moduleName} is a {kind ?? "document of no kind this can name"} ({names.Count} properties)");
+        return kind;
+    }
+
+    /// <summary>A property only a chart sheet's object carries (measured in Excel 16.0).</summary>
+    private const string ChartMarker = "HasLegend";
 
     /// <summary>
     /// Whether a project is locked for viewing: password protected, and not unlocked this
