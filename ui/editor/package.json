@@ -12,6 +12,7 @@
     "spec:sync": "node tools/sync-spec.mjs --write"
   },
   "devDependencies": {
+    "dompurify": "3.4.17",
     "esbuild": "0.28.2",
     "fast-check": "4.10.2",
     "monaco-editor": "0.57.0",
@@ -19,7 +20,7 @@
   },
   "overrides": {
     "monaco-editor": {
-      "dompurify": "3.4.16"
+      "dompurify": "$dompurify"
     }
   }
 }

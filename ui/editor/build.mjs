@@ -151,6 +151,31 @@ async function ensureCodicon() {
   await copyFile(source, target);
 }
 
+// MONACO'S OWN COPY OF DOMPURIFY IS REPLACED BY THE PACKAGE'S.
+//
+// monaco-editor vendors DOMPurify into its ESM tree (vs/base/browser/dompurify/dompurify.js) and
+// imports that file, not the `dompurify` package it also declares. So the override in
+// package.json, added to fix GHSA-p98j-92pf-mc4p (#46), only quieted npm audit: the page kept
+// shipping the vendored 3.4.15 (found 2026-10-23, reading DOMPurify.version out of dist). The
+// import is sent to the package here instead, and the build fails unless the bundle reports the
+// package's version, so a Monaco that moves or renames its copy cannot bring the old one back
+// unnoticed.
+// By folder: the package's exports map does not expose its package.json.
+const DOMPURIFY_ROOT = path.join(root, "node_modules", "dompurify");
+const DOMPURIFY = path.join(DOMPURIFY_ROOT, "dist", "purify.es.mjs");
+const DOMPURIFY_VERSION = JSON.parse(readFileSync(path.join(DOMPURIFY_ROOT, "package.json"), "utf8")).version;
+let dompurifyRedirects = 0;
+const dompurifyFromPackage = {
+  name: "dompurify-from-package",
+  setup(builder) {
+    builder.onResolve({ filter: /(^|[\\/])dompurify[\\/]dompurify\.js$/ }, (args) => {
+      if (!args.importer.includes(`${path.sep}monaco-editor${path.sep}`)) return undefined;
+      dompurifyRedirects++;
+      return { path: DOMPURIFY };
+    });
+  },
+};
+
 async function main() {
   await rm(dist, { recursive: true, force: true });
   await mkdir(dist, { recursive: true });
@@ -187,6 +212,7 @@ async function main() {
       ".svg": "file",
     },
     logLevel: "warning",
+    plugins: [dompurifyFromPackage],
   };
 
   const results = await Promise.all([
@@ -198,6 +224,14 @@ async function main() {
     // worker parses that unconditionally, a classic worker would not be guaranteed to.
     build({ ...common, entryPoints: { "editor.worker": "src/editor.worker.ts" }, format: "esm" }),
   ]);
+
+  const shipped = [...readFileSync(path.join(dist, "editor.js"), "utf8").matchAll(/version\s*=\s*"(3\.\d+\.\d+)"/g)]
+    .map((match) => match[1]);
+  if (dompurifyRedirects === 0 || shipped.length !== 1 || shipped[0] !== DOMPURIFY_VERSION) {
+    throw new Error(`The page must carry DOMPurify ${DOMPURIFY_VERSION} from the package, but the build `
+      + `redirected ${dompurifyRedirects} import(s) and editor.js reports ${shipped.join(", ") || "no version"}.`);
+  }
+  console.log(`DOMPurify ${DOMPURIFY_VERSION}, from the package`);
 
   await copyFile(path.join(root, "index.html"), path.join(dist, "index.html"));
   await writeFile(path.join(dist, "boot.js"), BOOT_JS, "utf8");
