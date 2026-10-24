@@ -234,21 +234,23 @@ check('and the word host method paints as a call', () => {
     assert.equal(method[0].type, 'function', `FitToPages painted as ${method[0].type}`);
 });
 
-// A host the registry does not know: the honest answer is still known:false with a note.
+// A host the registry does not model: the honest answer is still known:false with a note. Visio
+// is a VBA host the analyzer names but has no object model for. (This was Outlook until the
+// analyzer's 11.2.1 modelled Outlook's library.)
 await call('project/open', {
-    projectId: 'OutlookProject',
+    projectId: 'VisioProject',
     generation: 1,
-    host: 'outlook',
+    host: 'visio',
     modules: [{ moduleName: 'Module1', source: 'Sub A()\r\nEnd Sub\r\n', type: 'standard' }],
 });
 
-const inOutlook = await call('knowledge/objectModel', {});
+const inVisio = await call('knowledge/objectModel', {});
 
 check('an unmodelled host says so plainly', () => {
-    assert.equal(inOutlook.host, 'outlook');
-    assert.equal(inOutlook.known, false);
-    assert.ok(inOutlook.note.length > 0, 'a refusal without a note strands the caller');
-    assert.equal(inOutlook.types, undefined);
+    assert.equal(inVisio.host, 'visio');
+    assert.equal(inVisio.known, false);
+    assert.ok(inVisio.note.length > 0, 'a refusal without a note strands the caller');
+    assert.equal(inVisio.types, undefined);
 });
 
 check('the rule catalogue is host-independent', () => {

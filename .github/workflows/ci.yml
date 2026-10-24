@@ -44,7 +44,7 @@ jobs:
         working-directory: xlide_vbide
         run: |
           $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
-          if ($pin.commit -ne '91a9f90ff3968081dc6f3f62df762c08b1676ce7') {
+          if ($pin.commit -ne '4f728e9c2f76438686aa4f0d32b4bfb9bfe14961') {
             throw 'Update the CI analyzer checkout when .github/analyzer.json changes.'
           }
 
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/xlide_vscode
-          ref: 91a9f90ff3968081dc6f3f62df762c08b1676ce7 # xlide_vscode v11.1.9
+          ref: 4f728e9c2f76438686aa4f0d32b4bfb9bfe14961 # xlide_vscode v11.2.1
           path: xlide_vscode
           persist-credentials: false
 

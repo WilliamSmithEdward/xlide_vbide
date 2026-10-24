@@ -206,6 +206,10 @@ internal static unsafe partial class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 
+    /// <summary>The window's dots per inch, 96 at 100% scaling; 0 for a window that is not one.</summary>
+    [LibraryImport("user32.dll")]
+    public static partial uint GetDpiForWindow(nint window);
+
     /// <summary>
     /// State of a key at the point the message being processed was posted, which is what a key
     /// handler needs: asking for the state now would report where the modifier is by the time the
