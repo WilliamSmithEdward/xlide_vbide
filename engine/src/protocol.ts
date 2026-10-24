@@ -118,6 +118,19 @@ export interface ProjectOpenParams {
     referenceGuids?: readonly string[];
     /** Non-Office referenced type libraries read from this machine's registered type metadata. */
     referenceLibraries?: readonly ReferenceLibraryPayload[];
+    /**
+     * The NAME of every library the project references, broken ones included, as each reference
+     * calls itself (`VBA`, `Excel`, `stdole`, `ADODB`), and the project's own name (`VBAProject`).
+     *
+     * The analyzer reads these to judge a type qualified by a library: `Dim c As ADODB.Connection`
+     * in a project without ActiveX Data Objects is the VBE's "User-defined type not defined"
+     * (xlide_vscode#1477). The GUIDs above cannot answer that, because most libraries are not
+     * modelled. THREE STATES: absent means the references could not all be read, and the rules
+     * that read them stay silent; an incomplete list sent as complete would report code that
+     * compiles. Both are sent together or not at all.
+     */
+    referenceNames?: readonly string[];
+    projectName?: string;
 }
 
 export interface ReferenceLibraryPayload {

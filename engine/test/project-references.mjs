@@ -292,6 +292,92 @@ check("closing a project forgets its references - a reopen does not inherit them
   missingLibrary(reopened.diagnostics ?? []).length === 1,
   missingLibrary(reopened.diagnostics ?? []).map((one) => one.code).join(",") || "(none)");
 
+/* ---- the libraries' NAMES, in three states -------------------------------------------------- */
+
+// A type qualified by a library the project does not reference is the VBE's "User-defined type
+// not defined" (xlide_vscode#1477), and only the reference NAMES can say so: ActiveX Data Objects
+// is no library the analyzer models, so its GUID answers nothing. Absent names are unknown, and
+// unknown must stay silent, or every project the add-in could not read would turn red.
+const USES_ADO = [
+  "Option Explicit",
+  "",
+  "Public Sub Query()",
+  "    Dim c As ADODB.Connection",
+  "    Set c = Nothing",
+  "End Sub",
+].join(CRLF);
+const STANDARD_NAMES = ["VBA", "Excel", "stdole", "Office"];
+
+async function analyseWithNames(source, referenceNames) {
+  const projectId = `names${nextProject}`;
+  const moduleName = `Names${nextProject}`;
+  nextProject += 1;
+  await call("project/open", {
+    projectId, generation: 1,
+    modules: [{ moduleName, source, type: "standard" }],
+    referenceGuids: [EXCEL, STDOLE],
+    ...(referenceNames === undefined ? {} : { referenceNames, projectName: "VBAProject" }),
+  });
+  const { diagnostics } = await call("textDocument/diagnostics", {
+    documentKey: `${projectId}/${moduleName}`, projectId, generation: 1, source, moduleName,
+    moduleType: "standard",
+  });
+  return (diagnostics ?? []).filter((one) => /ADODB|type not defined/i.test(one.message));
+}
+
+const namesUnknown = await analyseWithNames(USES_ADO, undefined);
+check("a project whose reference names were not sent says nothing about ADODB",
+  namesUnknown.length === 0, namesUnknown.map((one) => one.code).join(",") || "(none)");
+
+const namesWithoutAdo = await analyseWithNames(USES_ADO, STANDARD_NAMES);
+check("one that references no ADO reports ADODB.Connection as the VBE does",
+  namesWithoutAdo.length === 1, namesWithoutAdo.map((one) => `${one.code}: ${one.message}`).join(" | ") || "(none)");
+
+const namesWithAdo = await analyseWithNames(USES_ADO, [...STANDARD_NAMES, "ADODB"]);
+check("and the same code is clean once ADO is among the names",
+  namesWithAdo.length === 0, namesWithAdo.map((one) => one.code).join(",") || "(none)");
+
+/* ---- a document module's type, seeded once ---------------------------------------------------- */
+
+// A sheet module derives from Worksheet, and a declaration that takes one of its names is the
+// VBE's "Member already exists in an object module from which this object module derives". The
+// host sends the type on the seed only; a diagnostics request that carries none is analysed
+// under it. Untyped, the rule can hold a sheet only to what a Worksheet and a Chart share, and
+// Calculate is a Worksheet's alone.
+const CALCULATE = ["Option Explicit", "", "Public Sub Calculate()", "End Sub"].join(CRLF);
+
+const SAVE = ["Option Explicit", "", "Public Sub Save()", "End Sub"].join(CRLF);
+
+async function analyseSheet(moduleName, documentType, source = CALCULATE) {
+  const projectId = `doc${nextProject}`;
+  nextProject += 1;
+  await call("project/open", {
+    projectId, generation: 1,
+    modules: [{ moduleName, source, type: "document", ...(documentType ? { documentType } : {}) }],
+  });
+  const { diagnostics } = await call("textDocument/diagnostics", {
+    documentKey: `${projectId}/${moduleName}`, projectId, generation: 1, source, moduleName,
+    moduleType: "document",
+  });
+  return (diagnostics ?? []).filter((one) => one.code === "member-exists-in-base-class");
+}
+
+const typedSheet = await analyseSheet("Sheet1", "worksheet");
+check("a sheet seeded as a worksheet reports its Calculate as a member of Worksheet",
+  typedSheet.length === 1, typedSheet.map((one) => one.message).join(" | ") || "(none)");
+
+const untypedSheet = await analyseSheet("Sheet1", undefined);
+check("the same sheet unseeded is held only to what a worksheet and a chart share",
+  untypedSheet.length === 0, untypedSheet.map((one) => one.message).join(" | ") || "(none)");
+
+const renamedBook = await analyseSheet("BookCode", "workbook", SAVE);
+check("a renamed ThisWorkbook seeded as the workbook is still a Workbook",
+  renamedBook.length === 1, renamedBook.map((one) => one.message).join(" | ") || "(none)");
+
+const unseededBook = await analyseSheet("BookCode", undefined, SAVE);
+check("and unseeded, its renamed module cannot be told from a sheet's",
+  unseededBook.length === 0, unseededBook.map((one) => one.message).join(" | ") || "(none)");
+
 await stop();
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) { failures.forEach((one) => console.log(`  ${one}`)); }

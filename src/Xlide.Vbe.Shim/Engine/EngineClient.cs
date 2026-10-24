@@ -187,6 +187,8 @@ internal sealed class EngineClient : IAsyncDisposable
         string? conditionalConstants,
         string[]? referenceGuids,
         EngineReferenceLibrary[]? referenceLibraries,
+        string[]? referenceNames,
+        string? projectName,
         CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
@@ -228,6 +230,18 @@ internal sealed class EngineClient : IAsyncDisposable
         if (referenceLibraries is { Length: > 0 })
         {
             payload["referenceLibraries"] = referenceLibraries;
+        }
+
+        // AND THEIR NAMES, with the project's own, which is what the analyzer judges a qualified
+        // type by: `Dim c As ADODB.Connection` without ActiveX Data Objects is "User-defined type
+        // not defined" (xlide_vscode#1477), and no GUID table can say so, because ADO is not a
+        // library the analyzer models. Sent only when every reference was read: a list missing
+        // one would report that library's types as undefined in code that compiles, and absent
+        // keeps the rule silent, as an unknown must.
+        if (referenceNames is not null && projectName is { Length: > 0 })
+        {
+            payload["referenceNames"] = referenceNames;
+            payload["projectName"] = projectName;
         }
 
         var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);

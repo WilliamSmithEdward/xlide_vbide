@@ -1372,7 +1372,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                 var opened = await engine.OpenProjectAsync(
                     snapshot.ProjectId, snapshot.Generation, snapshot.Modules,
                     snapshot.ConditionalConstants, snapshot.ReferenceGuids,
-                    snapshot.ReferenceLibraries, _stopping.Token)
+                    snapshot.ReferenceLibraries, snapshot.ReferenceNames, snapshot.ProjectName,
+                    _stopping.Token)
                     .ConfigureAwait(false);
 
                 if (opened is not null)
@@ -1638,9 +1639,11 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// name against them in that order, so a reorder is a real change to compare.
     /// </summary>
     private static string ReferenceSeedOf(ProjectSnapshot snapshot) =>
-        snapshot.ReferenceGuids is null
-            ? string.Empty
-            : string.Join('\u0000', snapshot.ReferenceGuids);
+        (snapshot.ReferenceGuids is null ? string.Empty : string.Join('\u0000', snapshot.ReferenceGuids))
+        // The names too: a broken reference changes them and not the GUIDs, and a project whose
+        // references could not all be read (null) is a different seed from one that read none.
+        + '\u0001' + (snapshot.ReferenceNames is null ? "?" : string.Join('\u0000', snapshot.ReferenceNames))
+        + '\u0001' + (snapshot.ProjectName ?? "?");
 
     /// <summary>
     /// Whether a project's modules are exactly what it was last seeded with: same names, same
@@ -1684,7 +1687,7 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// </summary>
     private static string SeedOf(EngineModule module)
     {
-        if (module.ImplicitMembers is null && module.PredeclaredId is null)
+        if (module.ImplicitMembers is null && module.PredeclaredId is null && module.DocumentType is null)
         {
             return module.Source;
         }
@@ -1704,6 +1707,10 @@ internal sealed class AnalysisService : IAsyncDisposable
         // bare use of its name, without a character of its source moving. Folded in so the pass
         // that notices is this one rather than whichever unrelated edit reseeds next.
         seed.Append('\0').Append(module.PredeclaredId switch { true => '1', false => '0', null => '?' });
+
+        // And what a document module derives from, which decides which declarations clash with
+        // its host class: a sheet classified on a later pass than it was first seeded is a reseed.
+        seed.Append('\0').Append(module.DocumentType ?? "?");
 
         return seed.ToString();
     }
