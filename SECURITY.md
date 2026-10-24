@@ -72,11 +72,15 @@ malformed report or a missing result fails the gate too.
   engine's and the editor page's lockfiles, development tools included,
   without running install scripts, and lists every NuGet package of the
   solution with a known vulnerability, transitive ones included. Any
-  advisory fails Security, whatever its severity. The editor page overrides
-  the DOMPurify that monaco-editor 0.57.0 pins exactly (3.4.15) with
-  3.4.16, the release that fixes GHSA-p98j-92pf-mc4p; remove the override
-  in `ui/editor/package.json` once monaco-editor ships a fixed DOMPurify
-  itself.
+  advisory fails Security, whatever its severity. monaco-editor 0.57.0
+  bundles its own copy of DOMPurify 3.4.15 and declares the same version,
+  which has known advisories. The editor page depends on DOMPurify 3.4.17
+  directly, overrides monaco-editor's declared copy with it, and its build
+  (`ui/editor/build.mjs`) sends Monaco's import of its bundled copy to the
+  package instead. The build fails unless the page it writes reports the
+  package's version. An override alone only quiets `npm audit`, because the
+  page never loads the declared copy. Remove all three once monaco-editor
+  bundles a fixed DOMPurify itself.
 - **Malware:** ClamAV, with signatures freshclam fetches and verifies on
   every run, and YARA-X, with the YARA Forge rules pinned to a release and
   its SHA-256, scan every Git-tracked file and, on a published release,
