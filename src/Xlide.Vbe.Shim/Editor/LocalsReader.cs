@@ -475,6 +475,7 @@ internal sealed class LocalsReader : GhostWindowReader
         }
 
         var row = CurrentBounds(element.Target);
+        var before = row;
         if (row is not { } seen || double.IsInfinity(seen.Y) || seen.Y < box.Y || seen.Y + seen.Height > box.Y + box.Height)
         {
             using var item = Pattern<IUIAutomationSelectionItemPattern>(element,
@@ -483,9 +484,18 @@ internal sealed class LocalsReader : GhostWindowReader
             row = CurrentBounds(element.Target);
         }
 
+        // The expander's offset is the control's own, laid out at 96 dots per inch and scaled by
+        // the window's. Unscaled, the click fell short of every nested row's expander under 130%
+        // scaling (an RDP session, 2026-10-23: rows 26px tall, depth 1 clicked at 22 of ~29),
+        // while a top-level row's still landed, so only a member far down an object failed.
+        var dpi = Win32.GetDpiForWindow(reading.ListWindow);
+        var scale = dpi == 0 ? 1.0 : dpi / 96.0;
+        var x = row is { } at ? (int)(at.X - box.X + (6 + Math.Clamp(depth, 0, 10) * 14) * scale) : -1;
+        var y = row is { } on ? (int)(on.Y - box.Y + on.Height / 2) : -1;
+        Log.Verbose($"locals: toggle '{expression}' row {rowIndex}: list {box}, row {before?.ToString() ?? "none"}"
+            + (before == row ? string.Empty : $" then {row?.ToString() ?? "none"}")
+            + $", {dpi} dpi, click {x},{y}");
         if (row is not { } rect || double.IsInfinity(rect.Y)) return;
-        var x = (int)(rect.X - box.X) + 6 + Math.Clamp(depth, 0, 10) * 14;
-        var y = (int)(rect.Y - box.Y + rect.Height / 2);
         if (x < 0 || y < 0 || x >= box.Width || y >= box.Height) return;
         var point = (nint)((y << 16) | (x & 0xffff));
         Win32.PostMessage(reading.ListWindow, 0x0201, 1, point);
