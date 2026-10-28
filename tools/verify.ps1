@@ -950,7 +950,8 @@ if ($Live) {
                                      'closer-typeover.mjs',
                                      # theme drives the Theme setting through every choice under
                                      # both Windows modes, and reads the light surface for AA
-                                     # contrast (#114).
+                                     # contrast (#114), and a name typed into the Rename
+                                     # box in both themes (#128).
                                      'theme.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
