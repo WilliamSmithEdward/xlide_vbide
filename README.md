@@ -9,6 +9,17 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/WilliamSmithEdward/xlide_vbide/blob/main/LICENSE)
 [![Microsoft 365 Windows x64 on Excel, Word, PowerPoint and Access](https://img.shields.io/badge/Microsoft_365_Windows_x64-Excel,_Word,_PowerPoint,_Access-0078D4)](https://github.com/WilliamSmithEdward/xlide_vbide)
 
+## Special thanks
+
+Thank you to our beta testers for trying xlide, reporting issues, and helping improve it:
+
+- [@batGnat](https://github.com/batGnat)
+- [@Vlad-Dumitrescu](https://github.com/Vlad-Dumitrescu)
+- [@yarecky1](https://github.com/yarecky1)
+- [@swsammy](https://github.com/swsammy)
+- [@dfsawdf-droid](https://github.com/dfsawdf-droid)
+- [@yfzdb](https://github.com/yfzdb)
+
 ![The xlide surface inside the VBE: editing side by side, completion from the analyzer, diagnostics with quick fixes, and break mode with live locals](assets/images/tour.gif)
 ***(Yes! This is really the VBA Editor in Excel)***
 
