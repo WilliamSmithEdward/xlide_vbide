@@ -10,7 +10,8 @@
  * on, composited through its ancestors' backgrounds and its own opacity, held to WCAG AA - 4.5:1
  * for text, 3:1 for large text and icons. Disabled controls are exempt, as WCAG exempts them.
  * And dark is read back as dark, because every light rule is scoped to light and a slip in that
- * scoping would show here first.
+ * scoping would show here first. Last, a name typed into the Rename Symbol box is read in both
+ * themes, which the scan cannot see (#128).
  *
  * Windows' mode is emulated for the page through DevTools (prefers-color-scheme), so the suite
  * does not depend on, or change, the machine's own setting. The developer's Theme choice is put
@@ -155,6 +156,38 @@ try {
   }
   await api.act("closeDialogs");
   await editor.js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })), true`);
+
+  // THE RENAME SYMBOL BOX, typed into (#128). Monaco puts the input foreground on the box and
+  // nothing told the input to take it, so a name typed into it was the browser's default black -
+  // invisible on the dark input once the selection that hid it was gone. The scan above skips
+  // inputs, which hold no text nodes, so the box is read on its own, in both themes, after typing.
+  console.log("\nthe Rename Symbol box\n");
+  const project = await api.project();
+  await api.pane("open", { module: "Helper", project: project.projectId });
+  await wait(1500);
+  for (const theme of ["dark", "light"]) {
+    await api.settings({ theme });
+    await wait(800);
+    await editor.js(`(() => { const e = window.xlideBridge.workspace.activeEditor(), m = e.getModel();
+      for (let i = 1; i <= m.getLineCount(); i++) { const t = m.getLineContent(i), k = t.search(/(Sub|Function) [A-Za-z]/);
+        if (k >= 0) { e.focus(); e.setPosition({ lineNumber: i, column: t.indexOf(' ', k) + 2 }); break; } }
+      e.trigger('theme', 'editor.action.rename', {}); return true; })()`);
+    await wait(1200);
+    await editor.cdp("Input.insertText", { text: "Renamed" });
+    await wait(400);
+    const read = await editor.js(`(() => { const i = document.querySelector('.rename-box .rename-input'); if (!i) return null;
+      const parse = (c) => /rgba?\\(([^)]+)\\)/.exec(c)[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+      const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+      const s = getComputedStyle(i), [a, b] = [lum(parse(s.color)), lum(parse(s.backgroundColor))].sort((p, q) => q - p);
+      return { value: i.value, color: s.color, ground: s.backgroundColor, ratio: (a + 0.05) / (b + 0.05) }; })()`);
+    check(`${theme}: a name typed into the Rename box holds AA contrast`, read !== null && read.value === "Renamed" && read.ratio >= 4.5,
+      read ? `${read.color} on ${read.ground}, ${read.ratio.toFixed(2)}:1` : "no rename box");
+    for (const type of ["keyDown", "keyUp"]) {
+      await editor.cdp("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    }
+    await wait(400);
+  }
 } finally {
   await api.settings({ theme: kept }).catch(() => {});
   await editor.cdp("Emulation.setEmulatedMedia", { features: [] }).catch(() => {});

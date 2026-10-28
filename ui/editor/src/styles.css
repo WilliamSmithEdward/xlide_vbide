@@ -4126,6 +4126,14 @@ body.objbrowser-page #objbrowser-card {
   box-shadow: inset -1px 0 0 var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.3));
 }
 
+/* The Rename Symbol box's text, in the theme's input foreground (#128).
+   Monaco sets that colour on the box and nothing tells the input inside to take it, and an input
+   does not inherit text colour, so the name was typed in the browser's default black: on white in
+   light, readable; on the dark input background, nearly invisible once the selection was gone. */
+.monaco-editor .rename-box .rename-input {
+  color: inherit;
+}
+
 /* Where the breakpoint would go, under the pointer. */
 .xlide-breakpoint-hover::after {
   content: "";
