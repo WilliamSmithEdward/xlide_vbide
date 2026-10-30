@@ -48,7 +48,7 @@ updates:
       default-days: 7
       exclude: [pyopenvba, pyofficeeditor, pyprettyvba, vba-reference, pyvbaanalysis, pyvbaharness, xlide-mcp]
   - package-ecosystem: docker
-    directories: [/.github/security/clamav, /.github/security/semgrep]
+    directories: [/.github/security/clamav]
     schedule:
       interval: weekly
     groups:
