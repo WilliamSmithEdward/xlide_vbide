@@ -43,7 +43,7 @@ jobs:
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -51,7 +51,7 @@ jobs:
       - name: Build C# with source generators for extraction
         if: matrix.language == 'csharp'
         run: dotnet build xlide_vbide.slnx --configuration Release --no-incremental -p:UseSharedCompilation=false
-      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           output: security-results/codeql-${{ matrix.language }}
           category: /language:${{ matrix.language }}
@@ -89,7 +89,7 @@ jobs:
             --sarif-output security-results/semgrep/semgrep.sarif .
       - name: Upload to code scanning
         if: always() && github.ref_type != 'tag' && hashFiles('security-results/semgrep/*.sarif') != ''
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: security-results/semgrep/semgrep.sarif
           category: semgrep
@@ -175,7 +175,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12.14"
 
@@ -193,7 +193,7 @@ jobs:
           zizmor --format plain .github/workflows || true
           exit "$status"
 
-      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         if: ${{ !cancelled() }}
         with:
           sarif_file: zizmor.sarif
