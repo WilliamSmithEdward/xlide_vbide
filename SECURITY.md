@@ -142,13 +142,15 @@ release builds the engine from the analyzer commit named in
 `.github/analyzer.json`, which moves by hand; `tools/Pin-Analyzer.ps1` makes
 the same pin for a local build.
 
-Dependabot proposes updates to GitHub Actions, npm, NuGet and the ClamAV and
-Semgrep images weekly, and to the hash-locked Python tools (YARA-X and
-zizmor) daily, in every ecosystem once a version is a week old; and at once
-for a security advisory. The Update YARA rules workflow proposes new YARA
-pins each week. A minor or patch update, and the YARA pull request, merges
-itself once CI, Security and Malware scan pass; a third-party major version
-waits for review.
+Dependabot proposes updates to GitHub Actions, npm, NuGet and the ClamAV
+image weekly, and to the hash-locked Python tools (YARA-X and zizmor)
+daily, in every ecosystem once a version is a week old; and at once for a
+security advisory. The Update YARA rules workflow proposes new YARA pins
+each week, and the Update Semgrep image workflow a new Semgrep image once
+it is a week old (GitHub refuses Dependabot's updates of that image). A
+minor or patch update, and the YARA and Semgrep pull requests, merge
+themselves once CI, Security and Malware scan pass; a third-party major
+version waits for review.
 
 ## Releases
 
