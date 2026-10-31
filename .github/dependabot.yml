@@ -47,16 +47,8 @@ updates:
     cooldown:
       default-days: 7
       exclude: [pyopenvba, pyofficeeditor, pyprettyvba, vba-reference, pyvbaanalysis, pyvbaharness, xlide-mcp]
-  - package-ecosystem: docker
-    directories: [/.github/security/clamav]
-    schedule:
-      interval: weekly
-    groups:
-      minor-and-patch:
-        patterns: ["*"]
-        update-types: [minor, patch]
-    cooldown:
-      default-days: 7
+  # The ClamAV and Semgrep images are not here: GitHub refuses Dependabot's
+  # image updates, so update-images.yml moves them.
   # The SDK pinned in global.json.
   - package-ecosystem: dotnet-sdk
     directory: /
