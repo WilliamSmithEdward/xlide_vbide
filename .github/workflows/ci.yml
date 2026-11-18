@@ -13,6 +13,12 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
 
+# A new push to a pull request cancels its older runs. A push to main waits
+# for the run before it, and only the newest waiting run starts.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ (github.event_name == 'pull_request' || github.event_name == 'push') && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # The ENGINE, which had no CI at all until 2026-08-07 -- including the smoke test that pins
   # every rename and navigation fix from the adversarial pass.
