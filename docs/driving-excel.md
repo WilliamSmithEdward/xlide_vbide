@@ -454,7 +454,8 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Does a closer typed over the one Smart Enter wrote leave one - `endif` above an inserted `End If` - while nested blocks and a closer edited by hand keep theirs | `node tools\harness\closer-typeover.mjs` |
 | Does a committed line read as the VBE rewrote it - `x = 1 + 2` for `x=1+2`, a string closed, `1#` for `1.0` - once the caret leaves it, and never while the caret is on it | `node tools\harness\commit-rewrite.mjs` |
 | Do the toolbar's Bookmarks group and the Bookmarks pane work by pointer and keys - the group's hover, click and keyboard, the pane's rows, Delete, Clear All, its file filter, and a closed module's marks (#111) | `node tools\harness\bookmarks-pane.mjs`, in a session with two or more files open (the gate's three-file group) |
-| Does every Theme choice reach the page, the code editor, the title bar and the Object Browser under both Windows modes, does the light surface hold AA contrast (#114), and is a name typed into the Rename Symbol box readable in both themes (#128) | `node tools\harness\theme.mjs`; the scheme is emulated through DevTools, so Windows' own mode is untouched, and the developer's choice is put back |
+| Does every Theme choice reach the page, the code editor, the title bar and the Object Browser under both Windows modes, does the light surface hold AA contrast (#114), the Changes pane included with a change written into it so its summary, a picked row with its diff and the accepted line are read, is that one pane AA in dark as well, and is a name typed into the Rename Symbol box readable in both themes (#128) | `node tools\harness\theme.mjs`; the scheme is emulated through DevTools, so Windows' own mode is untouched, and the developer's choice and the module the suite changed are put back; it presses Accept, which stays pressed for the session |
+| Can the import and export dialog and the Source Control pane be read, in both themes, in the states their own suites build - a changed module picked with its comparison beside it; rows, a picked row with its comparison and an opened commit | `module-sync.mjs` and `scm.mjs` each read their surface where they already have it on screen, through `tools\harness\contrast.mjs`: the reading `theme.mjs` takes, every text run under one root held to WCAG AA against its composited ground. Scoped to the surface and taking in what is scrolled out of view, so the window's size does not change the answer; each reading says how many runs it took in, so a reading of nothing shows; and the developer's Theme is put back |
 | Are the module's four copies one text - the page's model, the host's shadow, the engine's mirror and the workbook - through a respace by the VBE, a multi-range edit, an outside change while typing, a stale edit and a length tripwire (#105) | `node tools\harness\text-mirror.mjs`; one module by hand: `engineSource(module, { text: true })`, `readModule(module, project, { live: true })` and `readModule(module, project)` |
 | Press a REAL key in the page - Enter, Up, Down - through the DevTools protocol, so it runs through Monaco's keybinding service as a person's key does; `act("press")` types the newline directly and cannot see a binding that steals the key (#103) | `node tools\harness\editor-keys.mjs` (`Input.dispatchKeyEvent` on the `xlide editor` page target) |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
@@ -1807,7 +1808,9 @@ code and elapsed time, so a slow refresh names the command that was slow.
 
 `scm.mjs` pins it against a fixture of its own (`tools\New-ScmFixture.ps1`), initialising a
 repository in a temporary folder, committing, branching, blaming, restoring, importing, and
-putting the fixture back. It needs git.exe and fails naming it rather than skipping:
+putting the fixture back. Where the pane holds the most at once - rows, a picked row with its
+comparison, an opened commit - it also reads the pane for contrast in both themes. It needs
+git.exe and fails naming it rather than skipping:
 
 ```bash
 node tools\harness\scm.mjs

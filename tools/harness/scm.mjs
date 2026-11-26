@@ -35,6 +35,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, ut
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
+import { contrastByTheme, contrastSaid } from "./contrast.mjs";
 
 const api = await open();
 const { check, done } = comparingReporter();
@@ -651,6 +652,24 @@ try {
   await paneIdle();
   const commitOpened = await api.act("scmPane", { commit: first.short });
   check("a commit opens from the pane's history", commitOpened.did, true);
+
+  // AND THE PANE CAN BE READ, in both themes, here because this is where it holds the most at
+  // once: rows with their status words, one of them picked with its comparison beside it, and a
+  // commit unfolded to its files. Every status word was dimmed on top of its git colour until
+  // 2026-11-25 - 2.3:1 for the red on the dark ground, 3.3:1 for the green on the light one - and
+  // "renamed" had no light colour at all. Nothing was looking.
+  //
+  // Each reading says how much it took in, because a root that no longer matches anything reads
+  // nothing and so finds nothing wrong; the checks just above are what say the comparison and
+  // the commit are on screen.
+  await paneIdle();
+  const readable = await contrastByTheme(api, "#scm");
+  for (const theme of ["dark", "light"]) {
+    console.log(`       ${theme}: ${contrastSaid(readable[theme])}`);
+    check(`the pane was read in ${theme}, rows and comparison and history`, readable[theme].read >= 25, true);
+    check(`and holds AA contrast in ${theme}`, readable[theme].fails, []);
+  }
+  await paneIdle();
 
   // ---- a remote: a bare repository beside the folder, then one that cannot answer -------------
 
