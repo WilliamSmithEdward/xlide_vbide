@@ -105,7 +105,20 @@ origin = `http://127.0.0.1:${server.address().port}`;
 const preferenceRoot = process.env.XLIDE_TEST_PREFERENCES_ROOT ?? process.env.LOCALAPPDATA;
 const uiStateFile = join(preferenceRoot, "xlide_vbide", "ui-state.json");
 const updatesFolder = join(preferenceRoot, "xlide_vbide", "updates");
-const uiStateBefore = existsSync(uiStateFile) ? readFileSync(uiStateFile, "utf8") : null;
+
+// READ, NOT ASKED ABOUT FIRST. The file is the product's, written whenever a pane moves, so
+// "is it there?" followed by a write is a window in which it can change between the two - which
+// is what CodeQL's file-system-race said of this suite's first cut, and it was right. A missing
+// file is an answer to the read itself.
+const readIfThere = (file) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+};
+const uiStateBefore = readIfThere(uiStateFile);
 
 try {
   console.log("self-update, against a feed of this suite's own\n");
@@ -245,10 +258,15 @@ try {
 
   if (uiStateBefore !== null) {
     writeFileSync(uiStateFile, uiStateBefore);
-  } else if (existsSync(uiStateFile)) {
-    const parsed = JSON.parse(readFileSync(uiStateFile, "utf8"));
-    delete parsed.updateSkipped;
-    writeFileSync(uiStateFile, JSON.stringify(parsed, null, 2));
+  } else {
+    // No file when the suite began, so one that is there now is the product's from this run:
+    // the skipped version this suite recorded goes, and whatever else it holds stays.
+    const uiStateNow = readIfThere(uiStateFile);
+    if (uiStateNow !== null) {
+      const parsed = JSON.parse(uiStateNow);
+      delete parsed.updateSkipped;
+      writeFileSync(uiStateFile, JSON.stringify(parsed, null, 2));
+    }
   }
 
   for (const name of existsSync(updatesFolder) ? readdirSync(updatesFolder) : []) {
