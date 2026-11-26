@@ -183,7 +183,8 @@ format can be added later around the same payload if a real need appears.
 
 ## 8. Releases are signed
 
-Status: decided, not yet implemented. Blocks public release; does not block development.
+Status: reversed 2026-11-25. The owner: code signing is probably not going to happen. Decision 19
+stands in its place, and the text below is kept for what it weighed.
 
 An unsigned installer triggers a Windows Security warning naming the executable as unpublishable
 ("we can't confirm who published xlide-setup.exe"), observed on this machine during the first
@@ -502,3 +503,37 @@ tools use on the same folder. Consequences: source control is exactly as present
 workbook binary is never committed, because the repository holds source; a form's design is
 compared and written at commit rather than in the live rows; and a save made from Excel's own
 window is not exported until the next save through this editor.
+
+## 19. Self-update verifies the published digest, in place of a signature
+
+Status: decided and implemented 2026-11-25.
+
+The editor asks GitHub's releases API for the newest release once per Office session
+(`update.checkOnStart` in settings.json, on by default, and Check for updates on the wrench menu
+and in About by hand), judges the tag against the running build, and offers it in a dialog with
+its notes. Install downloads `xlide-setup.exe` from that release, checking its length and SHA-256
+against the digest GitHub computed when the file was uploaded, and starts the installer, which
+waits for the Office host to close and installs. The add-in never replaces a file it is loaded
+from; the installer is the one a first install runs, which decision 7 asked for.
+
+The chain of trust, since nothing is signed: TLS to the feed; the repository pinned in code
+(`ProductIdentity.RepositoryOwner` and `RepositoryName`, held to Directory.Build.props by a unit
+test); every address in the feed's answer - the download, the release page - vouched for by the
+source before it is used, so a reply pointing anywhere but the repository's own release path is
+refused before a byte is fetched (`ReleaseFeed`, `UpdateSource`); and the digest checked against
+every byte as it arrives, with a download that disagrees deleted before anything can run it. What
+this does not give is what only a signature gives: a publisher's name in Windows' warning and
+SmartScreen reputation. A file the product downloads itself carries no Mark of the Web, so Windows
+raises no browser-download warning on it; a machine with Smart App Control on judges the executable
+as it judges any unsigned program.
+
+Alternatives weighed: verifying the release's Sigstore provenance bundle inside the add-in, which
+puts a certificate chain and a transparency-log client into a native library for a check GitHub's
+digest already makes; a release feed of the product's own, a second thing to keep running and a
+second thing to trust; and the page fetching the feed itself, which would have spread the trust
+decisions over two places. Consequences: one request to GitHub per session, against the sixty an
+hour an address gets unauthenticated, so a limited answer is "try later" and never a retry; the
+installer continues on its own when the host closes, for everyone, not only for updates; the api's
+`update` route is the dialog's other half, and `update.mjs` drives the whole path against a
+loopback feed, which is the only kind of feed the debug door accepts and which a shipped build has
+no door for at all.

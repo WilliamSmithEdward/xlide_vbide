@@ -1345,6 +1345,13 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateFromPanel;
         _editorSurface.ExternalOpenRequested = OpenExternal;
+        _editorSurface.UpdateActionRequested = action =>
+        {
+            if (OnUpdateAction(action) is { } refused)
+            {
+                _editorSurface?.Notify(refused);
+            }
+        };
         _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
@@ -1554,6 +1561,11 @@ internal sealed partial class AddInSession : IDisposable
             _lastLanguageFactsKey = null;
             _editorSurface?.ShowInstallPath(Interop.ShimModule.Directory);
             _editorSurface?.ShowSystemColours();
+
+            // The newest release, asked for once per session a few seconds from now; and the
+            // updater's state re-said to a reloaded page, so a download in flight keeps its dialog.
+            ScheduleUpdateCheck();
+            ShowUpdate(open: false);
             _hostChrome ??= HostChrome.Install(CodePaneTracker.MainWindow(), Interop.ShimModule.Directory);
             PublishModules();
             PublishProjects();
@@ -13558,6 +13570,10 @@ internal sealed partial class AddInSession : IDisposable
         _stopped = true;
         _framePreferences?.Capture(_frame);
         Log.Info("session stopping");
+
+        // A download in flight is abandoned, not finished: the installer it would have started
+        // can be fetched again next session, and nothing here outlives the host.
+        StopUpdates();
 
         // First out: no debug request may land on a session mid-teardown. The inside door goes
         // with it, and BEFORE the automation references below - it hangs on the add-in object,

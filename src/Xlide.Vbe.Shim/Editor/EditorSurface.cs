@@ -178,6 +178,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised with an address the page wants opened outside itself.</summary>
     public Action<string>? ExternalOpenRequested { get; set; }
 
+    /// <summary>Raised with the update dialog's choice: check, install, skip, notes or cancel.</summary>
+    public Action<string>? UpdateActionRequested { get; set; }
+
     /// <summary>Raised when the page wants a module's text without being taken to it.</summary>
     public Action<string, string?>? DocumentRequested { get; set; }
 
@@ -1750,6 +1753,21 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetInstallPathMessage));
     }
 
+    /// <summary>
+    /// Tells the surface where the self-updater stands. `open` asks the page to put its dialog
+    /// up: an automatic check that found a newer release, any outcome of a check the developer
+    /// asked for by hand, or a step that failed. Progress while the dialog already stands rides
+    /// with it false.
+    /// </summary>
+    public void ShowUpdate(Updates.UpdateStateReply state, bool open)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        Send("setUpdate", JsonSerializer.Serialize(
+            new Updates.SetUpdateMessage("setUpdate", open, state),
+            EditorMessageContext.Default.SetUpdateMessage));
+    }
+
     /// <summary>Tells the surface what this machine's system colours are, for the colour
     /// picker's System half. Sent with the install path, at load, for the same reason: it is a
     /// fact about the machine that the page cannot ask for itself.</summary>
@@ -1871,7 +1889,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.ExplorerView,
                 settings.ApplyAttributesOnSave,
                 settings.ExplorerSort,
-                settings.Theme),
+                settings.Theme,
+                settings.UpdateCheckOnStart),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2514,6 +2533,15 @@ internal sealed class EditorSurface : IDisposable
 
                     break;
 
+                case "update":
+                    if (document.RootElement.TryGetProperty("action", out var updateAction)
+                        && updateAction.GetString() is { Length: > 0 } updateAsked)
+                    {
+                        UpdateActionRequested?.Invoke(updateAsked);
+                    }
+
+                    break;
+
                 case "requestDocument":
                     if (document.RootElement.TryGetProperty("module", out var documentName)
                         && documentName.GetString() is { Length: > 0 } documentAsked)
@@ -2791,6 +2819,9 @@ internal sealed class EditorSurface : IDisposable
                         && themeValue.ValueKind == JsonValueKind.String
                             ? themeValue.GetString() ?? held.Theme
                             : held.Theme;
+                    var checkForUpdates = document.RootElement.TryGetProperty("updateCheckOnStart", out var checkValue)
+                        ? checkValue.ValueKind is not JsonValueKind.False
+                        : held.UpdateCheckOnStart;
 
                     // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
                     // names eight fields and zeroes the rest, so a page settings change silently
@@ -2813,6 +2844,7 @@ internal sealed class EditorSurface : IDisposable
                         ExplorerSort = explorerSort,
                         ApplyAttributesOnSave = applyOnSave,
                         Theme = theme,
+                        UpdateCheckOnStart = checkForUpdates,
                     }).Normalized());
                     break;
                 }

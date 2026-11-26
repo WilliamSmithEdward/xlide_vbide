@@ -78,6 +78,14 @@ const OPTIONS = [
       + "attribute annotations into the attributes the code pane cannot show; importing a module does "
       + "the same. Off leaves the drift in the Problems pane with its quick fix.",
   },
+  {
+    key: "updateCheckOnStart" as const,
+    kind: "toggle" as const,
+    label: "Check for updates when the editor opens",
+    description:
+      "Asks GitHub for the newest release once per Office session and offers it when it is newer "
+      + "than this build. Off asks nothing; Check for updates on the wrench menu still does.",
+  },
   // There is no "indent with tabs" here, and there cannot be a working one: VBA's code store
   // will not hold a tab, and expands any it is handed. Indentation is this many spaces, and
   // Backspace in a line's leading whitespace takes back a whole level of them.

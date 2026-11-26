@@ -101,6 +101,7 @@ import { openSyncDialog } from "./syncdialog.js";
 import { openAgentDialog } from "./agentdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
+import { installUpdateHandlers, openUpdateDialog, pressUpdateButton } from "./updatedialog.js";
 import { Bookmarks } from "./bookmarks.js";
 import { BookmarksPane } from "./bookmarkspane.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
@@ -1160,6 +1161,13 @@ function boot(): void {
         return;
       }
 
+      // Check for updates: the card opens asking, and the host answers into it. The host does
+      // the asking, the judging and the installing; the page only draws where it stands.
+      if (command.id === "checkUpdates") {
+        openUpdateDialog({ check: true }, () => workspace.activeEditor().focus());
+        return;
+      }
+
 
       // Beside About, because it answers the question About raises. The addresses are opened by
       // the HOST: this page is not allowed to navigate anywhere, and the host will only open the
@@ -1192,7 +1200,7 @@ function boot(): void {
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
       || command.id === "openSponsor" || command.id === "openSync" || command.id === "openAgent"
-      || command.id === "restorePaneDefaults"
+      || command.id === "restorePaneDefaults" || command.id === "checkUpdates"
       || command.id === "openAnalysisRules"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
@@ -1641,6 +1649,9 @@ function boot(): void {
   // the product's settings are where the choices that matter live.
   bridge.openSettings = () =>
     openSettingsDialog((next) => bridge.updateSettings(next), () => workspace.activeEditor().focus());
+
+  // The update dialog's one way out: its buttons post to the host through here.
+  installUpdateHandlers({ act: (action) => bridge.update(action) });
 
   // Completions come from the host's engine: the analyzer that verified the Excel object model
   // decides what a receiver offers, and the page only renders the answer. Triggered on the dot
@@ -2422,6 +2433,14 @@ function boot(): void {
     openSponsors: () => openSponsorDialog(
       { openExternal: (url) => bridge.openExternal(url) },
       () => workspace.activeEditor().focus()),
+    updateDialog: (button) => {
+      if (button !== undefined) {
+        return pressUpdateButton(button);
+      }
+
+      openUpdateDialog({ check: true }, () => workspace.activeEditor().focus());
+      return { did: true, detail: "update dialog opened, asking the host to check" };
+    },
     // The same call every control in the settings dialog makes: the whole settings object with
     // one field replaced, posted to the host. Not the host's settings route, which is the path
     // that could never have had this defect.

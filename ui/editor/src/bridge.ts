@@ -4,6 +4,7 @@ import { DocumentStore, HISTORY_URI_SCHEME, docKeyOf, knownFace, type DocumentId
 import type { ExplorerProject } from "./explorer.js";
 import { setSystemColours, type SystemColour } from "./colourpicker.js";
 import { setInstallPath } from "./helpdialog.js";
+import { applyUpdateState, type UpdateState } from "./updatedialog.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { SearchWidget } from "./searchwidget.js";
@@ -131,6 +132,8 @@ export type HostMessage =
   | { type: "obTypesResult"; id: number; types: ObType[] }
   | { type: "obMembersResult"; id: number; members: ObMember[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
+  /** Where the self-updater stands; `open` asks for its dialog now. */
+  | { type: "setUpdate"; open: boolean; state: UpdateState }
   | ({ type: "setSettings" } & IncomingSettings);
 
 /** One test as the Tests pane draws it: identity, place, directive facts, and outcome. */
@@ -594,6 +597,8 @@ export type ClientMessage =
   | { type: "command"; name: string; project?: string }
   | { type: "evaluate"; text: string }
   | { type: "openExternal"; url: string }
+  /** The update dialog's choice: check, install, skip, notes, cancel or dismiss. */
+  | { type: "update"; action: string }
   | { type: "requestDocument"; module: string; project?: string }
   | { type: "panel"; name: string; open: boolean }
   | { type: "menu"; path: number[] }
@@ -1182,6 +1187,14 @@ export class EditorBridge {
    */
   openExternal(url: string): void {
     this.transport.post({ type: "openExternal", url });
+  }
+
+  /**
+   * The update dialog's choice, for the host to act on: it checks, downloads, verifies and
+   * starts the installer, and says where it stands with setUpdate as it goes.
+   */
+  update(action: string): void {
+    this.transport.post({ type: "update", action });
   }
 
   /**
@@ -2355,6 +2368,9 @@ export class EditorBridge {
         return;
       case "setInstallPath":
         setInstallPath(message.path);
+        return;
+      case "setUpdate":
+        applyUpdateState(message.state, message.open);
         return;
       case "setSystemColours":
         // What this machine calls a button face today: the colour picker's System half, which

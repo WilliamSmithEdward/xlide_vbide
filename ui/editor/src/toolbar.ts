@@ -118,6 +118,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "openAnalysisRules", target: "editor", icon: "checklist", label: "Analyzer rules" },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
   { id: "openHelp", target: "editor", icon: "question", label: "About xlide" },
+  { id: "checkUpdates", target: "editor", icon: "cloud-download", label: "Check for updates" },
   { id: "openSponsor", target: "editor", icon: "heart", label: "Support xlide" },
 ];
 

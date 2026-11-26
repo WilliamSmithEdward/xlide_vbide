@@ -284,6 +284,15 @@ internal static class AgentGuide
             "blockLayout=? continueCommentOnNewline=? mirrorCommentSpacing=? insertOptionExplicit=? treeFollowsEditor=? formatIndentSize=? syncEngine=? designerSnap=? designerGridSize=? explorerView=? explorerSort=? applyAttributesOnSave=? theme=?",
             "Reads the product settings, or writes the ones named. insertOptionExplicit (default true) makes every module xlide creates start with Option Explicit; restore never seeds, it recreates what was recorded. explorerView (tree|folders) is which layout the Explorer pane shows. explorerSort (code|name|kind) is how an unfolded module lists its members. applyAttributesOnSave (default true) makes a save write every module's attribute annotations into its attributes first.",
             "GET settings", true, DoorPolicy.Open),
+        new("update", "GET|POST",
+            "action=check|install|skip|notes|cancel? feed=<http://127.0.0.1:port/...>?",
+            "The self-updater, one brain with the Check for updates dialog. Bare, the state: phase (idle, checking, upToDate, available, skipped, downloading, verified, launched, exited, failed), the installed version, the newest release once a check has answered (version, tag, notes, page, size), the download's progress and verified path, the started installer's pid and - if it ended before the Office host closed, which means it did not install - its exit code, and whether this is a development build. action=check asks the releases feed for the newest release and judges it against the running build; install downloads xlide-setup.exe, checks its length and SHA-256 against what the release published, and starts it, after which the installer waits for the Office host to close and installs; skip declines the offered version until a newer one exists; notes opens the release page in the browser; cancel stops a download. Every action answers the state at once; poll the bare GET for the outcome.",
+            "GET update", true, DoorPolicy.Open,
+            "feed= is a debug door for the harness: a loopback feed serving a release of its own, "
+            + "which is how update.mjs drives the whole path without GitHub or a real installer; "
+            + "an empty feed= goes back to GitHub, and action=reset returns to idle. In a "
+            + "development build the state says so, because the installer registers the copy "
+            + "under Programs\\xlide and not the one loaded from the repository."),
         new("command", "POST", "name=<command>",
             "Runs a named editor command at the caret - run, save, stepInto and the rest of the command table.",
             "POST command?name=save", true, DoorPolicy.Open,

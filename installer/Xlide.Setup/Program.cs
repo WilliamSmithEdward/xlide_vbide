@@ -30,8 +30,30 @@ internal static class Program
     private const string UninstallerFileName = "xlide-setup.exe";
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\xlide";
 
+    /// <summary>
+    /// The Office applications that load the add-in, by process name and by the name a person
+    /// knows them by. Replacing files under any of them produces an installation that appears
+    /// to succeed and takes effect at the next restart, which is the one outcome worse than
+    /// waiting.
+    /// </summary>
+    private static readonly (string Process, string Name)[] Hosts =
+    [
+        ("EXCEL", "Excel"),
+        ("WINWORD", "Word"),
+        ("POWERPNT", "PowerPoint"),
+        ("MSACCESS", "Access"),
+    ];
+
     private static int Main(string[] args)
     {
+        // Which installer this is, for a support question and for the harness that drives the
+        // updater: it answers and exits, touching nothing.
+        if (args.Contains("--version", StringComparer.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0");
+            return 0;
+        }
+
         var silent = args.Contains("--silent", StringComparer.OrdinalIgnoreCase);
         var uninstall = args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase);
         var relaunched = args.Contains("--relaunched", StringComparer.OrdinalIgnoreCase);
@@ -535,17 +557,22 @@ internal static class Program
     }
 
     /// <summary>
-    /// Waits while Excel is open, offering to try again or to close it, instead of making someone
-    /// start over. Returns false when they gave up, or when there is nobody to ask.
+    /// Waits while an Office host is open, continuing on its own the moment it closes, and
+    /// offering to close it, instead of making someone start over. Returns false when they gave
+    /// up, or when there is nobody to ask.
     ///
-    /// It says Excel is open rather than that Excel holds the add-in open, because whether the
+    /// It says the host is open rather than that it holds the add-in open, because whether the
     /// add-in is loaded in that process is not known here and often it is not: a first install has
-    /// nothing registered to load. What is true in every case is that Excel is running and these
+    /// nothing registered to load. What is true in every case is that the host is running and these
     /// files cannot safely be replaced while it might pick them up.
+    ///
+    /// Continuing on its own is what makes this the update's last step as well as the install's
+    /// first: the editor starts this program while the host is still up, the developer saves and
+    /// closes, and the install happens with nothing more to press.
     /// </summary>
     private static bool WaitForHostToClose(bool silent)
     {
-        if (!IsHostRunning(out var processId))
+        if (!IsHostRunning(out var processId, out var host))
         {
             return true;
         }
@@ -553,20 +580,42 @@ internal static class Program
         if (silent || Console.IsInputRedirected)
         {
             Console.Error.WriteLine();
-            Console.Error.WriteLine($"Excel is open (process {processId}). Close it and run this again.");
+            Console.Error.WriteLine($"{host} is open (process {processId}). Close it and run this again.");
             return false;
         }
 
-        while (IsHostRunning(out processId))
-        {
-            Console.WriteLine();
-            Console.WriteLine($"Excel is open (process {processId}).");
-            Console.Write("Close Excel, then press Enter. F force closes it (unsaved work is lost). Esc cancels. ");
+        Console.WriteLine();
+        Console.WriteLine($"{host} is open (process {processId}).");
+        Console.WriteLine($"Close {host} and this continues on its own. F force closes it (unsaved work is lost). Esc cancels.");
+        var waitingFor = host;
 
-            ConsoleKeyInfo key;
+        while (IsHostRunning(out _, out host))
+        {
+            if (!string.Equals(host, waitingFor, StringComparison.Ordinal))
+            {
+                // Excel closed and Word is still up: say which one the wait is for now.
+                Console.WriteLine($"{host} is open too. Close {host} and this continues on its own.");
+                waitingFor = host;
+            }
+
             try
             {
-                key = Console.ReadKey(intercept: true);
+                if (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(intercept: true);
+
+                    if (key.Key == ConsoleKey.Escape)
+                    {
+                        Console.WriteLine("Cancelled. Nothing was changed.");
+                        return false;
+                    }
+
+                    if (key.Key == ConsoleKey.F)
+                    {
+                        ForceCloseHosts();
+                        continue;
+                    }
+                }
             }
             catch (InvalidOperationException)
             {
@@ -574,48 +623,40 @@ internal static class Program
                 return false;
             }
 
-            Console.WriteLine();
-
-            if (key.Key == ConsoleKey.Escape)
-            {
-                Console.WriteLine("Cancelled. Nothing was changed.");
-                return false;
-            }
-
-            if (key.Key == ConsoleKey.F)
-            {
-                ForceCloseHost();
-            }
+            Thread.Sleep(500);
         }
 
+        Console.WriteLine($"{waitingFor} has closed. Continuing.");
         return true;
     }
 
     /// <summary>
-    /// Ends Excel, without asking it to close first. The prompt that offers this says unsaved work
-    /// is lost, so someone pressing F has said what they want; a polite close that then sits behind
-    /// an unanswered save prompt would not be doing it.
+    /// Ends every Office host, without asking it to close first. The prompt that offers this says
+    /// unsaved work is lost, so someone pressing F has said what they want; a polite close that
+    /// then sits behind an unanswered save prompt would not be doing it.
     /// </summary>
-    private static void ForceCloseHost()
+    private static void ForceCloseHosts()
     {
-        Console.WriteLine("Force closing Excel.");
-
-        foreach (var process in Process.GetProcessesByName("EXCEL"))
+        foreach (var (processName, name) in Hosts)
         {
-            try
+            foreach (var process in Process.GetProcessesByName(processName))
             {
-                // The tree, because Excel starts helpers, and one surviving child can keep a file
-                // locked after the window everyone was looking at has gone.
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(10_000);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-                Console.Error.WriteLine($"Could not end process {process.Id}: {ex.Message}");
-            }
-            finally
-            {
-                process.Dispose();
+                Console.WriteLine($"Force closing {name} (process {process.Id}).");
+                try
+                {
+                    // The tree, because Office starts helpers, and one surviving child can keep a
+                    // file locked after the window everyone was looking at has gone.
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(10_000);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    Console.Error.WriteLine($"Could not end process {process.Id}: {ex.Message}");
+                }
+                finally
+                {
+                    process.Dispose();
+                }
             }
         }
     }
@@ -681,19 +722,25 @@ internal static class Program
     }
 
     /// <summary>
-    /// Reports whether a host holds the add-in open. Overwriting a loaded library silently produces
-    /// an installation that appears to succeed and does not take effect until the next restart.
+    /// Reports whether an Office host that loads the add-in is running, and which. Overwriting a
+    /// loaded library silently produces an installation that appears to succeed and does not take
+    /// effect until the next restart.
     /// </summary>
-    private static bool IsHostRunning(out int processId)
+    private static bool IsHostRunning(out int processId, out string host)
     {
-        foreach (var process in Process.GetProcessesByName("EXCEL"))
+        foreach (var (processName, name) in Hosts)
         {
-            processId = process.Id;
-            process.Dispose();
-            return true;
+            foreach (var process in Process.GetProcessesByName(processName))
+            {
+                processId = process.Id;
+                host = name;
+                process.Dispose();
+                return true;
+            }
         }
 
         processId = 0;
+        host = string.Empty;
         return false;
     }
 

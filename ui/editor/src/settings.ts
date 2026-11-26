@@ -49,6 +49,8 @@ export interface EditorSettings {
   designerGridSize: number;
   /** The colours: "system" follows Windows' app mode; "light" and "dark" hold one (#114). */
   theme: "system" | "light" | "dark";
+  /** Ask GitHub for the newest release when the editor opens, once per Office session. */
+  updateCheckOnStart: boolean;
 }
 
 /** What ships: the companion editor's own defaults. */
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   designerSnap: "grid",
   designerGridSize: 6,
   theme: "system",
+  updateCheckOnStart: true,
 };
 
 let current: EditorSettings = { ...DEFAULT_SETTINGS };
@@ -101,6 +104,7 @@ export function applySettings(next: IncomingSettings): void {
       : next.designerSnap === "off" ? "off" : "grid",
     designerGridSize: Math.min(24, Math.max(2, Math.round(next.designerGridSize ?? 6) || 6)),
     theme: next.theme === "light" ? "light" : next.theme === "dark" ? "dark" : "system",
+    updateCheckOnStart: next.updateCheckOnStart !== false,
   };
 
   for (const listener of listeners) {
