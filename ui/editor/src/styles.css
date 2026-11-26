@@ -2656,6 +2656,113 @@ body.live-resize .minimap {
   line-height: 1.45;
 }
 
+/* The update dialog: a heading with its X, a few lines of prose, the release notes in a box that
+   scrolls rather than grows, a progress bar while the installer downloads, and the shared button
+   row. Its parts are appended straight to the card, so the card pads them, like the other
+   question cards. Wide enough for a sentence about closing Excel to read as one. */
+#update-backdrop {
+  padding-top: 12vh;
+  z-index: 90;
+}
+
+#update-card {
+  box-sizing: border-box;
+  width: 520px;
+  padding: 16px;
+}
+
+#update-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#update-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#update-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+#update-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.update-line {
+  margin: 8px 0 0;
+  line-height: 1.5;
+
+  /* Several of these lines carry a path, which has no space to break at, and a narrow window is
+     narrower than one: unbroken, it ran off the card's edge and gave the card a sideways bar. */
+  overflow-wrap: anywhere;
+}
+
+/* Four choices do not fit a narrow window in one row. They wrap as whole buttons, rather than
+   each folding its label in two to stay on the row. */
+#update-buttons {
+  flex-wrap: wrap;
+}
+
+#update-buttons .modal-button {
+  white-space: nowrap;
+}
+
+.update-muted {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.update-notes {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 3px;
+  background: var(--vscode-editor-background, rgba(128, 128, 128, 0.08));
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 8px;
+  accent-color: var(--vscode-progressBar-background, #0e70c0);
+}
+
+.update-path {
+  font-size: 12px;
+}
+
+/* The About card's Updates row: the state in words, and the button beside it. */
+#help-updates {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .modal-title {
   font-weight: 600;
   line-height: 1.4;
@@ -7560,6 +7667,7 @@ body.objbrowser-page #objbrowser-card {
 :where(:root[data-theme="light"]) .tree-folder .tree-twisty,
 :where(:root[data-theme="light"]) .tree-item .tree-kind,
 :where(:root[data-theme="light"]) .tree-item .tree-twisty,
+:where(:root[data-theme="light"]) .update-muted,
 :where(:root[data-theme="light"]) span.prop-value.readonly
  {
   opacity: 0.7;

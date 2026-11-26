@@ -108,6 +108,9 @@ native code, so Excel never loads a .NET runtime on its account.
   VBE compile failure say so instead of offering a switch that would be ignored.
 - A local api, off by default, that lets an agent read a module, write one, run a test and drive
   the editor. One switch on a card that explains exactly what turning it on allows.
+- Updates that come to you. A newer release is offered when the editor opens, with its notes;
+  Install fetches the installer from this repository's releases, verifies it against the digest
+  GitHub published, and hands over to it.
 
 ## Installing
 
@@ -117,12 +120,24 @@ and run it.
 It installs to `%LOCALAPPDATA%\Programs\xlide` for the current user. It asks for no administrator
 rights, changes nothing outside your own profile, and needs no runtime, framework, or tool to be
 present first. Everything it needs is inside the one executable. Windows will warn before running
-it, because it carries no code signature yet.
+it, because it carries no code signature.
 
-Close Excel first. If it is open, the installer says so and offers to wait while you close it, or to
-force close it for you.
+Close Excel first. If it is open, the installer says so and waits; it continues on its own when
+Excel closes, or force closes it if you ask.
 
 Then start Excel and press Alt+F11.
+
+## Updating
+
+The editor checks for a newer release once per Office session, a few seconds after it opens, and
+offers it in a dialog: what changed, Install now, Release notes, Skip this version, Not now.
+Install downloads `xlide-setup.exe` from this repository's releases, checks its length and SHA-256
+against the digest GitHub published for that file, and starts it. The installer then waits in its
+own window; save your work and close Excel, and it installs. The next time you open the editor it
+is the new build.
+
+Check for updates is also on the wrench menu and in About xlide. The check on open can be turned
+off in Settings; nothing else ever reaches out, and the check sends nothing but the request.
 
 ## Uninstalling
 

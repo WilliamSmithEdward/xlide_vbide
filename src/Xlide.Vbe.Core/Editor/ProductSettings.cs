@@ -159,6 +159,16 @@ public sealed record ProductSettings
     public string Theme { get; set; } = "system";
 
     /// <summary>
+    /// Whether the editor asks GitHub for the newest release when it opens, once per Office
+    /// session, and offers it when it is newer than this build. On by default, because the
+    /// installer carries no code signature and a developer on an old build has no other way to
+    /// hear that a fix shipped. Off asks nothing; Check for updates on the wrench menu still
+    /// does, by hand.
+    /// </summary>
+    [JsonPropertyName("update.checkOnStart")]
+    public bool UpdateCheckOnStart { get; set; } = true;
+
+    /// <summary>
     /// Which code decides what an import or export will do: "xlide" or "builtIn".
     ///
     /// "xlide" runs the companion editor's own planner inside the engine, so both products make

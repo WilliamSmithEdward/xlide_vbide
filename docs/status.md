@@ -124,8 +124,13 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 ## What is not done
 
-- **Not signed.** The installer carries no code signature, so Windows warns before running it.
-  Signing and update plumbing are the next release-engineering milestone (decision 8).
+- **Not signed, and not going to be** (the owner, 2026-11-25). The installer carries no code
+  signature, so Windows warns before a downloaded one is run. Self-update stands without it
+  (decision 19): the editor asks GitHub for the newest release once per session, downloads the
+  installer from the repository's own release, verifies it by length and the SHA-256 GitHub
+  published for the asset, and starts it; the installer installs when the Office host closes.
+  One brain with the api's `update` route; `update.mjs` drives it end to end against a loopback
+  feed of its own.
 - **Five refactorings**, three of them landed on 2026-09-03.
 
   - `rename` and `renameModule`, the two this product started with.

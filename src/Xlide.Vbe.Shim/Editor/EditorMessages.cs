@@ -293,7 +293,9 @@ public sealed record SetSettingsMessage(
     /// <summary>How an unfolded module lists its members: "code", "name" or "kind".</summary>
     [property: JsonPropertyName("explorerSort")] string ExplorerSort = "code",
     /// <summary>The editor's colours: "system", "light" or "dark".</summary>
-    [property: JsonPropertyName("theme")] string Theme = "system");
+    [property: JsonPropertyName("theme")] string Theme = "system",
+    /// <summary>Whether the editor asks GitHub for the newest release when it opens.</summary>
+    [property: JsonPropertyName("updateCheckOnStart")] bool UpdateCheckOnStart = true);
 
 /// <summary>One search hit, as the results list draws it. Project is the display name.</summary>
 public sealed record SurfaceSearchMatch(
@@ -1165,6 +1167,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetMenuMessage))]
 [JsonSerializable(typeof(SetChromeMessage))]
 [JsonSerializable(typeof(SetInstallPathMessage))]
+[JsonSerializable(typeof(Xlide.Vbe.Shim.Updates.SetUpdateMessage))]
+[JsonSerializable(typeof(Xlide.Vbe.Shim.Updates.UpdateStateReply))]
 [JsonSerializable(typeof(SetSystemColoursMessage))]
 [JsonSerializable(typeof(SystemColourEntry))]
 [JsonSerializable(typeof(SurfaceMenuItem))]

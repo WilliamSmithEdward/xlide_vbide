@@ -837,6 +837,17 @@ function clientFor(entry) {
       call(`settings${query(changes ?? {})}`, changes ? { method: "POST" } : {}),
 
     /**
+     * The self-updater, one brain with the Check for updates dialog. Bare, the state: phase,
+     * the installed version, the newest release once a check has answered, the download's
+     * progress and path, the started installer's pid and exit code. With `action` (check,
+     * install, skip, notes, cancel, reset) the action begins and the state is answered AT ONCE;
+     * poll the bare call for the outcome, as the dialog does. `feed` (debug builds) points the
+     * updater at a loopback feed serving a release of the harness's own; "" goes back to GitHub.
+     */
+    update: ({ action, feed } = {}) =>
+      call(`update${query({ action, feed })}`, action ? { method: "POST" } : {}),
+
+    /**
      * What the VBA project actually CONTAINS: every component, its kind, its line count, and
      * whether the editor has a pane open on it.
      *

@@ -39,4 +39,15 @@ public static class ProductIdentity
 
     /// <summary>File name of the git the Source Control pane looks for. Never bundled.</summary>
     public const string GitFileName = "git.exe";
+
+    /// <summary>
+    /// The GitHub repository releases are published from. The updater asks its releases API for
+    /// the newest release and accepts an installer only from its own download path, so these two
+    /// names are the whole of what decides where a new build may come from. A unit test holds
+    /// them to the RepositoryUrl in Directory.Build.props.
+    /// </summary>
+    public const string RepositoryOwner = "WilliamSmithEdward";
+
+    /// <summary>The repository's name under <see cref="RepositoryOwner"/>.</summary>
+    public const string RepositoryName = "xlide_vbide";
 }

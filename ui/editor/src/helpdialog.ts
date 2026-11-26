@@ -7,6 +7,7 @@
  */
 
 import { openModal } from "./modal.js";
+import { describeUpdateState, openUpdateDialog } from "./updatedialog.js";
 
 declare const __XLIDE_BUILD__: string;
 declare const __XLIDE_VERSION__: string;
@@ -161,6 +162,32 @@ export function openHelpDialog(closed?: () => void): void {
   whereDetail.id = "help-install-path";
   describeInstall(whereDetail);
   facts.append(whereTerm, whereDetail);
+
+  // What the updater knows, and the way to ask it now. The question "is there a newer one" is
+  // asked in the same breath as "which one is this", so it is answered in the same place.
+  const updateTerm = document.createElement("dt");
+  updateTerm.textContent = "Updates";
+  const updateDetail = document.createElement("dd");
+  updateDetail.id = "help-updates";
+
+  const updateStatus = document.createElement("span");
+  updateStatus.id = "help-update-status";
+  updateStatus.textContent = describeUpdateState();
+
+  const check = document.createElement("button");
+  check.type = "button";
+  check.id = "help-check-updates";
+  check.className = "help-copy";
+  check.textContent = "Check for updates";
+  check.addEventListener("click", () => {
+    // One card at a time: this one goes, the update card comes, and the focus the About card
+    // would have given back goes to the update card instead.
+    dismiss();
+    openUpdateDialog({ check: true }, closed);
+  });
+
+  updateDetail.append(updateStatus, check);
+  facts.append(updateTerm, updateDetail);
 
   const keysTitle = document.createElement("div");
   keysTitle.className = "help-section";

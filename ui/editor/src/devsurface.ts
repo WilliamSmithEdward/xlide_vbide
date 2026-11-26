@@ -363,6 +363,12 @@ export interface DevSurfaceParts {
   openReferences(position: { line: number; column: number }): Promise<boolean>;
   openSettings(): void;
   openSponsors(): void;
+  /**
+   * The update dialog: bare, opens it the way the wrench's Check for updates does, which also
+   * asks the host to check; with a button's action name, presses that button through its own
+   * click. Answers what it did.
+   */
+  updateDialog(button?: string): { did: boolean; detail: string };
   /** What the status line is showing, read from the element the render writes. */
   statusNotice(): string;
   /** The status bar's caret readout ("Ln 4, Col 7"), read the same way. */
@@ -2037,6 +2043,15 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       parts.openSponsors();
       return { did: true, detail: "sponsor dialog opened" };
     },
+
+    /**
+     * The update dialog: `act("update")` opens it as the wrench's Check for updates does, and
+     * `act("update", {button: "install"})` presses one of its buttons by action name - check,
+     * install, notes, skip, cancel or close - through the button's own click, which is the path
+     * a developer's pointer takes. The host's `update` route is the other half: it answers the
+     * state the card draws, and the same actions without the card.
+     */
+    update: (args) => parts.updateDialog(args.button === undefined ? undefined : String(args.button)),
 
     /**
      * Presses a toolbar command by id: `act("toolbar", {command: "openSync"})`.

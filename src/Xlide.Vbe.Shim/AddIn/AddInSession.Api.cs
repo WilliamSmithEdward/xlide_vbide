@@ -4766,6 +4766,48 @@ internal sealed partial class AddInSession
                 }
             }
 
+            case "update":
+            {
+                // THE SELF-UPDATER, one brain with the Check for updates dialog: the same state the
+                // dialog draws, and the same actions its buttons press. Bare, the state; with an
+                // action, the action is begun and the state answered AT ONCE - a check or a
+                // download runs off the host thread and a caller polls the bare GET for the
+                // outcome, which is what the dialog does too.
+#if DEBUG
+                // The harness points the updater at a loopback feed serving a release of its own,
+                // so the whole path - feed, digest, download, launch - is driven without GitHub or
+                // a real installer. A debug door only: a shipped build reads GitHub and nothing
+                // else, and UpdateSource.Loopback refuses any address that is not 127.0.0.1.
+                if (request.Query.TryGetValue("feed", out var feed))
+                {
+                    if (feed.Length == 0)
+                    {
+                        _updateSource = Xlide.Vbe.Core.Updates.UpdateSource.GitHub;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            _updateSource = Xlide.Vbe.Core.Updates.UpdateSource.Loopback(new Uri(feed));
+                        }
+                        catch (Exception ex) when (ex is ArgumentException or UriFormatException)
+                        {
+                            return HostError($"feed must be http://127.0.0.1:<port>/...: {ex.Message.Trim()}");
+                        }
+                    }
+                }
+#endif
+
+                if (request.Query.TryGetValue("action", out var updateAction) && updateAction.Length > 0
+                    && OnUpdateAction(updateAction) is { } updateRefusal)
+                {
+                    return HostError(updateRefusal);
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    UpdateState(), DebugJsonContext.Default.UpdateStateReply);
+            }
+
             case "undoRename":
             {
                 // The same path the editor's own Undo Rename takes. Here so a probe can prove a
@@ -4861,6 +4903,7 @@ internal sealed partial class AddInSession
                         Theme = request.Query.TryGetValue("theme", out var theme)
                             ? theme
                             : settings.Theme,
+                        UpdateCheckOnStart = Flag("updateCheckOnStart", settings.UpdateCheckOnStart),
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4880,7 +4923,8 @@ internal sealed partial class AddInSession
                         settings.ExplorerView,
                         settings.ApplyAttributesOnSave,
                         settings.ExplorerSort,
-                        settings.Theme),
+                        settings.Theme,
+                        settings.UpdateCheckOnStart),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

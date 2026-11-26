@@ -953,6 +953,11 @@ if ($Live) {
                                      # contrast (#114), and a name typed into the Rename
                                      # box in both themes (#128).
                                      'theme.mjs',
+                                     # update drives the self-updater end to end against a feed
+                                     # of its own on a loopback port: the check, the dialog, a
+                                     # download verified by length and SHA-256, the installer
+                                     # started, and every refusal. Installs nothing.
+                                     'update.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',

@@ -15,12 +15,14 @@ pane positions, sizes, active tabs, and closed panes. Choose **Restore defaults*
 default arrangement for future Office sessions, or **Cancel** to keep your layout. Code,
 editor settings, code-editor splits, and native window geometry are retained.
 
-- `settings.json` holds editor behavior, Explorer choices, analyzer rule overrides, and
-  the agent API switch. Existing settings files keep their format and location.
+- `settings.json` holds editor behavior, Explorer choices, analyzer rule overrides, the
+  agent API switch, and `update.checkOnStart`, whether the editor asks GitHub for the newest
+  release once per Office session. Existing settings files keep their format and location.
 - `sync.json` holds each project's import/export choices and source-control folder.
 - `ui-state.json` holds pane visibility, active pane tabs, dock sides, tab order, split
-  proportions, pane sizes, the Source Control divider, editor group geometry, and the
-  editor and Object Browser windows' normal bounds and maximized state.
+  proportions, pane sizes, the Source Control divider, editor group geometry, the
+  editor and Object Browser windows' normal bounds and maximized state, and
+  `updateSkipped`, a release version the developer declined from the update dialog.
 
 Editor group geometry is shared across hosts. Restored empty groups are available for
 the modules opened in the new session; source text and document identities belong to
