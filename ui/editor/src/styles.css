@@ -85,6 +85,9 @@ body {
     --vscode-gitDecoration-addedResourceForeground: #1f6b26;
     --vscode-gitDecoration-modifiedResourceForeground: #7a4f00;
     --vscode-gitDecoration-deletedResourceForeground: #b3121a;
+    /* Named, because unnamed it fell back to the dark surface's green: 1.9:1 on this ground.
+       The added green, since the word beside it says which of the two happened. */
+    --vscode-gitDecoration-renamedResourceForeground: #1f6b26;
     --vscode-charts-blue: #005fb8;
     --vscode-charts-green: #1f6b26;
     --vscode-charts-purple: #6b2fa0;
@@ -4745,9 +4748,11 @@ body.objbrowser-page #objbrowser-card {
   white-space: nowrap;
 }
 
+/* 0.75: it also sits on a PICKED row, whose blue is lighter than the card, and 0.65 read 4.3:1
+   there. */
 .sync-item-detail {
   font-size: 11px;
-  opacity: 0.65;
+  opacity: 0.75;
 }
 
 .sync-item-warning {
@@ -4777,8 +4782,10 @@ body.objbrowser-page #objbrowser-card {
   border-color: rgba(226, 192, 141, 0.45);
 }
 
+/* The dark red is the Changes pane's, for the reason given there: #c74e39 read 3.3:1 on this
+   card. The border keeps the hue it had. */
 .sync-chip[data-tone="remove"] {
-  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #ee9383);
   border-color: rgba(199, 78, 57, 0.45);
 }
 
@@ -4787,8 +4794,10 @@ body.objbrowser-page #objbrowser-card {
   border-color: rgba(241, 76, 76, 0.45);
 }
 
+/* The quiet chip still says a word, "same". 0.55 read 4.2:1 on the card and 3.5:1 on a picked
+   row; 0.75 is the detail line's figure beside it, for the same row. */
 .sync-chip[data-tone="muted"] {
-  opacity: 0.55;
+  opacity: 0.75;
   border-color: var(--vscode-editorWidget-border, #454545);
 }
 
@@ -4847,10 +4856,14 @@ body.objbrowser-page #objbrowser-card {
   white-space: pre;
 }
 
+/* 0.7, in the dialog and wherever else this renderer draws (the Changes pane, its full-size
+   view). 0.4 read 2.9:1 on the dark ground and 2.6:1 on a changed or an added line's tint; 0.7
+   holds 4.7:1 or better on the tints and 5.8:1 on the plain ground. It is the light surface's
+   figure too, which names it again at the end of the file. */
 .sync-gutter {
   padding-right: 8px;
   text-align: right;
-  opacity: 0.4;
+  opacity: 0.7;
   user-select: none;
 }
 
@@ -4918,7 +4931,8 @@ body.objbrowser-page #objbrowser-card {
   padding: 2px 12px;
   font-family: var(--vscode-font-family, sans-serif);
   font-size: 11px;
-  opacity: 0.55;
+  /* "6 identical lines" is a sentence: 0.55 read 4.2:1, and 0.7 is the line numbers' figure. */
+  opacity: 0.7;
 }
 
 /* ---- the form designer tab: markup document beside the honest canvas ---- */
@@ -6088,8 +6102,10 @@ body.objbrowser-page #objbrowser-card {
   white-space: nowrap;
 }
 
+/* 0.75, where its neighbour the time rests at 0.6: this one also sits on a PICKED row, whose
+   ground is lighter, and 0.6 read 3.8:1 there. 0.75 holds 4.9:1 picked and 6.6:1 at rest. */
 .changes-kind {
-  opacity: 0.6;
+  opacity: 0.75;
   font-size: 11px;
 }
 
@@ -6104,12 +6120,18 @@ body.objbrowser-page #objbrowser-card {
   color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
 }
 
+/* The fallback is the DARK colour; the light surface names its own. It was #c74e39, the red git
+   decorations wear, which read 3.4:1 on the dark ground and 2.4:1 on a picked row. This is that
+   hue lifted until it reads as the green beside it does, ground for ground: 6.8:1 at rest and
+   4.6:1 or better picked, against the green's 6.9:1 and 4.7:1. */
 .changes-removed {
-  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #ee9383);
 }
 
+/* "text let go", in place of the counts. 0.5 worked out to 3.7:1 on the dark ground; 0.75 is the
+   kind label's figure beside it, for the same picked row. */
 .changes-gone {
-  opacity: 0.5;
+  opacity: 0.75;
 }
 
 /* The accepted line: everything above it is what has happened since. */
@@ -6138,7 +6160,8 @@ body.objbrowser-page #objbrowser-card {
   text-align: right;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.45;
+  /* The quietest thing on the row that still has to be read: 0.45 was 3.3:1, this is 4.7:1. */
+  opacity: 0.6;
 }
 
 /* The comparison, full size. The pane is a strip along the bottom and a diff is two columns of
@@ -6172,6 +6195,16 @@ body.objbrowser-page #objbrowser-card {
   border: 1px solid rgba(140, 140, 140, 0.45);
   border-radius: 4px;
   background: rgba(128, 128, 128, 0.08);
+}
+
+/* AT FULL STRENGTH, where the strip's other buttons rest at 0.8. This one carries readings
+   rather than a label, and 0.8 multiplied into them: on the light surface the green count fell to
+   3.8:1 and the tally, dimmed to 0.75 of its own, to 4.3:1; on the dark one the red count fell to
+   2.5:1 and the tally to 4.5:1. The outline and the ground still say button, and hovering still
+   deepens the ground. A disabled summary keeps the strip's 0.4: this selector leaves it out, as
+   WCAG leaves it out. */
+#changes-actions #changes-summary:not(:disabled) {
+  opacity: 1;
 }
 
 /* Air between the two counts: the green and the red are one reading, not one word (the owner:
@@ -7226,9 +7259,12 @@ body.objbrowser-page #objbrowser-card {
   white-space: nowrap;
 }
 
+/* NOT DIMMED AS WELL AS COLOURED. Every status the pane shows wears one of git's colours below,
+   and a 0.7 here multiplied into each of them: the red read 2.3:1 on the dark ground and 4:1
+   on the light one, the green 4.1:1 and 3.3:1. The smaller size and the colour are the quieter
+   voice; the word still has to be read. */
 .scm-status {
   font-size: 11px;
-  opacity: 0.7;
 }
 
 /* Git's own colours for what happened to a file, from the same variables the tree badges use.
@@ -7243,9 +7279,10 @@ body.objbrowser-page #objbrowser-card {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
 }
 
+/* The dark red is the Changes pane's, for the reason given there. */
 .scm-status-deleted,
 .scm-status-missingInProject {
-  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #ee9383);
 }
 
 .scm-status-renamed {
@@ -7485,6 +7522,13 @@ body.objbrowser-page #objbrowser-card {
   flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+/* THE ACCEPTED LINE, ON THE LIGHT SURFACE. It is dimmed to 0.7 like the grey text around it, but
+   it is green, and the light green at 0.7 read 3.3:1 where the dark one holds 4.9:1. At full
+   strength it holds 6.1:1. */
+:where(:root[data-theme="light"]) .changes-accepted {
+  opacity: 1;
 }
 
 /* DIMMED TEXT, ON THE LIGHT SURFACE (#114). These rules de-emphasise text with opacity, which

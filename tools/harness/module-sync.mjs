@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { open, wait, waitFor, waitUntilStable, comparingReporter } from "./xlide-api.mjs";
+import { contrastByTheme, contrastSaid } from "./contrast.mjs";
 
 const api = await open();
 
@@ -302,6 +303,29 @@ try {
   const planDrawn = await rowsOf();
   check("the dialog drew the same plan the api answers", planDrawn.includes("Helper.bas:will-update"));
   if (!planDrawn.includes("Helper.bas:will-update")) { console.log(`       drawn: ${planDrawn}`); }
+
+  // AND IT CAN BE READ, in both themes, here because this is the one moment the suite has the
+  // dialog in a state worth reading: the changed module's row picked, on the selection's ground,
+  // its comparison beside it with line numbers and a folded run of identical lines, and a "same"
+  // chip on every other row. The dark dialog fell short four ways in exactly this state until
+  // 2026-11-25 - the line numbers at 2.9:1 - and nothing was looking.
+  //
+  // Two guards before the verdict. The comparison is waited for, by the same reading scm.mjs
+  // takes of its own, because a dialog read before it draws passes on less than it claims; and
+  // each reading says how much it took in, because a root that no longer matches anything reads
+  // nothing and so finds nothing wrong.
+  const comparison = await waitFor("the picked row's comparison to draw", async () => {
+    const said = await api.ask(`document.querySelectorAll('#sync-card .sync-diff-row').length`);
+    const count = typeof said === "number" ? said : Number(said);
+    return count > 0 ? count : false;
+  }, { budgetMs: 15000 });
+  check("the changed module's comparison is showing, nothing clicked", comparison > 0);
+  const readable = await contrastByTheme(api, "#sync-card");
+  for (const theme of ["dark", "light"]) {
+    console.log(`       ${theme}: ${contrastSaid(readable[theme])}`);
+    check(`the dialog was read in ${theme}, rows and comparison and all`, readable[theme].read >= 40);
+    check(`and holds AA contrast in ${theme}`, readable[theme].fails, []);
+  }
 
   const applied = await api.act("syncDialog", { press: "apply" });
   if (!applied.did) { throw new Error(`Apply could not be pressed: ${applied.detail}`); }
