@@ -315,22 +315,30 @@ jobs:
           name: editor-page
           path: ui/editor/dist
 
-      - name: Publish the native shim
-        run: dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Release -r win-x64
+      # BOTH WIDTHS, staged and packed the way a release is. A host loads only a library of its
+      # own width, so the product is a 64-bit shim and a 32-bit one, and the script Publish runs
+      # is what publishes them, checks each is the width its folder says, and builds the
+      # installer that carries both. Without an engine: that is built by another job from
+      # another repository, and nothing below needs one.
+      - name: Build an installer with both shims
+        shell: pwsh
+        run: ./installer/build.ps1 -WithoutEngine
 
-      - name: Check that the shim is a native server
+      - name: Check that each shim is a native server
         shell: pwsh
         run: |
-          $shim = 'artifacts/publish/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
-          if (-not (Test-Path $shim)) { throw "No shim was published at $shim." }
+          foreach ($runtime in 'win-x64', 'win-x86') {
+            $shim = "artifacts/publish/Xlide.Vbe.Shim/release_$runtime/Xlide.Vbe.Shim.dll"
+            if (-not (Test-Path $shim)) { throw "No shim was published at $shim." }
 
-          $size = (Get-Item $shim).Length / 1MB
-          Write-Host ('Shim is {0:N2} MB.' -f $size)
+            $size = (Get-Item $shim).Length / 1MB
+            Write-Host ('The {0} shim is {1:N2} MB.' -f $runtime, $size)
 
-          # A runtime-hosted build would drag a runtime alongside it. Catching that here keeps the
-          # no-runtime-on-the-user's-machine promise from regressing quietly.
-          $runtime = Get-ChildItem (Split-Path $shim) -Filter 'hostfxr.dll' -ErrorAction SilentlyContinue
-          if ($runtime) { throw 'A runtime was published next to the shim. The build is no longer ahead-of-time.' }
+            # A runtime-hosted build would drag a runtime alongside it. Catching that here keeps the
+            # no-runtime-on-the-user's-machine promise from regressing quietly.
+            $hosted = Get-ChildItem (Split-Path $shim) -Filter 'hostfxr.dll' -ErrorAction SilentlyContinue
+            if ($hosted) { throw "A runtime was published next to the $runtime shim. The build is no longer ahead-of-time." }
+          }
 
       - name: Check that the shim carries the editor page
         shell: pwsh
@@ -357,31 +365,57 @@ jobs:
       - name: Check that Release ships the api shut
         shell: pwsh
         run: |
-          $shim = 'artifacts/bin/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
-          if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
+          foreach ($runtime in 'win-x64', 'win-x86') {
+            $shim = "artifacts/bin/Xlide.Vbe.Shim/release_$runtime/Xlide.Vbe.Shim.dll"
+            if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
 
-          # BOTH ALIGNMENTS. A .NET string literal lives in the #US heap as UTF-16 and nothing
-          # makes it start on an even byte, so decoding from offset 0 alone garbles every literal
-          # that lands on an odd one - which reads as "not found" and passes having checked
-          # nothing. This scan had one alignment until 2026-08-22.
-          $bytes = [IO.File]::ReadAllBytes($shim)
-          $text = [Text.Encoding]::Unicode.GetString($bytes) +
-            [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
-            [Text.Encoding]::ASCII.GetString($bytes)
+            # BOTH ALIGNMENTS. A .NET string literal lives in the #US heap as UTF-16 and nothing
+            # makes it start on an even byte, so decoding from offset 0 alone garbles every literal
+            # that lands on an odd one - which reads as "not found" and passes having checked
+            # nothing. This scan had one alignment until 2026-08-22.
+            $bytes = [IO.File]::ReadAllBytes($shim)
+            $text = [Text.Encoding]::Unicode.GetString($bytes) +
+              [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
+              [Text.Encoding]::ASCII.GetString($bytes)
 
-          $shut = 'this build keeps the door shut unless told otherwise'
-          $open = 'this build opens the door unless told otherwise'
-          if (-not $text.Contains($shut)) { throw 'Release does not say it ships the api shut.' }
-          if ($text.Contains($open)) { throw "RELEASE SHIPS THE API OPEN: found '$open'." }
-          if (-not $text.Contains('xlide-api-')) { throw 'Release carries no api at all.' }
+            $shut = 'this build keeps the door shut unless told otherwise'
+            $open = 'this build opens the door unless told otherwise'
+            if (-not $text.Contains($shut)) { throw "$runtime does not say it ships the api shut." }
+            if ($text.Contains($open)) { throw "RELEASE SHIPS THE API OPEN in ${runtime}: found '$open'." }
+            if (-not $text.Contains('xlide-api-')) { throw "$runtime carries no api at all." }
 
-          # The DevTools protocol is NOT part of the api and must never ship: it takes no token,
-          # and --remote-allow-origins=* means anything local that reaches the port drives the
-          # page.
-          foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
-            if ($text.Contains($needle)) { throw "Release carries an unauthenticated door: found '$needle'." }
+            # The DevTools protocol is NOT part of the api and must never ship: it takes no token,
+            # and --remote-allow-origins=* means anything local that reaches the port drives the
+            # page.
+            foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
+              if ($text.Contains($needle)) { throw "$runtime carries an unauthenticated door: found '$needle'." }
+            }
+            Write-Host "$runtime ships the api shut, and no unauthenticated door."
           }
-          Write-Host 'Release ships the api shut, and no unauthenticated door.'
+
+      # No runner has an Office on it, and none is needed to ask whether a library LOADS: every
+      # 64-bit Windows has a Windows PowerShell of each width, and a process is all a library
+      # needs. Each shim is loaded into the one of its own width, asked for its class factory
+      # the way COM asks, and called by name the way a host that late-binds calls it.
+      - name: Load each shim into a process of its own width
+        shell: powershell
+        run: ./tools/harness/Test-ShimLoad.ps1 -Configuration Release
+
+      # THIS MACHINE IS THROWN AWAY, so the installer can be run on it for real: installed,
+      # asked through COM by ProgID from a process of each width for the library it was given,
+      # and uninstalled, with the registry and the folder checked at both ends. The script
+      # refuses to do this anywhere but a CI runner.
+      - name: Install, check both widths resolve, and uninstall
+        shell: powershell
+        run: ./tools/harness/Test-InstallerWidths.ps1 -Installer artifacts/xlide-setup-editor-only.exe
+
+      - name: Keep the load reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shim-load-release
+          path: artifacts/shim-load/*.txt
+          if-no-files-found: warn
 
       - name: Upload artifacts
         if: always()
@@ -391,10 +425,77 @@ jobs:
           path: artifacts/publish/Xlide.Vbe.Shim/release_win-x64/
           if-no-files-found: error
 
+  # THE SHIM'S OWN CODE, IN A 32-BIT PROCESS.
+  #
+  # 32-bit and 64-bit Office cannot be installed side by side, so no developer machine has a
+  # host for the 32-bit shim, and before 2026-11-28 nothing had ever run a line of it: it built,
+  # and it would have failed the first time it made a window, on an entry point only the 64-bit
+  # user32 exports. A Debug shim exports a self-check that runs the parts that depend on the
+  # width of a pointer - a window and its slots, automation calls and their errors, a type
+  # library, the font callback, a picture, UI Automation reads, the job object, the browser -
+  # through the product's own code. It runs here in a process of each width, and what must read
+  # the same in both is compared. See src/Xlide.Vbe.Shim/Diagnostics/SelfCheck.cs.
+  #
+  # Without the engine stage: this job builds no engine. The release gate runs it with one.
+  shim-check:
+    name: Shim self-check, 32-bit and 64-bit
+    needs: page
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Download the built page
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: editor-page
+          path: ui/editor/dist
+
+      - name: Publish the Debug shim for both widths
+        shell: pwsh
+        run: |
+          foreach ($runtime in 'win-x64', 'win-x86') {
+            dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Debug -r $runtime
+            if ($LASTEXITCODE -ne 0) { throw "Publishing the Debug shim for $runtime failed." }
+          }
+
+      - name: Run the self-check in a process of each width
+        shell: powershell
+        run: ./tools/harness/Test-ShimLoad.ps1 -Skip engine
+
+      # The same again from a copy laid out as the installer lays it out, where the 32-bit shim
+      # sits one folder below the page and the icon and has to look up for them.
+      - name: Run it again laid out as an installation
+        shell: powershell
+        run: ./tools/harness/Test-ShimLoad.ps1 -InstalledLayout -Skip engine
+
+      - name: Collect the shim's own logs
+        if: failure()
+        shell: pwsh
+        run: |
+          $logs = Join-Path $env:LOCALAPPDATA 'xlide_vbide/logs'
+          if (Test-Path $logs) { Copy-Item (Join-Path $logs '*.log') artifacts/shim-load/ -ErrorAction SilentlyContinue }
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shim-load-debug
+          path: |
+            artifacts/shim-load/*.txt
+            artifacts/shim-load/*.log
+          if-no-files-found: warn
+
   ci-passed:
     name: CI passed
     if: always()
-    needs: [engine, page, dotnet, shim]
+    needs: [engine, page, dotnet, shim, shim-check]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
