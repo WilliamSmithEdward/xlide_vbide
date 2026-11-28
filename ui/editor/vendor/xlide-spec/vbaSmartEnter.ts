@@ -38,8 +38,41 @@ export interface VbaSmartBlockInsertion {
 
 export type VbaSmartBlockLayout = 'comfy' | 'compact';
 
+/** The indentation level a snippet or block template is written with. */
 export const VBA_BLOCK_INDENT_UNIT = '\t';
 export const DEFAULT_VBA_SMART_BLOCK_LAYOUT: VbaSmartBlockLayout = 'comfy';
+/**
+ * A With member line: a leading dot with a member after it. A lone `.`, the
+ * dot XLIDE seeds, is no member yet, so Enter on it seeds no other (issue #1620).
+ */
+export const WITH_MEMBER_LINE_RE = /^[ \t]*\.[ \t]*[\p{L}_[]/u;
+
+/** The editor options that decide what one indentation level is. */
+export interface VbaIndentOptions {
+    insertSpaces?: boolean | string;
+    tabSize?: number | string;
+    indentSize?: number | string;
+}
+
+/** The widest indent size taken from settings, far above any real one. */
+const MAX_VBA_INDENT_SIZE = 32;
+
+/**
+ * One indentation level as the editor writes it: a tab, or with
+ * `insertSpaces` as many spaces as its indent size, which VS Code takes from
+ * `tabSize` unless `editor.indentSize` is set. A size read from raw settings
+ * is not validated by VS Code, so one above MAX_VBA_INDENT_SIZE is ignored
+ * rather than repeated into a huge string on every completion.
+ */
+export function vbaIndentUnit(options: VbaIndentOptions): string {
+    if (options.insertSpaces === false) {
+        return '\t';
+    }
+    const size = [options.indentSize, options.tabSize]
+        .map(Number)
+        .find((value) => Number.isInteger(value) && value > 0 && value <= MAX_VBA_INDENT_SIZE);
+    return ' '.repeat(size ?? 4);
+}
 
 export function normalizeSmartBlockLayout(value: unknown): VbaSmartBlockLayout {
     return value === 'compact' ? 'compact' : DEFAULT_VBA_SMART_BLOCK_LAYOUT;
@@ -87,19 +120,26 @@ interface LoopNextLine {
 
 type LoopLineInfo = LoopOpenerLine | LoopNextLine;
 
+// The VBE takes the access word and Static in either order: `Public Static
+// Sub` and `Static Public Sub` both declare a procedure (issue #1496).
+const PROCEDURE_MODIFIERS = '(?:(?:Public|Private|Friend|Global)\\s+(?:Static\\s+)?|Static\\s+(?:(?:Public|Private|Friend|Global)\\s+)?)?';
+const PROCEDURE_OPENER_RE = new RegExp(`^${PROCEDURE_MODIFIERS}(?:Sub|Function|Property)\\b`, 'i');
+/** A Type field: one name, perhaps an array's bounds, then As. */
+const TYPE_FIELD_RE = /^[\p{L}_][\p{L}\p{M}\p{N}_]*\s*(?:\([^)]*\)\s*)?As\b/iu;
+
 export function procedureHeaderParensEdit(line: string): VbaProcedureHeaderParensEdit | undefined {
     const stripped = lexerStrippedLine(line);
     const patterns = [
         new RegExp(
-            `^(\\s*(?:(?:Public|Private|Friend|Global)\\s+)?(?:Static\\s+)?Sub\\s+${VBA_IDENTIFIER_PATTERN})(\\s*)$`,
+            `^(\\s*${PROCEDURE_MODIFIERS}Sub\\s+${VBA_IDENTIFIER_PATTERN})(\\s*)$`,
             'iu',
         ),
         new RegExp(
-            `^(\\s*(?:(?:Public|Private|Friend|Global)\\s+)?(?:Static\\s+)?Function\\s+${VBA_IDENTIFIER_PATTERN})(\\s*(?:As\\s+.+)?\\s*)$`,
+            `^(\\s*${PROCEDURE_MODIFIERS}Function\\s+${VBA_IDENTIFIER_PATTERN})(\\s*(?:As\\s+.+)?\\s*)$`,
             'iu',
         ),
         new RegExp(
-            `^(\\s*(?:(?:Public|Private|Friend|Global)\\s+)?(?:Static\\s+)?Property\\s+Get\\s+${VBA_IDENTIFIER_PATTERN})(\\s*(?:As\\s+.+)?\\s*)$`,
+            `^(\\s*${PROCEDURE_MODIFIERS}Property\\s+Get\\s+${VBA_IDENTIFIER_PATTERN})(\\s*(?:As\\s+.+)?\\s*)$`,
             'iu',
         ),
     ];
@@ -121,6 +161,11 @@ export function procedureHeaderParensEdit(line: string): VbaProcedureHeaderParen
 export function detectSmartBlockOpener(strippedLine: string): VbaSmartBlockOpener | undefined {
     const t = strippedLine.trim();
     if (!t || t.includes(':')) {
+        return undefined;
+    }
+    // A Type field named like a block word, `Sub As Long` or `Next(1 To 2) As Long`
+    // (issue #1619). No block line has As straight after its first word.
+    if (TYPE_FIELD_RE.test(t)) {
         return undefined;
     }
 
@@ -327,7 +372,7 @@ export function withMemberContinuationText(
     if (previousLine === undefined) {
         return undefined;
     }
-    if (!/^[ \t]*\./.test(lexerStrippedLine(previousLine))) {
+    if (!WITH_MEMBER_LINE_RE.test(lexerStrippedLine(previousLine))) {
         return undefined;
     }
 
@@ -541,7 +586,7 @@ function isCompleteSmartBlockOpener(t: string, kind: BlockKind): boolean {
 }
 
 function isProcedureOpener(t: string): boolean {
-    return /^(?:(?:Public|Private|Friend|Global)\s+)?(?:Static\s+)?(?:Sub|Function|Property)\b/i.test(t);
+    return PROCEDURE_OPENER_RE.test(t);
 }
 
 function closerRegex(endKeyword: string): RegExp {
