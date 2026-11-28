@@ -78,6 +78,8 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editor.foreground": "#d4d4d4",
     "editorLineNumber.foreground": "#6e7681",
     "editorLineNumber.activeForeground": "#c6c6c6",
+    // The lenses above procedures: quieter than code, and still text. 6.2:1 on the ground.
+    "editorCodeLens.foreground": "#9d9d9d",
     "editorCursor.foreground": "#d4d4d4",
     "editor.selectionBackground": "#264f78",
     "editor.inactiveSelectionBackground": "#3a3d41",
@@ -109,6 +111,9 @@ const lightTheme: monaco.editor.IStandaloneThemeData = {
     // 5.2:1 on white. The first light value (#9a9aa6) was 2.7:1, below what text needs (#114).
     "editorLineNumber.foreground": "#6b6b75",
     "editorLineNumber.activeForeground": "#3b3b42",
+    // The lenses above procedures. Monaco's light default is #919191, 3.2:1 on white; this is
+    // the description grey the rest of the light surface uses, 6.6:1.
+    "editorCodeLens.foreground": "#5c5c66",
     "editorCursor.foreground": "#1b1b1f",
     // The Immediate entry line's hint. Monaco's light default is rgba(0,0,0,0.47), 3.6:1 (#114).
     "editor.placeholder.foreground": "#6b6b75",

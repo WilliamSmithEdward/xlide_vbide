@@ -348,9 +348,17 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Raised when the page asks where a symbol is declared or used:
-    /// (requestId, offset, wantsReferences, includeDeclaration).
+    /// (requestId, offset, wantsReferences, includeDeclaration, moduleName or null, workbook or
+    /// null). A named module is the one asked about, whichever is showing; unnamed, it is the
+    /// shown one.
     /// </summary>
-    public Action<int, int, bool, bool>? NavigationRequested { get; set; }
+    public Action<int, int, bool, bool, string?, string?>? NavigationRequested { get; set; }
+
+    /// <summary>
+    /// Raised when a lens asks how many places use a symbol: (requestId, moduleName, workbook or
+    /// null, offset).
+    /// </summary>
+    public Action<int, string, string?, int>? ReferenceCountRequested { get; set; }
 
     /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName,
     /// workbook or null).</summary>
@@ -759,6 +767,19 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new NavigationResultMessage("navigationResult", requestId, locations),
             EditorMessageContext.Default.NavigationResultMessage));
+    }
+
+    /// <summary>Answers one lens's count. Below zero is a count nobody could give.</summary>
+    public void ShowReferenceCount(int requestId, int count)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ReferenceCountResultMessage("referenceCountResult", requestId, count),
+            EditorMessageContext.Default.ReferenceCountResultMessage));
     }
 
     /// <summary>Answers one colouring request. Failed keeps what the page already shows.</summary>
@@ -1890,7 +1911,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.ApplyAttributesOnSave,
                 settings.ExplorerSort,
                 settings.Theme,
-                settings.UpdateCheckOnStart),
+                settings.UpdateCheckOnStart,
+                settings.CodeLens),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2822,6 +2844,9 @@ internal sealed class EditorSurface : IDisposable
                     var checkForUpdates = document.RootElement.TryGetProperty("updateCheckOnStart", out var checkValue)
                         ? checkValue.ValueKind is not JsonValueKind.False
                         : held.UpdateCheckOnStart;
+                    var codeLens = document.RootElement.TryGetProperty("codeLens", out var lensValue)
+                        ? lensValue.ValueKind is not JsonValueKind.False
+                        : held.CodeLens;
 
                     // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
                     // names eight fields and zeroes the rest, so a page settings change silently
@@ -2845,6 +2870,7 @@ internal sealed class EditorSurface : IDisposable
                         ApplyAttributesOnSave = applyOnSave,
                         Theme = theme,
                         UpdateCheckOnStart = checkForUpdates,
+                        CodeLens = codeLens,
                     }).Normalized());
                     break;
                 }
@@ -3259,11 +3285,43 @@ internal sealed class EditorSurface : IDisposable
                             !document.RootElement.TryGetProperty("includeDeclaration", out var declElement)
                             || declElement.ValueKind != JsonValueKind.False;
 
+                        // Named by the page when it knows which module it means: a lens in
+                        // the other half of a split. Unnamed, the shown module is the one asked.
+                        var navModule = document.RootElement.TryGetProperty("module", out var navModuleElement)
+                            && navModuleElement.ValueKind == JsonValueKind.String
+                                ? navModuleElement.GetString()
+                                : null;
+                        var navProject = document.RootElement.TryGetProperty("project", out var navProjectElement)
+                            && navProjectElement.ValueKind == JsonValueKind.String
+                                ? navProjectElement.GetString()
+                                : null;
+
                         NavigationRequested?.Invoke(
                             navRequestId,
                             navOffset,
                             type.GetString() == "references",
-                            includeDeclaration);
+                            includeDeclaration,
+                            string.IsNullOrEmpty(navModule) ? null : navModule,
+                            navProject);
+                    }
+
+                    break;
+
+                case "referenceCount":
+                    if (document.RootElement.TryGetProperty("id", out var countId)
+                        && countId.TryGetInt32(out var countRequestId)
+                        && document.RootElement.TryGetProperty("module", out var countModuleElement)
+                        && countModuleElement.ValueKind == JsonValueKind.String
+                        && countModuleElement.GetString() is { Length: > 0 } countModule
+                        && document.RootElement.TryGetProperty("offset", out var countOffsetElement)
+                        && countOffsetElement.TryGetInt32(out var countOffset)
+                        && countOffset >= 0)
+                    {
+                        var countProject = document.RootElement.TryGetProperty("project", out var countOwner)
+                            && countOwner.ValueKind == JsonValueKind.String
+                                ? countOwner.GetString()
+                                : null;
+                        ReferenceCountRequested?.Invoke(countRequestId, countModule, countProject, countOffset);
                     }
 
                     break;

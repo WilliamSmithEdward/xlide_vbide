@@ -295,7 +295,9 @@ public sealed record SetSettingsMessage(
     /// <summary>The editor's colours: "system", "light" or "dark".</summary>
     [property: JsonPropertyName("theme")] string Theme = "system",
     /// <summary>Whether the editor asks GitHub for the newest release when it opens.</summary>
-    [property: JsonPropertyName("updateCheckOnStart")] bool UpdateCheckOnStart = true);
+    [property: JsonPropertyName("updateCheckOnStart")] bool UpdateCheckOnStart = true,
+    /// <summary>Whether lenses are drawn above procedures.</summary>
+    [property: JsonPropertyName("codeLens")] bool CodeLens = true);
 
 /// <summary>One search hit, as the results list draws it. Project is the display name.</summary>
 public sealed record SurfaceSearchMatch(
@@ -974,6 +976,16 @@ public sealed record NavigationResultMessage(
     [property: JsonPropertyName("locations")] SurfaceLocation[] Locations);
 
 /// <summary>
+/// The answer to one lens's question: how many places in the workbook use a symbol, its
+/// declaration aside. Below zero is a count nobody could give - no engine, or no such module -
+/// which the lens says in words rather than as "no references".
+/// </summary>
+public sealed record ReferenceCountResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("count")] int Count);
+
+/// <summary>
 /// One coloured span, offsets into the live source. The type is the analyzer's vocabulary and
 /// the only modifier used is defaultLibrary, which marks a host global.
 /// </summary>
@@ -1208,6 +1220,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(IntroduceParameterResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
+[JsonSerializable(typeof(ReferenceCountResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
 [JsonSerializable(typeof(CodeObjectsResultMessage))]

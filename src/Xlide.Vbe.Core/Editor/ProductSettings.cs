@@ -58,6 +58,14 @@ public sealed record ProductSettings
     public bool InsertOptionExplicit { get; set; } = true;
 
     /// <summary>
+    /// The lenses above procedures: Run test and Debug test over a test, and over every
+    /// procedure a count of the places that use it. On by default; off draws nothing and asks
+    /// the analysis nothing, for a developer who wants the text and only the text.
+    /// </summary>
+    [JsonPropertyName("editor.codeLens")]
+    public bool CodeLens { get; set; } = true;
+
+    /// <summary>
     /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
     /// the folders on the way to it open while the workbook's others fold (#23), and everything
     /// folds away when the last tab closes. Off leaves the tree entirely to the hand that opened

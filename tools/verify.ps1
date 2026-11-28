@@ -967,6 +967,11 @@ if ($Live) {
                                      'locals-hidden-rows.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
+                                     # lenses reads the lines above procedures - Run test, Debug
+                                     # test, a count of uses - as planned and as drawn, presses
+                                     # them, and holds a count to the references list. After
+                                     # test-runner, which has the tests' support module installed.
+                                     'lenses.mjs',
                                      'pane-scope.mjs',
                                      'inline-comments-live.mjs', 'analysis-rules-live.mjs',
                                      # references brings its own module and needs nothing of the

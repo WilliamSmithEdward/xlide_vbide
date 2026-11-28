@@ -687,6 +687,73 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// The same question about a module the asker names rather than the shown one: a lens in the
+    /// other half of a split, whose module the host is not showing.
+    /// </summary>
+    public async Task<EngineLocation[]> NavigateAsync(
+        string moduleName,
+        string? projectId,
+        int offset,
+        bool references,
+        bool includeDeclaration,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return [];
+        }
+
+        if (ResolveNamedHome(moduleName, projectId) is not { } home)
+        {
+            return [];
+        }
+
+        var result = await engine.NavigateAsync(
+            references ? "textDocument/references" : "textDocument/definition",
+            home.ProjectId,
+            moduleName,
+            home.ModuleType,
+            offset,
+            includeDeclaration,
+            cancellation).ConfigureAwait(false);
+
+        return result?.Locations ?? [];
+    }
+
+    /// <summary>
+    /// How many places in the workbook use the symbol at an offset of a named module, its
+    /// declaration aside. Null when there is no engine, no address for the module, or no answer,
+    /// which is a different fact from a symbol nothing uses.
+    /// </summary>
+    public async Task<int?> CountReferencesAsync(
+        string moduleName,
+        string? projectId,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveNamedHome(moduleName, projectId) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine.NavigateAsync(
+            "textDocument/references",
+            home.ProjectId,
+            moduleName,
+            home.ModuleType,
+            offset,
+            false,
+            cancellation).ConfigureAwait(false);
+
+        return result?.Locations?.Length;
+    }
+
+    /// <summary>
     /// Asks the engine what a rename would make of every module in the workbook it touches. Null
     /// when there is no engine or no address for the module, which is a different fact from a
     /// rename the engine refused and said why.
