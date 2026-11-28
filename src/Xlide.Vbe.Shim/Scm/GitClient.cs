@@ -66,9 +66,16 @@ internal sealed class GitClient
     /// </summary>
     public static GitClient? Locate()
     {
+        // Inside a 32-bit Office both special folders below name "Program Files (x86)", and the
+        // 64-bit Git for Windows almost everyone installs is under the other one. ProgramW6432
+        // names that folder to a process of either width; it is absent only on 32-bit Windows.
+        var programFiles = Environment.GetEnvironmentVariable("ProgramW6432") is { Length: > 0 } native
+            ? native
+            : Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
         var candidates = GitLocator.Candidates(
             Environment.GetEnvironmentVariable("PATH"),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            programFiles,
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 
