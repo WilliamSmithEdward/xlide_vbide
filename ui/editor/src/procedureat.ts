@@ -132,6 +132,15 @@ export function procedureAt(procedures: readonly ProcedureRange[], line: number)
   return null;
 }
 
+/**
+ * The 1-based column a procedure's name starts at on its header line, or null when the line is
+ * not a header. Where a question about the procedure itself is asked: its references, say.
+ */
+export function headerNameColumn(line: string): number | null {
+  const header = HEADER.exec(line);
+  return header ? header[0].length - header[2]!.length + 1 : null;
+}
+
 /** The status bar's spelling: "Sub Recalculate", "Property Get Total". */
 export function describeProcedure(procedure: ProcedureRange | null): string {
   return procedure ? `${procedure.kind} ${procedure.name}` : "";

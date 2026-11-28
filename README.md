@@ -91,6 +91,9 @@ native code, so Excel never loads a .NET runtime on its account.
 - A test runner. Mark procedures with `@xlide-test`, run them against the live project, and read
   the outcomes in a Tests pane that shows nothing rather than stale green when the project cannot
   execute a line.
+- Lenses above procedures. Run test and Debug test sit over every test, and every procedure
+  carries a count of the places that use it, across the whole project; a click on the count
+  opens the list. One switch in Settings turns them off.
 - A Changes pane: what an agent, or you, changed in this project, in rounds, newest first, with
   the text from before kept so you can read it - and restored from: any round, one module or the
   whole project, or Reject everything since you last accepted. A restore is recorded as a round

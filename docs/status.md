@@ -122,6 +122,17 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   naming the download. One brain with the `scm` route, driven by `scm.mjs` against a fixture of
   its own. [source-control.md](source-control.md).
 
+- **Lenses above procedures** (2026-11-27). Run test and Debug test over every `@xlide-test`
+  procedure the runner lists, going where the Tests pane's own buttons go, and over every
+  procedure a count of its uses that opens xlide's references list. A count is asked only for a
+  lens the editor shows, kept until the analysis moves, and asked again then, so a use added in
+  another module reaches a module nobody touched. `editor.codeLens` turns them off, and off
+  asks the host nothing. Read and pressed through `ui.lenses` and `act("lens")`; `lenses.mjs`
+  holds what is drawn to what is planned and a count to the list. Measured on PerfFixture with
+  the Debug shim: an open asks three counts, the ones on screen, whether the module plans 12
+  lenses or 7,200, at 17 to 30 ms a count; the editor's zone per lens line adds about 1 ms to a
+  keystroke at 1,250 lens lines and 5 ms at 7,200, the 64,803-line module.
+
 ## What is not done
 
 - **Not signed, and not going to be** (the owner, 2026-11-25). The installer carries no code

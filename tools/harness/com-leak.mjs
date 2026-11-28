@@ -310,6 +310,28 @@ for (const [name, call] of READ_ROUTES) {
 }
 
 /*
+ * A LENS'S COUNT, which no route carries: the page asks it over its own bridge, for every
+ * procedure on screen and again whenever the analysis moves, so with the lenses on it is the
+ * question a session asks most. It names its module instead of using the shown one, which is a
+ * road of its own through the session, and the page is the only thing that can send it down it.
+ * The answer is checked to be a number, so a round that asked nothing cannot read as a clean one.
+ */
+await onScreen(sample);
+await repeat("counting a procedure's uses, as a lens does", 0, async () => {
+  const counted = await api.ask(`(async () => {
+    const bridge = window.xlideBridge;
+    const model = bridge.workspace.activeEditor().getModel();
+    const first = bridge.proceduresIn(model)[0];
+    if (!first) { return "no procedure"; }
+    const column = model.getLineContent(first.header).indexOf(first.name) + 1;
+    return bridge.requestReferenceCount(model, model.getOffsetAt({ lineNumber: first.header, column }));
+  })()`);
+  if (typeof counted !== "number") {
+    throw new Error(`the lens count for ${sample} answered ${JSON.stringify(counted)}, not a number`);
+  }
+});
+
+/*
  * THE ROUTES THAT CHANGE STATE, which do the most COM work of anything here.
  *
  * Each is paired with its own undo, so a round leaves the fixture where it found it and the suite

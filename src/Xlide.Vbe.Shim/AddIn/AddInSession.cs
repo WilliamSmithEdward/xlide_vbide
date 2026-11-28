@@ -1487,6 +1487,7 @@ internal sealed partial class AddInSession : IDisposable
                 surface?.RunOnHostThread(() => surface.Notify(said));
             });
         _editorSurface.NavigationRequested = OnNavigationRequested;
+        _editorSurface.ReferenceCountRequested = OnReferenceCountRequested;
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
         _editorSurface.ExtractMethodRequested = OnExtractMethodRequested;
@@ -10105,10 +10106,14 @@ internal sealed partial class AddInSession : IDisposable
     /// display name right for all of them: the engine resolves within one project and never
     /// across two, because two open workbooks can each hold a Module1 and a Recalculate.
     /// </summary>
-    private void OnNavigationRequested(int requestId, int offset, bool references, bool includeDeclaration)
+    private void OnNavigationRequested(
+        int requestId, int offset, bool references, bool includeDeclaration, string? namedModule, string? namedProject)
     {
         var surface = _editorSurface;
-        var module = surface?.Module;
+
+        // Named, the question is about that module whichever is showing: a lens clicked in the
+        // other half of a split asks before the host has heard that half took the focus.
+        var module = namedModule ?? surface?.Module;
 
         if (surface is null || module is null || _analysis is not { } analysis)
         {
@@ -10116,7 +10121,10 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        var workbook = DisplayFromProjectId(_shownProject);
+        var namedProjectId = namedModule is null ? null : ProjectIdFromDisplay(namedProject);
+        var workbook = namedModule is not null && !string.IsNullOrEmpty(namedProject)
+            ? namedProject
+            : DisplayFromProjectId(_shownProject);
 
         _ = Task.Run(async () =>
         {
@@ -10125,8 +10133,9 @@ internal sealed partial class AddInSession : IDisposable
             try
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                var answered = await analysis
-                    .NavigateAsync(module, offset, references, includeDeclaration, deadline.Token)
+                var answered = await (namedModule is null
+                        ? analysis.NavigateAsync(module, offset, references, includeDeclaration, deadline.Token)
+                        : analysis.NavigateAsync(module, namedProjectId, offset, references, includeDeclaration, deadline.Token))
                     .ConfigureAwait(false);
 
                 locations = [.. answered.Select(location => new SurfaceLocation(
@@ -10141,6 +10150,46 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowLocations(requestId, locations));
+        });
+    }
+
+    /// <summary>
+    /// Answers a lens: how many places in its workbook use the symbol at an offset of the named
+    /// module, the declaration aside. Addressed by name the way colouring is, because a split
+    /// draws lenses in two modules at once. Minus one is a count nobody could give.
+    /// </summary>
+    private void OnReferenceCountRequested(int requestId, string moduleName, string? projectDisplay, int offset)
+    {
+        var surface = _editorSurface;
+
+        if (surface is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowReferenceCount(requestId, -1);
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay);
+
+        _ = Task.Run(async () =>
+        {
+            var count = -1;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var answered = await analysis
+                    .CountReferencesAsync(moduleName, projectId, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                count = answered ?? -1;
+                Log.Info($"referenceCount: {moduleName}@{offset} -> {count}");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"referenceCount: {moduleName}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowReferenceCount(requestId, count));
         });
     }
 

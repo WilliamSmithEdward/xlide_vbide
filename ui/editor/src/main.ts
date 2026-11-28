@@ -8,6 +8,9 @@ import "monaco-editor/features/clipboard/register.js";
 // The lightbulb and its menu. A code-action provider without this registered answers into a void,
 // the same way a completion provider does without suggest.
 import "monaco-editor/features/codeAction/register.js";
+// CodeLens: this register module does import the controller, which is the whole feature (read
+// 2026-11-27), unlike the four below whose names promise more than they import.
+import "monaco-editor/features/codelens/register.js";
 import "monaco-editor/features/codicon/register.js";
 import "monaco-editor/features/comment/register.js";
 import "monaco-editor/features/contextmenu/register.js";
@@ -78,6 +81,7 @@ import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
+import { Lenses } from "./lenses.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
 import { openAnalysisRulesDialog } from "./analysisrulesdialog.js";
 
@@ -456,16 +460,22 @@ async function referencesAt(
   bridge: EditorBridge,
   model: monaco.editor.ITextModel,
   position: monaco.Position,
+  named?: DocumentId | null,
 ): Promise<{ word: string; found: HostLocation[] } | null> {
   // The same refusal every language provider opens with: this answers for the module the host
   // believes is active and for no other, because that is what the menu entry does.
-  if (model !== bridge.hostActiveModel()) {
+  //
+  // UNLESS THE ASKER NAMES THE MODULE, which a lens does. A lens is clicked in whichever half of
+  // a split it is drawn in, and the click is also what makes that half the active one - two
+  // messages, and the host need not have read the first when the second arrives. Named, the
+  // question is about that module whichever the host is showing.
+  if (!named && model !== bridge.hostActiveModel()) {
     return null;
   }
 
   return {
     word: model.getWordAtPosition(position)?.word ?? "",
-    found: await bridge.requestNavigation(model.getOffsetAt(position), true, true),
+    found: await bridge.requestNavigation(model.getOffsetAt(position), true, true, named),
   };
 }
 
@@ -492,8 +502,9 @@ async function showReferencesAt(
   bridge: EditorBridge,
   model: monaco.editor.ITextModel,
   position: monaco.Position,
+  named?: DocumentId | null,
 ): Promise<boolean> {
-  const answer = await referencesAt(bridge, model, position);
+  const answer = await referencesAt(bridge, model, position, named);
   if (!answer) {
     return false;
   }
@@ -675,6 +686,9 @@ function boot(): void {
     // say yes: the flag is hardcoded off on every one of them, so a provider would be registered,
     // asked nothing, and paint nothing.
     "semanticHighlighting.enabled": true,
+    // The developer's switch (Settings). The lenses' own provider answers nothing when it is off,
+    // and this takes the feature's line of space away with them.
+    codeLens: currentSettings().codeLens,
   };
 
   const transport = webView2Transport();
@@ -697,6 +711,26 @@ function boot(): void {
   // the commands that resolve as actions at build time, so every per-editor action must be
   // registered before it looks. Nothing host-driven runs before bridge.start().
   const bridge = new EditorBridge(transport ?? demoTransport(), documents);
+
+  // The lenses: Run test and Debug test above a test, a count of uses above every procedure.
+  // Built here, ahead of the panes and providers, because three of them tell it when to look
+  // again: the runner's list, the analysis, and the developer's switch.
+  const lenses = new Lenses({
+    enabled: () => currentSettings().codeLens,
+    idOf: (model) => documents.idOf(model),
+    procedures: (model) => bridge.proceduresIn(model),
+    tests: () => bridge.tests(),
+    countReferences: (model, offset) => bridge.requestReferenceCount(model, offset),
+    runTest: (id, file) => bridge.testsAction("runOne", id, file),
+    debugTest: (id, file) => bridge.testsAction("debug", id, file),
+    showReferences: (model, position) => void showReferencesAt(bridge, model, position, documents.idOf(model)),
+  });
+  onSettingsApplied((next) => {
+    for (const editor of workspace.editors()) {
+      editor.updateOptions({ codeLens: next.codeLens });
+    }
+    lenses.switched();
+  });
 
   // The blame layer asks the source control brain through the same channel the pane does, and
   // paints only documents the store owns - a history tab's model is nobody's document.
@@ -1266,7 +1300,11 @@ function boot(): void {
     // navigation that named only the module would open whichever answered first.
     navigate: (module, line, file) => bridge.navigate(module, line, 1, true, file),
   });
-  bridge.testsChanged = (tests) => testsPane.paint(tests);
+  bridge.testsChanged = (tests) => {
+    testsPane.paint(tests);
+    // Which procedures are tests is the runner's list, so a Run lens follows it.
+    lenses.testsMoved();
+  };
 
   // The Bookmarks pane: every module's marks, drawn from the store whenever one moves.
   const bookmarksPane = new BookmarksPane(document.querySelector("#bookmarks") as HTMLElement, bookmarks, {
@@ -2241,6 +2279,9 @@ function boot(): void {
 
   monaco.languages.registerRenameProvider(VBA_LANGUAGE_ID, renameProvider);
 
+  // The lenses' provider and the three commands a lens can carry. See lenses.ts.
+  lenses.install(VBA_LANGUAGE_ID);
+
   // Semantic colouring, over the grammar rather than instead of it. The grammar already paints
   // the project's words from the lists project/open hands it; what it cannot do is tell a class
   // from an enum from a user-defined type, tell a host global from a local that shadows its
@@ -2259,6 +2300,9 @@ function boot(): void {
   const semanticRefresh = new monaco.Emitter<void>();
   let semanticRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   bridge.semanticsMayHaveMoved = () => {
+    // A use added or taken away anywhere in the project changes a count here, and the analysis
+    // moving is the only word of it this page gets.
+    lenses.analysisMoved();
     clearTimeout(semanticRefreshTimer);
     semanticRefreshTimer = setTimeout(() => semanticRefresh.fire(), 250);
   };
@@ -2401,6 +2445,7 @@ function boot(): void {
     bookmarks,
     bookmarksPane,
     blame,
+    lenses,
     providers: {
       hover: hoverProvider,
       completion: completionProvider,

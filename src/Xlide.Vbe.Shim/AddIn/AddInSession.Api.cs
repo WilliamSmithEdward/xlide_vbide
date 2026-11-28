@@ -4904,6 +4904,7 @@ internal sealed partial class AddInSession
                             ? theme
                             : settings.Theme,
                         UpdateCheckOnStart = Flag("updateCheckOnStart", settings.UpdateCheckOnStart),
+                        CodeLens = Flag("codeLens", settings.CodeLens),
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4924,7 +4925,8 @@ internal sealed partial class AddInSession
                         settings.ApplyAttributesOnSave,
                         settings.ExplorerSort,
                         settings.Theme,
-                        settings.UpdateCheckOnStart),
+                        settings.UpdateCheckOnStart,
+                        settings.CodeLens),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

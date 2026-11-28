@@ -104,6 +104,7 @@ export type HostMessage =
   | { type: "analysisRulesResult"; id: number; rules: HostAnalysisRule[]; overrides: Record<string, string>; failed?: boolean }
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
+  | { type: "referenceCountResult"; id: number; count: number }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "extractResult"; id: number; procedure?: string | null; from?: string | null; signature?: string | null; module?: string | null; refused?: string | null }
   | { type: "implementResult"; id: number; interfaces: string[]; added: string[]; module?: string | null; refused?: string | null }
@@ -632,7 +633,8 @@ export type ClientMessage =
   | { type: "refactorings"; id: number; candidates: HostRefactorCandidate[] }
   | { type: "semanticTokens"; id: number; module: string; project?: string }
   | { type: "definition"; id: number; offset: number }
-  | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
+  | { type: "references"; id: number; offset: number; includeDeclaration: boolean; module?: string; project?: string }
+  | { type: "referenceCount"; id: number; module: string; project?: string; offset: number }
   | { type: "rename"; id: number; offset: number; newName: string }
   | { type: "extractMethod"; id: number; startLine: number; endLine: number; newName: string }
   | { type: "implementInterface"; id: number; interfaceName?: string }
@@ -888,6 +890,8 @@ export class EditorBridge {
   private readonly pendingAnalysisRules = new RequestTable<HostAnalysisRules | null>();
   private readonly pendingSemanticTokens = new RequestTable<HostSemanticToken[] | null>();
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
+  /** A lens's count of uses. Null is a count nobody could give, which the lens says in words. */
+  private readonly pendingReferenceCounts = new RequestTable<number | null>();
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
   private readonly pendingExtracts = new RequestTable<HostExtractAnswer>();
   private readonly pendingImplements = new RequestTable<HostImplementAnswer>();
@@ -1647,11 +1651,46 @@ export class EditorBridge {
     offset: number,
     references: boolean,
     includeDeclaration = true,
+    of?: DocumentId | null,
   ): Promise<HostLocation[]> {
+    // NAMED, when the asker knows which module it means. Unnamed, the host answers for the
+    // module it is showing, which is right for a key pressed in the focused editor and wrong for
+    // a lens clicked in the other half of a split: the click and the activation it causes are
+    // two messages, and the question must not depend on which one the host reads first.
+    const named = of ? { module: of.module, ...(of.project ? { project: of.project } : {}) } : {};
     return this.pendingNavigations.ask(() => [], 8000, (id) =>
       this.transport.post(references
-        ? { type: "references", id, offset, includeDeclaration }
+        ? { type: "references", id, offset, includeDeclaration, ...named }
         : { type: "definition", id, offset }));
+  }
+
+  /**
+   * Asks the host how many places in the project use the symbol at an offset of one module, its
+   * declaration aside. Named by module, the way colouring is: a split draws lenses in two modules
+   * at once, and a count for "whichever the host is showing" would land over the wrong one.
+   * Null is a count nobody could give - no engine, no such module, or no answer in time.
+   */
+  requestReferenceCount(model: monaco.editor.ITextModel, offset: number): Promise<number | null> {
+    const shown = this.documents.idOf(model);
+    if (!shown) {
+      return Promise.resolve(null);
+    }
+
+    return this.pendingReferenceCounts.ask(() => null, 8000, (id) =>
+      this.transport.post({
+        type: "referenceCount",
+        id,
+        module: shown.module,
+        ...(shown.project ? { project: shown.project } : {}),
+        offset,
+      }));
+  }
+
+  /** The runner's tests as it last sent them; empty until it has said anything. */
+  private testRows: readonly TestRow[] = [];
+
+  tests(): readonly TestRow[] {
+    return this.testRows;
   }
 
   /**
@@ -2480,6 +2519,10 @@ export class EditorBridge {
       case "navigationResult":
         this.pendingNavigations.settle(message.id, message.locations);
         return;
+      case "referenceCountResult":
+        // Below zero is the host saying it could not ask: no engine, or no such module.
+        this.pendingReferenceCounts.settle(message.id, message.count >= 0 ? message.count : null);
+        return;
       case "semanticTokensResult":
         // A failed answer is a shrug, not a statement of colourlessness.
         this.pendingSemanticTokens.settle(message.id, message.failed ? null : message.tokens);
@@ -2574,6 +2617,7 @@ export class EditorBridge {
         this.shell?.setDebugMode(message.mode);
         return;
       case "setTests":
+        this.testRows = message.rows;
         this.testsChanged?.(message);
         return;
       case "obLibrariesResult":
@@ -3026,6 +3070,11 @@ export class EditorBridge {
    * than the text changes, and a 65,000-line module is not re-read for each arrow key.
    */
   private readonly procedureIndex = new WeakMap<monaco.editor.ITextModel, { version: number; ranges: ProcedureRange[] }>();
+
+  /** The procedures of a model's text as it stands, scanned once per text version. */
+  proceduresIn(model: monaco.editor.ITextModel): readonly ProcedureRange[] {
+    return this.proceduresOf(model);
+  }
 
   private proceduresOf(model: monaco.editor.ITextModel): ProcedureRange[] {
     const version = model.getVersionId();
@@ -4053,6 +4102,19 @@ export function demoTransport(): HostTransport {
       }
       // The demo's own colouring, so the legend, the delta encoding and the theme rules are
       // exercisable in a plain browser: the host globals the module names, plus its one type.
+      // A lens's count, the demo's way: every mention of the word in both modules, less the one
+      // that is its declaration. Enough for the lenses to be seen and pressed in a plain browser.
+      if (message.type === "referenceCount") {
+        const asked = message.module === "Module2" ? DEMO_MODULE_2 : DEMO_MODULE;
+        const word = /^[A-Za-z0-9_]+/.exec(asked.slice(message.offset))?.[0] ?? "";
+        let mentions = 0;
+        if (word.length > 1) {
+          for (const text of [DEMO_MODULE, DEMO_MODULE_2]) {
+            mentions += text.split(word).length - 1;
+          }
+        }
+        send({ type: "referenceCountResult", id: message.id, count: Math.max(0, mentions - 1) });
+      }
       if (message.type === "semanticTokens") {
         const text = message.module === "Module2" ? DEMO_MODULE_2 : DEMO_MODULE;
         const tokens: HostSemanticToken[] = [];

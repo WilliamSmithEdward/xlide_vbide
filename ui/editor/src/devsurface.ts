@@ -37,6 +37,7 @@ import { agentDialogProbe } from "./agentdialog.js";
 import { extractDialogProbe } from "./extractdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
 import type { BookmarkRow, BookmarksPaneState } from "./bookmarkspane.js";
+import type { LensDrawn, LensReading } from "./lenses.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
 interface DialogSnapshot {
@@ -176,6 +177,14 @@ export interface UiSnapshot {
   scm: ReturnType<ScmPaneProbe["state"]> | null;
   /** The blame layer for the model on screen: on, how many lines carry a hint, how many do not. */
   blame: { on: boolean; lines: number; uncommitted: number; painted: number; refused: string | null };
+  /**
+   * The lenses above procedures in the editor on screen. `planned` is every lens the module
+   * should carry, with what each says once the editor has asked (null until its lens has been
+   * shown); `drawn` is what the editor actually drew, line by line, read off the page; and
+   * `countsAsked` is how many counts have been asked of the host since the page loaded, which is
+   * what the feature costs.
+   */
+  lenses: { planned: LensReading[]; drawn: LensDrawn[]; countsAsked: number };
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** Token sets refused because their offsets did not describe the text on screen. */
@@ -326,6 +335,12 @@ export interface DevSurfaceParts {
     blameOn(model: monaco.editor.ITextModel): {
       on: boolean; lines: number; uncommitted: number; painted: number; refused: string | null;
     };
+  };
+  lenses: {
+    readingOf(editor: monaco.editor.ICodeEditor): LensReading[];
+    drawnIn(editor: monaco.editor.ICodeEditor): LensDrawn[];
+    press(editor: monaco.editor.ICodeEditor, line: number, title: string): { did: boolean; detail: string };
+    countsAsked(): number;
   };
   panes: {
     list(): { name: string; title: string; open: boolean; permanent: boolean }[];
@@ -799,6 +814,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     blame: (() => {
       const model = workspace.activeEditor().getModel();
       return model ? parts.blame.blameOn(model) : { on: false, lines: 0, uncommitted: 0, painted: 0, refused: null };
+    })(),
+    lenses: (() => {
+      const editor = workspace.activeEditor();
+      return {
+        planned: parts.lenses.readingOf(editor),
+        drawn: parts.lenses.drawnIn(editor),
+        countsAsked: parts.lenses.countsAsked(),
+      };
     })(),
     agent: agentDialogProbe()?.state() ?? null,
     extract: extractDialogProbe()?.state() ?? null,
@@ -2052,6 +2075,23 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * state the card draws, and the same actions without the card.
      */
     update: (args) => parts.updateDialog(args.button === undefined ? undefined : String(args.button)),
+
+    /**
+     * Presses a lens above a procedure: `act("lens", {line: 12, title: "Run test"})`. The line is
+     * the procedure's header line, and the title is what the lens says, or part of it -
+     * "references" finds "3 references". It is pressed on the drawn anchor, through the editor's
+     * own pointer handling, so what runs is whatever the editor wired to that anchor; a lens that
+     * is planned and not drawn cannot be pressed, and `ui.lenses` says which are which.
+     */
+    lens: (args) => {
+      const line = Number(args.line);
+      const title = String(args.title ?? "");
+      if (!Number.isInteger(line) || line < 1 || !title) {
+        return { did: false, detail: "pass line (the procedure's header line) and title (what the lens says)" };
+      }
+
+      return parts.lenses.press(workspace.activeEditor(), line, title);
+    },
 
     /**
      * Presses a toolbar command by id: `act("toolbar", {command: "openSync"})`.

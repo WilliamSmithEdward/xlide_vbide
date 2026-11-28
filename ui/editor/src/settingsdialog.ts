@@ -70,6 +70,15 @@ const OPTIONS = [
   // two snap toggles on the designer's toolbox row. A second control in this dialog is a second
   // place to look and a second place for the two to disagree (the owner, 2026-09-13).
   {
+    key: "codeLens" as const,
+    kind: "toggle" as const,
+    label: "Show lenses above procedures",
+    description:
+      "Run test and Debug test above each test, and above every procedure a count of the places "
+      + "that use it, which opens the list when clicked. Off draws nothing and asks the analysis "
+      + "nothing.",
+  },
+  {
     key: "applyAttributesOnSave" as const,
     kind: "toggle" as const,
     label: "Apply annotations to attributes on save",
