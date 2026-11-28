@@ -193,16 +193,31 @@ function closersOutnumberOpeners(model: monaco.editor.ITextModel, typedLine: num
 // developer's file, the page applies what arrives, and every Enter reads the choice as it
 // stands. See settings.ts for the store and settingsdialog.ts for where choices are made.
 
+/** What the rest of the page may ask of an editor's typing automation. */
+export interface TypingAutomationHandle {
+  /**
+   * True while one of the automation's own edits is going into the model: a closer Smart Enter
+   * wrote, a recase. Vim mode asks, so that text the developer never typed is not replayed as
+   * typing by a repeat (#173).
+   */
+  isApplying(): boolean;
+}
+
 export function installTypingAutomation(
   editor: monaco.editor.IStandaloneCodeEditor,
   bridge: EditorBridge,
-): void {
-  new TypingAutomation(editor, bridge);
+): TypingAutomationHandle {
+  const automation = new TypingAutomation(editor, bridge);
+  return { isApplying: () => automation.isApplying };
 }
 
 class TypingAutomation {
   /** True while one of this controller's own edits is going into the model. */
   private applying = false;
+
+  get isApplying(): boolean {
+    return this.applying;
+  }
 
   /** Lines the developer has touched, by model and line: the gate every recase runs behind. */
   private readonly touched = new Set<string>();

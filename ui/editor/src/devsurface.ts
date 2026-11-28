@@ -38,6 +38,7 @@ import { extractDialogProbe } from "./extractdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
 import type { BookmarkRow, BookmarksPaneState } from "./bookmarkspane.js";
 import type { LensDrawn, LensReading } from "./lenses.js";
+import type { VimModeState } from "./vimmode.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
 interface DialogSnapshot {
@@ -185,6 +186,13 @@ export interface UiSnapshot {
    * what the feature costs.
    */
   lenses: { planned: LensReading[]; drawn: LensDrawn[]; countsAsked: number };
+  /**
+   * Vim mode (#173), as the status bar shows it for the editor that last had the caret: whether
+   * the setting is on, the mode ("normal", "insert", "visual", "visual line", "visual block",
+   * "replace"), the keys of a command still being typed, the label drawn, the `:` or `/` line's
+   * text while one is open, and what Vim last said.
+   */
+  vim: VimModeState;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** Token sets refused because their offsets did not describe the text on screen. */
@@ -342,6 +350,7 @@ export interface DevSurfaceParts {
     press(editor: monaco.editor.ICodeEditor, line: number, title: string): { did: boolean; detail: string };
     countsAsked(): number;
   };
+  vim: { state(): VimModeState };
   panes: {
     list(): { name: string; title: string; open: boolean; permanent: boolean }[];
     /** Moves a pane to a dock side, through the method a real drop calls. */
@@ -823,6 +832,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         countsAsked: parts.lenses.countsAsked(),
       };
     })(),
+    vim: parts.vim.state(),
     agent: agentDialogProbe()?.state() ?? null,
     extract: extractDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],

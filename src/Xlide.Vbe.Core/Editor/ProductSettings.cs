@@ -66,6 +66,13 @@ public sealed record ProductSettings
     public bool CodeLens { get; set; } = true;
 
     /// <summary>
+    /// Vim's modes and keys in the code editors (#173). Off by default: it changes what every
+    /// plain key means, so it is on only for the developer who asked for it.
+    /// </summary>
+    [JsonPropertyName("editor.vimMode")]
+    public bool VimMode { get; set; }
+
+    /// <summary>
     /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
     /// the folders on the way to it open while the workbook's others fold (#23), and everything
     /// folds away when the last tab closes. Off leaves the tree entirely to the hand that opened

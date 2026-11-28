@@ -133,6 +133,28 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   lenses or 7,200, at 17 to 30 ms a count; the editor's zone per lens line adds about 1 ms to a
   keystroke at 1,250 lens lines and 5 ms at 7,200, the 64,803-line module.
 
+- **Vim mode** (2026-11-28, #173, requested by u/CptBadAss2016 on Reddit). Vim's modes and keys
+  in the code editors, behind `editor.vimMode`, off by default. The keymap is monaco-vim 0.4.4
+  (MIT; CodeMirror's Vim emulation over an adapter), bundled against the page's own Monaco; what
+  is this product's is in `vimmode.ts` and `vimkeys.ts`. Group editors only: the Immediate line,
+  a designer's markup and a past version's tab keep the plain keys. The mode, a half-typed
+  command, the `/` and `:` lines and Vim's messages are in the status bar.
+  - Keys. Plain and shifted keys and Escape are Vim's. A Ctrl chord stays the editor's, except
+    Ctrl+[ (Escape) and, outside insert mode, Ctrl+Q (block selection), Ctrl+D and Ctrl+U (half
+    a page). The keys the host's hook takes never reach the page, so Ctrl+R is still the Project
+    Explorer and redo is `:redo` or Ctrl+Shift+Z. A character typed with AltGr is given to Vim as
+    the character.
+  - Commands. `:w` is the host's Save, `:q` closes the tab through its own gate, `:wq` and `:x`
+    do both. `u` is the surface's Undo, one editor step a press, so a rename is still undone
+    across modules.
+  - `.` repeats what was typed. The closer Smart Enter writes and the respelling of a line are
+    kept from the keymap's record of the insert, or a repeat types the line and its correction.
+  - Not done: yank and put use Vim's registers, not the Windows clipboard (Ctrl+C and Ctrl+V
+    do); no vimrc or user mappings beyond `:map` for the session.
+  - Read through `ui.vim`; `vim.mjs` presses real keys (page-keys.mjs) and holds the project's
+    module to the page through a Vim edit and its undo; `vimkeys.mjs` pins the key policy.
+    [vim-mode.md](vim-mode.md).
+
 ## What is not done
 
 - **Not signed, and not going to be** (the owner, 2026-11-25). The installer carries no code

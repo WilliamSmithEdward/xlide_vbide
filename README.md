@@ -94,6 +94,11 @@ native code, so Excel never loads a .NET runtime on its account.
 - Lenses above procedures. Run test and Debug test sit over every test, and every procedure
   carries a count of the places that use it, across the whole project; a click on the count
   opens the list. One switch in Settings turns them off.
+- Vim mode, off until you turn it on in Settings: normal, insert, visual and replace modes with
+  Vim's motions, operators, text objects, counts, registers, marks, macros, `/` search and `:`
+  commands, and the mode in the status bar. `:w` saves the project and `:q` closes the tab. Ctrl
+  shortcuts and the function keys keep their usual meaning, so F5 still runs and Ctrl+V still
+  pastes. [docs/vim-mode.md](docs/vim-mode.md) has the keys and where it differs from Vim.
 - A Changes pane: what an agent, or you, changed in this project, in rounds, newest first, with
   the text from before kept so you can read it - and restored from: any round, one module or the
   whole project, or Reject everything since you last accepted. A restore is recorded as a round

@@ -4,78 +4,29 @@
  * Down walk its history. The two editors share one keybinding service, and a binding meant for
  * the entry line once took all three keys from the code editor too.
  *
- * Pressed through the page's DevTools protocol (Input.dispatchKeyEvent), which delivers a real,
- * trusted key event to the page and runs it through Monaco's keybinding resolution - the step
- * the api's `press` act skips, because it types the newline directly. Nothing goes to the
- * desktop: the event reaches only the page, after the editor under test has been focused.
+ * Pressed through page-keys.mjs, which delivers a real, trusted key event to the page and runs
+ * it through Monaco's keybinding resolution - the step the api's `press` act skips, because it
+ * types the newline directly. Nothing goes to the desktop: the event reaches only the page,
+ * after the editor under test has been focused.
  *
  * Run against the debug fixture:
  *   node tools\harness\editor-keys.mjs
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { open, reporter, wait } from "./xlide-api.mjs";
-import { loopbackUrl } from "./loopback-url.mjs";
+import { connectToEditorPage, devtoolsPort, pageKeyboard, plainTyping } from "./page-keys.mjs";
 
 const api = await open({});
 const project = await api.project();
 const { check, done } = reporter();
 
-/** The DevTools port of the session the api client is aimed at. */
-function devtoolsPort() {
-  const home = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
-  const pid = Number(process.env.XLIDE_PID) || api.pid;
-  return JSON.parse(readFileSync(join(home, `xlide-api-${pid}.json`), "utf8")).devtoolsPort;
-}
-
-async function connectToEditorPage(port) {
-  const version = await (await fetch(loopbackUrl(port, "/json/version"), { redirect: "error" })).json();
-  const socket = new WebSocket(version.webSocketDebuggerUrl);
-  let nextId = 0;
-  const waiting = new Map();
-  socket.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    const pending = message.id && waiting.get(message.id);
-    if (pending) {
-      waiting.delete(message.id);
-      if (message.error) { pending.reject(new Error(message.error.message)); } else { pending.settle(message.result); }
-    }
-  };
-  await new Promise((settle, reject) => {
-    socket.onopen = settle;
-    socket.onerror = () => reject(new Error("could not reach the DevTools door"));
-  });
-  const send = (method, params = {}, sessionId) => new Promise((settle, reject) => {
-    const id = ++nextId;
-    waiting.set(id, { settle, reject });
-    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-  });
-
-  const targets = await (await fetch(loopbackUrl(port, "/json"), { redirect: "error" })).json();
-  const page = targets.find((one) => one.type === "page" && one.title === "xlide editor");
-  if (!page) { throw new Error(`no editor page; saw ${targets.map((one) => one.title).join("|")}`); }
-  const { sessionId } = await send("Target.attachToTarget", { targetId: page.id, flatten: true });
-  return { socket, send: (method, params) => send(method, params, sessionId) };
-}
-
-const KEYS = {
-  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
-  ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
-  ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
-};
-
 console.log("the editing keys, pressed as keys\n");
 
-const page = await connectToEditorPage(devtoolsPort());
+const page = await connectToEditorPage(devtoolsPort(api));
 const evaluate = async (expression) => (await page.send("Runtime.evaluate",
   { expression, awaitPromise: true, returnByValue: true })).result?.value;
-async function pressKey(name) {
-  const key = KEYS[name];
-  await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...key });
-  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...key, text: undefined });
-  await wait(150);
-}
+const pressKey = pageKeyboard(page).press;
+const restoreTyping = await plainTyping(api);
 
 const original = (await api.readModule("Helper", project.projectId)).text ?? "";
 try {
@@ -128,6 +79,7 @@ try {
     (await evaluate(`${codeEditor}.getModel().getLineCount()`)) === before + 1);
 } finally {
   page.socket.close();
+  await restoreTyping();
   await api.writeModule("Helper", original, project.projectId).catch(() => {});
   await api.guard(false, { forget: true }).catch(() => {});
 }

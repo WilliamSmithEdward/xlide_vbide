@@ -4179,6 +4179,7 @@ export function demoTransport(): HostTransport {
           explorerSort: message.explorerSort,
           applyAttributesOnSave: message.applyAttributesOnSave !== false,
           theme: message.theme,
+          vimMode: message.vimMode === true,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

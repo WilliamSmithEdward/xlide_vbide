@@ -204,8 +204,17 @@ async function main() {
     // local declarations instead (tsconfig paths): behaviour from the spec, types from here, and
     // the two cannot disagree about what runs. tools/sync-spec.mjs refreshes the copy and checks it
     // against the spec repo whenever a neighbouring checkout is there to check against.
+    //
+    // monaco-vim (#173) is sent to its ESM build and its two Monaco imports to this Monaco. Its
+    // package offers a browser bundle first, which carries its own copy of what it takes from
+    // Monaco; and it names Monaco's files by the `esm/vs` paths the package no longer exports.
+    // Either way the page would hold two Monacos, and an editor made by one is not an editor to
+    // the other. The check below fails the build if a second copy arrives.
     alias: {
       "xlide-spec": path.resolve(root, "vendor/xlide-spec"),
+      "monaco-vim": path.join(root, "node_modules", "monaco-vim", "dist", "index.mjs"),
+      "monaco-editor/esm/vs/editor/editor.api": "monaco-editor/editor/editor.api.js",
+      "monaco-editor/esm/vs/editor/common/commands/shiftCommand": "monaco-editor/editor/common/commands/shiftCommand.js",
     },
     loader: {
       ".ttf": "file",
@@ -218,7 +227,7 @@ async function main() {
   const results = await Promise.all([
     // The page bundle is a classic script: no module loader, no import.meta, so index.html can
     // load it with a plain relative <script src>.
-    build({ ...common, entryPoints: { editor: "src/main.ts" }, format: "iife" }),
+    build({ ...common, entryPoints: { editor: "src/main.ts" }, format: "iife", metafile: true }),
     // The worker bundle is a module worker, matching how Monaco constructs its own workers.
     // Monaco lazily dynamic-imports an optional diff package inside the worker; a module
     // worker parses that unconditionally, a classic worker would not be guaranteed to.
@@ -232,6 +241,17 @@ async function main() {
       + `redirected ${dompurifyRedirects} import(s) and editor.js reports ${shipped.join(", ") || "no version"}.`);
   }
   console.log(`DOMPurify ${DOMPURIFY_VERSION}, from the package`);
+
+  // By what the build READ, not by what the alias asked for: of monaco-vim exactly its ESM
+  // build, and of Monaco's editor.api exactly one file.
+  const read = Object.keys(results[0].metafile.inputs);
+  const vimFiles = read.filter((file) => file.includes("node_modules/monaco-vim/"));
+  const editorApis = read.filter((file) => /(^|\/)editor\.api(\.js)?$/.test(file));
+  if (vimFiles.length !== 1 || !vimFiles[0].endsWith("monaco-vim/dist/index.mjs") || editorApis.length !== 1) {
+    throw new Error("The page must carry monaco-vim's ESM build over one Monaco, but the build read "
+      + `${vimFiles.join(", ") || "no monaco-vim file"} and ${editorApis.length} editor.api file(s): ${editorApis.join(", ")}.`);
+  }
+  console.log("monaco-vim, over the page's own Monaco");
 
   await copyFile(path.join(root, "index.html"), path.join(dist, "index.html"));
   await writeFile(path.join(dist, "boot.js"), BOOT_JS, "utf8");
