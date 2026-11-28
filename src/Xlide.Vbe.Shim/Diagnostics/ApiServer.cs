@@ -1219,7 +1219,9 @@ public sealed record DebugSettingsReply(
     /// <summary>Whether the editor asks GitHub for the newest release when it opens.</summary>
     [property: JsonPropertyName("updateCheckOnStart")] bool UpdateCheckOnStart = true,
     /// <summary>Whether lenses are drawn above procedures.</summary>
-    [property: JsonPropertyName("codeLens")] bool CodeLens = true);
+    [property: JsonPropertyName("codeLens")] bool CodeLens = true,
+    /// <summary>Whether the code editors take Vim's modes and keys.</summary>
+    [property: JsonPropertyName("vimMode")] bool VimMode = false);
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

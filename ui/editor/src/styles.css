@@ -2162,6 +2162,59 @@ body.live-resize .minimap {
   border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
+/* Vim mode's line (#173): the mode, the : or / prompt while one is open, what Vim last said, and
+   the keys of a command still being typed. Leads the bar, where Vim keeps it; absent unless the
+   mode is on. */
+#status-vim {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  white-space: pre;
+}
+
+#status-vim[hidden] {
+  display: none;
+}
+
+#status-vim-mode {
+  font-weight: 600;
+}
+
+#status-vim-prompt:empty,
+#status-vim-notice:empty,
+#status-vim-keys:empty {
+  display: none;
+}
+
+/* The keymap builds the prompt with inline fonts and a grey chosen for another page; the bar's
+   own type and ink hold contrast in both themes. */
+#status-vim-prompt span {
+  font-family: inherit !important;
+  color: inherit !important;
+}
+
+#status-vim-prompt input {
+  width: 24ch;
+  margin: 0 0 0 2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  font: inherit;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  color: inherit;
+  background: transparent;
+}
+
+#status-vim-prompt input:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 0;
+}
+
+#status-vim-keys {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
 #status-notice {
   margin-left: auto;
   opacity: 0;

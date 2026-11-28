@@ -79,6 +79,22 @@ const OPTIONS = [
       + "nothing.",
   },
   {
+    key: "vimMode" as const,
+    kind: "toggle" as const,
+    label: "Vim mode",
+    description:
+      "Vim's modes and keys in the code editors, with the mode shown in the status bar. Ctrl "
+      + "shortcuts and the function keys keep their usual meaning.",
+    detail:
+      "Normal, insert, visual and replace modes, with Vim's motions, operators, text objects, "
+      + "counts, registers, marks, macros, / search and : commands.\n\n"
+      + ":w saves the project and :q closes the tab. u is the editor's own Undo.\n\n"
+      + "Ctrl shortcuts stay as they are, so Ctrl+C copies and Ctrl+V pastes. The exceptions: "
+      + "Ctrl+[ is Escape, Ctrl+Q starts a block selection, and Ctrl+D and Ctrl+U scroll half a "
+      + "page. Redo is :redo or Ctrl+Shift+Z, because Ctrl+R opens the Project Explorer.\n\n"
+      + "Yank and put use Vim's own registers. Ctrl+C and Ctrl+V use the Windows clipboard.",
+  },
+  {
     key: "applyAttributesOnSave" as const,
     kind: "toggle" as const,
     label: "Apply annotations to attributes on save",

@@ -10786,6 +10786,18 @@ internal sealed partial class AddInSession : IDisposable
                 surface.TextOf(module, display)
                     ?? (_writtenModules.TryGetValue(WrittenKey(module, display), out var written) ? written : null);
 
+            // WHAT THE WORKBOOK HOLDS, which is what a clean workbook has saved. Not the surface's
+            // text while that is ahead of the module: typing reaches the surface at once and the
+            // module a pause later, and the workbook still reads Saved in between. A baseline
+            // taken from the surface in that gap was the saved text PLUS the first edit after a
+            // save, so that edit showed no dot, and putting the text back to what was saved
+            // showed one (found 2026-11-28). The last text written to the module is the module's
+            // text; with none remembered there is nothing safe to take, and the baseline waits.
+            string? SavedTextOf(string module, string? display) =>
+                surface.HasUnwritten(module, display)
+                    ? (_writtenModules.TryGetValue(WrittenKey(module, display), out var held) ? held : null)
+                    : CurrentTextOf(module, display);
+
             // One module, one answer. The dot used to be a workbook fact worn by every tab the
             // workbook owned, on the grounds that saving persists all of a workbook's modules
             // together. That is true of SAVING and false of the question a tab strip is asked,
@@ -10809,7 +10821,7 @@ internal sealed partial class AddInSession : IDisposable
                 // A clean moment is also when a baseline is the saved truth, so it is taken here.
                 if (saved != false)
                 {
-                    if (saved == true && CurrentTextOf(module, display) is { } clean)
+                    if (saved == true && SavedTextOf(module, display) is { } clean)
                     {
                         _savedBaselines[BaselineKey(display, module)] = clean;
                     }

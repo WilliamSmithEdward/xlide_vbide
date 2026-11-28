@@ -979,9 +979,17 @@ if ($Live) {
                                      # editor-keys presses Enter, Up and Down as real keys in the
                                      # code editor and the Immediate entry line (#103).
                                      'editor-keys.mjs',
+                                     # vim turns Vim mode on and presses its keys as keys: modes,
+                                     # an edit and its undo reaching the project, the repeat, the
+                                     # Ctrl keys, the : and / lines, :w and :q, and off (#173).
+                                     'vim.mjs',
                                      # text-mirror holds the page, the shadow, the engine's mirror and
                                      # the workbook to one text through the paths that split them (#105).
                                      'text-mirror.mjs',
+                                     # unsaved-dot holds a code tab's dot to the saved text around
+                                     # a save: the first edit after one, that edit taken back, and
+                                     # the save that clears it.
+                                     'unsaved-dot.mjs',
                                      # commit-rewrite holds the page to the VBE's rewrite of a line
                                      # once it is left: spacing, a closed string, 1# for 1.0.
                                      'commit-rewrite.mjs',
