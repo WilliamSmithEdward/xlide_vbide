@@ -1849,6 +1849,18 @@ await waitFor("the module to hold what was written", async () =>
 a host round trip joined the path it was waiting on, and then it reported a working feature
 broken - twice in one afternoon (2026-08-07).
 
+**So is every read of the screen in the same breath as the call that changes it.** The editor
+draws on its own schedule: a decoration removed is gone from the model when the call returns and
+from the DOM at the next frame, about twenty milliseconds later. `scm-ready-page-probe.mjs`
+turned blame off and counted the hint spans at once, expecting none. Until the lenses (#169) the
+hints had not been drawn again after the tab switch just before it, so it counted none before and
+none after and passed without ever seeing one. From the lenses on they were drawn by then, and it
+failed on a product that was right. Measured 2026-11-28 in the probe's own flow: no hints on
+screen before the call at the commit before the lenses and four at the lenses commit; and four
+spans one millisecond after the call, none at twenty-two. Read the layer's own state for what the
+call did, wait for the screen with `until`, and make sure the thing was on screen before
+asserting that it left.
+
 It is also where the live gate's time goes. Counted 2026-08-10: **130 fixed sleeps totalling about
 149 seconds**, roughly 127s of it in the suites `-Live` runs, before a single Excel restart. Seven
 suites had grown their own copy of the same poller and fifteen their own `wait`, which is why both

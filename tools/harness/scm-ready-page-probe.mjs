@@ -110,8 +110,24 @@ const DRIVE = `(async () => {
   ui.act("activate", { module: "Module1" });
   await until(() => ui.state().workspace.active && ui.state().workspace.active.module === "Module1" ? true : null);
   check("and Module1 is still on after the switch", ui.state().blame.on === true && ui.state().blame.lines === 2);
-  await ui.act("blame", { which: "off" });
-  check("blame off clears the hints", document.querySelectorAll(".xlide-blame, .xlide-blame-uncommitted").length === 0 && ui.state().blame.on === false);
+
+  // THE SCREEN FOLLOWS THE MODEL BY A PAINT, coming back and going away alike. The layer's
+  // state changes in the call; the hints are spans the editor draws, and a removal reaches the
+  // screen on its next frame, about twenty milliseconds later. This check used to read the
+  // screen in the same breath as the call, and so raced the paint twice. Until the lenses
+  // (#169) the editor had not drawn Module1's hints again by the time the switch back returned:
+  // the check counted none before turning them off and none after, and passed without having
+  // seen one. Since the lenses they are drawn by then, all four, and it read them one
+  // millisecond after the call that takes them away at the next frame. So: wait until they are
+  // on screen, turn blame off, and wait for them to go.
+  const hintsOnScreen = () => document.querySelectorAll(".xlide-blame, .xlide-blame-uncommitted").length;
+  const back = await until(() => (hintsOnScreen() === 4 ? true : null));
+  check("and its four hints are drawn again", !!back, String(hintsOnScreen()));
+  const off = await ui.act("blame", { which: "off" });
+  const after = ui.state().blame;
+  check("blame off turns the layer off in the call", off.did === true && after.on === false && after.painted === 0, JSON.stringify({ off, after }));
+  const cleared = await until(() => (hintsOnScreen() === 0 ? true : null));
+  check("blame off clears the hints", !!back && !!cleared, String(hintsOnScreen()));
 
   await idle();
   ui.act("scmPane", { message: "Demo commit from the probe" });
