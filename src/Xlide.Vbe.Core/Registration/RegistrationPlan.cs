@@ -37,6 +37,12 @@ public sealed record RegistryEntry(string Path, string? Name, string Value, bool
 /// Addins64 for 64-bit hosts. The subkey name is the ProgID. The ProgID resolves to a CLSID, and
 /// the CLSID resolves to the server library. Because the shim is a native library, InprocServer32
 /// points at it directly rather than at a runtime host.
+///
+/// THE TWO WIDTHS STAND SIDE BY SIDE. A host loads only a library of its own width, so there is
+/// a shim for each, and one installation registers both: the same ProgID and CLSID, with the
+/// class resolving to a different library depending on who asks. That works because the two
+/// plans share nothing but the ProgID, which says the same thing in both. See
+/// <see cref="ClassKeyPath"/> for where each width looks.
 /// </summary>
 public static class RegistrationPlan
 {
@@ -59,8 +65,8 @@ public static class RegistrationPlan
         var entries = new List<RegistryEntry>();
         var classes = ClassesRoot(scope);
 
-        AddCoClass(entries, classes, ProductIdentity.AddInClsid, ProductIdentity.AddInProgId,
-            ProductIdentity.FriendlyName, shimPath, bitness);
+        AddCoClass(entries, classes, ClassKeyPath(bitness, scope), ProductIdentity.AddInClsid,
+            ProductIdentity.AddInProgId, ProductIdentity.FriendlyName, shimPath);
 
         var addInsKey = AddInsKeyPath(bitness);
         entries.Add(new RegistryEntry($@"{addInsKey}\{ProductIdentity.AddInProgId}", "Description", ProductIdentity.Description));
@@ -112,31 +118,43 @@ public static class RegistrationPlan
         _ => throw new ArgumentOutOfRangeException(nameof(scope)),
     };
 
+    /// <summary>
+    /// Key path, relative to the hive root, of the add-in's class as a host of the given width
+    /// resolves it.
+    ///
+    /// On 64-bit Windows a class lookup reads a different key in a process of each width, in
+    /// the user's hive as much as in the machine's: a 64-bit process reads Classes\CLSID and a
+    /// 32-bit one reads Classes\WOW6432Node\CLSID. Measured on 2026-11-28 with a class
+    /// registered in one of the two only: a process of the matching width loaded its library,
+    /// and a process of the other width was told the class is not registered. So each width's
+    /// class is written to its own key and to that key alone. Writing the 32-bit library's path
+    /// to the plain key as well, which this did before both widths shipped, would hand a 64-bit
+    /// host a library it cannot load.
+    /// </summary>
+    public static string ClassKeyPath(HostBitness bitness, RegistryScope scope) => bitness switch
+    {
+        HostBitness.X64 => $@"{ClassesRoot(scope)}\CLSID\{{{ProductIdentity.AddInClsid}}}",
+        HostBitness.X86 => $@"{ClassesRoot(scope)}\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}",
+        _ => throw new ArgumentOutOfRangeException(nameof(bitness)),
+    };
+
     private static void AddCoClass(
         List<RegistryEntry> entries,
         string classes,
+        string clsidKey,
         string clsid,
         string progId,
         string friendlyName,
-        string serverPath,
-        HostBitness bitness)
+        string serverPath)
     {
-        var clsidKey = $@"{classes}\CLSID\{{{clsid}}}";
-
         entries.Add(new RegistryEntry(clsidKey, null, friendlyName));
         entries.Add(new RegistryEntry($@"{clsidKey}\InprocServer32", null, serverPath));
         entries.Add(new RegistryEntry($@"{clsidKey}\InprocServer32", "ThreadingModel", ThreadingModel));
         entries.Add(new RegistryEntry($@"{clsidKey}\ProgID", null, progId));
+
+        // The ProgID is not redirected: both widths read this one key, and both plans write the
+        // same two values to it.
         entries.Add(new RegistryEntry($@"{classes}\{progId}", null, friendlyName));
         entries.Add(new RegistryEntry($@"{classes}\{progId}\CLSID", null, $"{{{clsid}}}"));
-
-        // A 32-bit server registered on 64-bit Windows lives under the WOW node so that 32-bit
-        // Office resolves it. The add-in key itself is not redirected, only the class registration.
-        if (bitness == HostBitness.X86)
-        {
-            var wowKey = $@"Software\Classes\WOW6432Node\CLSID\{{{clsid}}}";
-            entries.Add(new RegistryEntry($@"{wowKey}\InprocServer32", null, serverPath));
-            entries.Add(new RegistryEntry($@"{wowKey}\InprocServer32", "ThreadingModel", ThreadingModel));
-        }
     }
 }

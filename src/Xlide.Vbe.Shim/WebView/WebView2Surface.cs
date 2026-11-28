@@ -920,7 +920,7 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
-        var directory = ShimModule.Directory;
+        var directory = ShimModule.SharedDirectory;
         if (directory is null)
         {
             Log.Error("webview: the shim could not locate its own directory, so the bundle cannot be found");

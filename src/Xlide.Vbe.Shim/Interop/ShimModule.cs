@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Xlide.Vbe.Core.Hosting;
 
 namespace Xlide.Vbe.Shim.Interop;
 
@@ -30,7 +31,10 @@ internal static unsafe class ShimModule
         }
     }
 
-    /// <summary>Directory containing this library, or null when it cannot be determined.</summary>
+    /// <summary>
+    /// Directory containing this library, or null when it cannot be determined. The browser
+    /// loader is here, because it has to be the same width as the library that loads it.
+    /// </summary>
     public static string? Directory
     {
         get
@@ -39,6 +43,14 @@ internal static unsafe class ShimModule
             return _directory;
         }
     }
+
+    /// <summary>
+    /// Directory containing what does not depend on the host's width: the editor page, the engine
+    /// and the icon. The same folder as <see cref="Directory"/> everywhere but in an installed
+    /// 32-bit shim, which sits one folder below them. See <see cref="InstallLayout"/>.
+    /// </summary>
+    public static string? SharedDirectory =>
+        Directory is { Length: > 0 } directory ? InstallLayout.SharedDirectory(directory) : null;
 
     private static void Resolve()
     {

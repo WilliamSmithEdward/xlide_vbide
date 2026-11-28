@@ -3,12 +3,15 @@ using System.IO.Compression;
 using System.Reflection;
 using Microsoft.Win32;
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Core.Registration;
 
 namespace Xlide.Setup;
 
 /// <summary>
-/// Installs and removes the product for the current user.
+/// Installs and removes the product for the current user, for 64-bit and 32-bit Office alike:
+/// one folder, a library of each width in it, and each registered with the Office that can
+/// load it. See <see cref="InstallLayout"/>.
 ///
 /// The primary registration lives under the user's own profile and registry hive and needs no
 /// administrator rights - the editor resolves class registration through the user hive, and a
@@ -160,11 +163,18 @@ internal static class Program
             throw new InvalidOperationException($"The payload did not contain {ProductIdentity.ShimFileName}.");
         }
 
-        ApplyRegistration(shim);
+        var bothWidths = ApplyRegistration(target);
         WriteUninstallEntry(target, uninstaller, payload.Sum(p => p.Content.Length));
 
         Report(silent, string.Empty);
-        Report(silent, "Registered for the current user. No administrator rights were needed.");
+        Report(silent, bothWidths
+            ? "Registered for the current user, for 64-bit and 32-bit Office. No administrator rights were needed."
+            : "Registered for the current user, for 64-bit Office. No administrator rights were needed.");
+
+        if (!bothWidths)
+        {
+            Report(silent, "This installer carries no 32-bit library, so a 32-bit Office will not show it.");
+        }
 
         SupplementOverlay(shim, silent);
 
@@ -288,12 +298,35 @@ internal static class Program
         return files;
     }
 
-    private static void ApplyRegistration(string shimPath)
+    /// <summary>
+    /// Registers the library of each width with the Office of that width, and answers whether
+    /// the 32-bit one was there to register.
+    ///
+    /// Both are registered whichever Office is installed. Nothing here asks which one the
+    /// machine has: each width reads its own add-in key and resolves the class through its own
+    /// view of the registry, so the registration a machine's Office does not read lies inert,
+    /// and an Office replaced by one of the other width finds xlide already there.
+    /// </summary>
+    private static bool ApplyRegistration(string installFolder)
     {
-        foreach (var entry in RegistrationPlan.Build(shimPath, HostBitness.X64, RegistryScope.CurrentUser))
+        var shim = Path.Combine(installFolder, ProductIdentity.ShimFileName);
+        foreach (var entry in RegistrationPlan.Build(shim, HostBitness.X64, RegistryScope.CurrentUser))
         {
             WriteEntry(Registry.CurrentUser, entry.Path, entry);
         }
+
+        var shim32 = InstallLayout.X86ShimPath(installFolder);
+        if (!File.Exists(shim32))
+        {
+            return false;
+        }
+
+        foreach (var entry in RegistrationPlan.Build(shim32, HostBitness.X86, RegistryScope.CurrentUser))
+        {
+            WriteEntry(Registry.CurrentUser, entry.Path, entry);
+        }
+
+        return true;
     }
 
     private static void WriteEntry(RegistryKey hive, string path, RegistryEntry entry)
@@ -314,6 +347,10 @@ internal static class Program
     /// <summary>
     /// Plants the registration inside the Click-to-Run overlay too, when that is possible without
     /// asking anyone for anything: only on C2R machines, and only when already elevated.
+    ///
+    /// The 64-bit registration only. Where a 32-bit Click-to-Run Office keeps this namespace in
+    /// its overlay has not been seen on a real machine, and a key written on a guess under the
+    /// machine hive is worse than one not written.
     /// </summary>
     private static void SupplementOverlay(string shimPath, bool silent)
     {
@@ -421,13 +458,13 @@ internal static class Program
 
     private static void RemoveRegistration()
     {
-        var classes = RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser);
+        foreach (var bitness in new[] { HostBitness.X64, HostBitness.X86 })
+        {
+            DeleteKeyIfPresent($@"{RegistrationPlan.AddInsKeyPath(bitness)}\{ProductIdentity.AddInProgId}");
+            DeleteKeyIfPresent(RegistrationPlan.ClassKeyPath(bitness, RegistryScope.CurrentUser));
+        }
 
-        DeleteKeyIfPresent($@"{RegistrationPlan.AddInsKeyPath(HostBitness.X64)}\{ProductIdentity.AddInProgId}");
-        DeleteKeyIfPresent($@"{RegistrationPlan.AddInsKeyPath(HostBitness.X86)}\{ProductIdentity.AddInProgId}");
-        DeleteKeyIfPresent($@"{classes}\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteKeyIfPresent($@"{classes}\{ProductIdentity.AddInProgId}");
-        DeleteKeyIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}");
+        DeleteKeyIfPresent($@"{RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser)}\{ProductIdentity.AddInProgId}");
     }
 
     private static void WriteUninstallEntry(string target, string uninstaller, int payloadBytes)

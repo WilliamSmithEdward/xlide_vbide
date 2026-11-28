@@ -83,19 +83,59 @@ public class RegistrationPlanTests
     }
 
     [Fact]
-    public void ThirtyTwoBitRegistrationAddsTheCompatibilityNode()
+    public void ThirtyTwoBitClassResolvesToItsServerInTheViewAThirtyTwoBitHostReads()
     {
-        var wow = Plan(HostBitness.X86)
-            .Where(e => e.Path.Contains("WOW6432Node", StringComparison.Ordinal))
-            .ToList();
+        var entry = Plan(HostBitness.X86).Single(e =>
+            e.Path == $@"Software\Classes\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}\InprocServer32"
+            && e.Name is null);
 
-        Assert.NotEmpty(wow);
+        Assert.Equal(ShimPath, entry.Value);
+    }
+
+    [Fact]
+    public void ThirtyTwoBitRegistrationLeavesTheSixtyFourBitClassAlone()
+    {
+        // The plain key is the one a 64-bit host loads from. A 32-bit library's path written
+        // there is a library that host cannot load, and it would replace the one it can.
+        Assert.DoesNotContain(Plan(HostBitness.X86), e =>
+            e.Path.StartsWith(@"Software\Classes\CLSID\", StringComparison.Ordinal));
     }
 
     [Fact]
     public void SixtyFourBitRegistrationDoesNotUseTheCompatibilityNode()
     {
         Assert.DoesNotContain(Plan(), e => e.Path.Contains("WOW6432Node", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BothWidthsCanBeRegisteredAtOnce()
+    {
+        // One installation registers both, each with its own library. Wherever the two plans
+        // write the same value they must write the same thing, or whichever is applied second
+        // undoes the first.
+        var x64 = RegistrationPlan.Build(@"C:\xlide\Xlide.Vbe.Shim.dll", HostBitness.X64, RegistryScope.CurrentUser);
+        var x86 = RegistrationPlan.Build(@"C:\xlide\x86\Xlide.Vbe.Shim.dll", HostBitness.X86, RegistryScope.CurrentUser);
+
+        var shared = x64
+            .Join(x86, left => (left.Path, left.Name), right => (right.Path, right.Name), (left, right) => (left, right))
+            .ToList();
+
+        // The ProgID, which is the one thing both widths read from the same key.
+        Assert.Equal(2, shared.Count);
+        Assert.All(shared, pair => Assert.Equal(pair.left.Value, pair.right.Value));
+    }
+
+    [Theory]
+    [InlineData(HostBitness.X64)]
+    [InlineData(HostBitness.X86)]
+    public void EachWidthRegistersItsOwnAddInKeyAndItsOwnClass(HostBitness bitness)
+    {
+        var plan = Plan(bitness);
+        var classKey = RegistrationPlan.ClassKeyPath(bitness, RegistryScope.CurrentUser);
+        var addInKey = $@"{RegistrationPlan.AddInsKeyPath(bitness)}\{ProductIdentity.AddInProgId}";
+
+        Assert.Contains(plan, e => e.Path == $@"{classKey}\InprocServer32" && e.Name is null && e.Value == ShimPath);
+        Assert.Contains(plan, e => e.Path == addInKey && e.Name == "LoadBehavior");
     }
 
     [Fact]

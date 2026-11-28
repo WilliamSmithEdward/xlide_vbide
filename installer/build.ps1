@@ -29,6 +29,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $setupProject = Join-Path $PSScriptRoot 'Xlide.Setup\Xlide.Setup.csproj'
 $payloadDir = Join-Path $PSScriptRoot 'Xlide.Setup\payload'
 $shimPublish = Join-Path $repoRoot "artifacts\publish\Xlide.Vbe.Shim\$($Configuration.ToLowerInvariant())_win-x64"
+$shimPublish32 = Join-Path $repoRoot "artifacts\publish\Xlide.Vbe.Shim\$($Configuration.ToLowerInvariant())_win-x86"
 $enginePublish = Join-Path $repoRoot 'engine\dist'
 # Only the built page ships, not the folder it is built in. WebViewPaths.EditorContentRelativePath
 # is what the shim looks for beside itself, and it is this and nothing else: staging the whole ui
@@ -52,10 +53,36 @@ if (Test-Path $vsInstaller) { $env:PATH = "$vsInstaller;$env:PATH" }
 
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
+<#
+.SYNOPSIS
+    The machine a Windows library was built for, read from its own header: 0x8664 is 64-bit,
+    0x014C is 32-bit.
+#>
+function Get-LibraryMachine([string] $Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $header = New-Object byte[] 4096
+        $read = $stream.Read($header, 0, $header.Length)
+    } finally {
+        $stream.Dispose()
+    }
+
+    $at = [BitConverter]::ToInt32($header, 0x3C)
+    if ($at -le 0 -or ($at + 6) -gt $read -or $header[$at] -ne 0x50 -or $header[$at + 1] -ne 0x45) {
+        throw "$Path is not a Windows library."
+    }
+
+    return [BitConverter]::ToUInt16($header, $at + 4)
+}
+
 if (-not $NoBuildProduct) {
-    Write-Host '==> Publishing the shim' -ForegroundColor Cyan
-    dotnet publish (Join-Path $repoRoot 'src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj') -c $Configuration -r win-x64
-    if ($LASTEXITCODE -ne 0) { throw 'Publishing the shim failed.' }
+    # One of each width. A host loads only a library of its own, and the installer registers
+    # both, so an installer with one missing would leave one kind of Office without xlide.
+    foreach ($runtime in 'win-x64', 'win-x86') {
+        Write-Host "==> Publishing the shim ($runtime)" -ForegroundColor Cyan
+        dotnet publish (Join-Path $repoRoot 'src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj') -c $Configuration -r $runtime
+        if ($LASTEXITCODE -ne 0) { throw "Publishing the shim for $runtime failed." }
+    }
 }
 
 Write-Host '==> Staging the payload' -ForegroundColor Cyan
@@ -81,6 +108,40 @@ foreach ($file in (Get-ChildItem $shimPublish -File -ErrorAction SilentlyContinu
 }
 
 if ($shipped -eq 0) { throw "Nothing to package: no published files under $shimPublish." }
+
+# THE 32-BIT SHIM, for a 32-bit Office. Two files and nothing else: the library, and the browser
+# loader, which has to be the width of the library that loads it. The page, the engine and the
+# icon are staged once, with the 64-bit shim, and the 32-bit one looks one folder up for them.
+# The folder is InstallLayout.X86FolderName, and the installer registers the library it finds
+# there, so its name here and there has to be the same word.
+$x86Dir = Join-Path $payloadDir 'x86'
+New-Item -ItemType Directory -Path $x86Dir | Out-Null
+foreach ($name in 'Xlide.Vbe.Shim.dll', 'WebView2Loader.dll') {
+    $source = Join-Path $shimPublish32 $name
+    if (-not (Test-Path $source)) {
+        throw "No 32-bit $name at $source, so this installer would leave a 32-bit Office without xlide. Run without -NoBuildProduct."
+    }
+
+    Copy-Item $source (Join-Path $x86Dir $name)
+    Write-Host ("    x86\{0} ({1:N0} KB)" -f $name, ((Get-Item $source).Length / 1KB))
+}
+
+# EACH LIBRARY IS THE WIDTH ITS FOLDER SAYS. The two publish folders differ by one word and the
+# four files by none, so a mix-up is a copy that succeeds and an add-in that never loads: Windows
+# refuses a library of the other width and the editor says nothing at all. The width is read out
+# of each file, since nothing else here would notice.
+foreach ($expected in @(
+        @{ Folder = $payloadDir; Machine = 0x8664; Says = '64-bit' },
+        @{ Folder = $x86Dir; Machine = 0x014C; Says = '32-bit' })) {
+    foreach ($name in 'Xlide.Vbe.Shim.dll', 'WebView2Loader.dll') {
+        $file = Join-Path $expected.Folder $name
+        $machine = Get-LibraryMachine $file
+        if ($machine -ne $expected.Machine) {
+            throw ("{0} should be a {1} library and its header says machine 0x{2:X4}." -f $file, $expected.Says, $machine)
+        }
+    }
+}
+Write-Host '    each library is the width its folder says'
 
 # THE ENGINE IS TAKEN BY NAME, not by extension. `*.exe` ships whatever executable happens to be
 # in the folder, and on 2026-09-13 that was `xlide-engine.held-130938.exe` - a 98 MB copy set
