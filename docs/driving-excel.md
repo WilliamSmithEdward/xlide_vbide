@@ -2791,6 +2791,42 @@ without `-Force`, because it really installs: over whatever xlide the machine ha
 registration the dev loop depends on. It runs the installer silently, checks the files and keys of
 both widths, runs `Test-ShimLoad.ps1 -Registered`, uninstalls, and checks nothing is left.
 
+### A real Excel of each width, on a runner
+
+`.github/workflows/office.yml` ("Office hosts") is the one place the editor runs inside a 32-bit
+Office. Each of its two jobs takes a hosted runner, installs an Excel of one width, registers the
+Debug shim of that width, and drives the editor there. The 64-bit job is the control: the same
+steps where the product is known to work, so a red 32-bit job is about 32-bit.
+
+```powershell
+tools\harness\Install-OfficeOnRunner.ps1 -Width 32      # a CI runner only
+tools\harness\Test-OfficeHost.ps1 -Width 32 -Shim <the registered shim> -Suites
+```
+
+`Install-OfficeOnRunner.ps1` downloads the Office Deployment Tool from Microsoft at a pinned
+address, holds it to a pinned SHA-256 and to Microsoft's signature, and runs it with a
+configuration for Excel alone in the width asked for. It then opens Excel once through automation
+and closes it, and sets `VBAWarnings` and `AccessVBOM` for the user. **It accepts Microsoft's
+license terms for Office** (`AcceptEULA`), and the Office it leaves is not activated, so it refuses
+to run outside a CI runner without `-Force`. Nothing follows the pin automatically; the script's
+header says how to move it.
+
+`Test-OfficeHost.ps1` installs and registers nothing, so it runs anywhere an Excel and a
+registered Debug shim of its width are. It starts a separate Excel on the scratch workbook, opens
+the editor through the ribbon, and checks that the door answers healthy, that Excel and the shim
+it loaded are the width asked for, and that the shim's own log says so. `-Suites` then builds the
+debug fixture through the api and runs `Test-DebugApi.ps1`, `objbrowser-live-probe.mjs`,
+`debugger-features.mjs`, `locals-hidden-rows.mjs`, `immediate-panel.mjs` and `com-leak.mjs`
+against it: the suites whose code depends on the width of a pointer.
+
+`LibraryMachine.ps1` is dot-sourced by both: `Get-LibraryWidth <file>` answers 32 or 64 from the
+file's own header.
+
+The workflow is not a required check. It rests on a download from Microsoft's servers, and it
+uploads a screenshot and the shim's logs as `office-32` and `office-64` whatever the outcome,
+because a dialog nobody answered looks like a timeout from everywhere but the screen. When the
+analyzer pin moves, the commit written in `office.yml` moves with it, as in `ci.yml`.
+
 ---
 
 ## 4. Where the api stops

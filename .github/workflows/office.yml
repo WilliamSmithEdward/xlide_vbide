@@ -74,22 +74,25 @@ jobs:
           persist-credentials: false
 
       # The engine is built from the analyzer commit a release is built from, named in
-      # .github/analyzer.json.
-      - name: Read the analyzer pin
-        id: pin
+      # .github/analyzer.json. The commit is written out below, as CI's engine job writes it,
+      # and this step holds the two together. Reading it out of the file instead would let a
+      # pull request choose what this job checks out and runs by editing a JSON file, which is
+      # what CodeQL's untrusted-checkout rule reports.
+      - name: Verify analyzer pin
         shell: pwsh
         working-directory: xlide_vbide
         run: |
           $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
-          if ($pin.commit -notmatch '^[0-9a-f]{40}$') { throw '.github/analyzer.json names no full commit SHA.' }
-          "commit=$($pin.commit)" >> $env:GITHUB_OUTPUT
+          if ($pin.commit -ne 'ec9c8a4343653d023b509304f70791a8e67a897b') {
+            throw 'Update the Office hosts analyzer checkout when .github/analyzer.json changes.'
+          }
 
       # Beside this checkout, where the engine build looks for the analyzer.
       - name: Check out the pinned analyzer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/xlide_vscode
-          ref: ${{ steps.pin.outputs.commit }}
+          ref: ec9c8a4343653d023b509304f70791a8e67a897b # xlide_vscode v11.2.11
           path: xlide_vscode
           persist-credentials: false
 

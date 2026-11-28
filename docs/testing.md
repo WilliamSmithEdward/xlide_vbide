@@ -243,6 +243,14 @@ What it cannot say is that the editor works in a 32-bit Office. Nothing in it ta
 installs: it runs the installer, asks COM for the add-in from a process of each width, checks
 which library each was handed, and uninstalls.
 
+The editor inside a 32-bit Office is the Office hosts workflow's question
+(`.github/workflows/office.yml`). A hosted runner is the one machine that can hold a 32-bit Office
+beside this product's development, so each of its two jobs installs an Excel of one width, and
+`Test-OfficeHost.ps1` loads the Debug shim of that width into it and runs the suites that depend
+on the width of a pointer. The 64-bit job is the control. It is not a required check, because it
+rests on a download from Microsoft that sometimes fails. See
+[driving-excel.md](driving-excel.md), section 3d.
+
 ## What the xlide api gives a probe
 
 `state`, `problems`, `module` read and write, `layout`, `eval` and `await` against the live page,

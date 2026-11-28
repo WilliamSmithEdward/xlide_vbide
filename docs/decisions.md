@@ -577,6 +577,15 @@ browser code in whatever process loaded it, and `tools\harness\Test-ShimLoad.ps1
 every pull request, and also installs on the runner and asks COM for the add-in from a process of
 each width (`Test-InstallerWidths.ps1`). See [testing.md](testing.md).
 
+The editor itself, inside a 32-bit Office, runs in one place: the Office hosts workflow, which
+installs an Excel of each width on a hosted runner, registers the Debug shim of that width and
+drives the editor with the harness a development machine uses. On 2026-11-28, in 32-bit Excel
+16.0.20527, the add-in loaded, the engine and the page came up, and the api probe, the Object
+Browser probe, the debugger suite, the Locals rows, the Immediate panel and the leak count all
+passed, as they did in the 64-bit Excel beside it. Excel is the only host installed there; Word,
+PowerPoint and Access have not run 32-bit. The workflow accepts Microsoft's license terms for
+Office on the runner and is not a required check.
+
 Alternatives weighed: a second installer for 32-bit Office, which makes the user answer a question
 most cannot (which Office do I have) and makes the updater choose a download; detecting the
 installed Office and registering one width, which is a second thing to get wrong and goes stale

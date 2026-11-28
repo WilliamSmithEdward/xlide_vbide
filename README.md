@@ -130,6 +130,9 @@ rights, changes nothing outside your own profile, and needs no runtime, framewor
 present first. Everything it needs is inside the one executable. Windows will warn before running
 it, because it carries no code signature.
 
+The one installer serves 64-bit and 32-bit Office on 64-bit Windows. You do not need to know which
+you have.
+
 Close Excel first. If it is open, the installer says so and waits; it continues on its own when
 Excel closes, or force closes it if you ask.
 
