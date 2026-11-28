@@ -1,0 +1,184 @@
+name: Office hosts
+
+# WHAT NO OTHER WORKFLOW CAN SAY: that the add-in loads into a real Office and its editor comes
+# up there, in a 64-bit Excel and in a 32-bit one.
+#
+# CI has no Office on it, and a development machine has one width only, because 32-bit and
+# 64-bit Office cannot be installed side by side. A hosted runner is a machine that is thrown
+# away, so an Excel of each width is installed on one of its own, the Debug shim of that width
+# is registered, and the harness that drives the editor on a developer's machine drives it
+# there: the add-in loads, the page and the engine come up, and the suites that depend on the
+# width of a pointer run. The 64-bit job is the control. It shows the method works on a runner
+# where the product is known to work, so that a failure of the 32-bit job is about 32-bit.
+#
+# THIS INSTALLS MICROSOFT OFFICE UNATTENDED, which accepts Microsoft's license terms for it on
+# the runner, and the Office it installs is not activated. tools/harness/Install-OfficeOnRunner.ps1
+# says how, and what is pinned. The method is the one DecimalTurn/setup-vba uses.
+#
+# Not a required check. It depends on a download from Microsoft's servers that fails now and
+# then, and a pull request that did nothing wrong should not wait on it.
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - installer/**
+      - engine/**
+      - ui/editor/**
+      - tools/harness/**
+      - tools/Xlide.Vbe.Register/**
+      - tools/FixtureDriver.ps1
+      - tools/New-DebugFixture.ps1
+      - Directory.Build.props
+      - global.json
+      - .github/analyzer.json
+      - .github/workflows/office.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+# A new push to a pull request cancels its older runs.
+concurrency:
+  group: office-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  excel:
+    name: Excel ${{ matrix.width }}-bit loads xlide
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - width: 64
+            runtime: win-x64
+            bitness: x64
+          - width: 32
+            runtime: win-x86
+            bitness: x86
+    env:
+      WIDTH: ${{ matrix.width }}
+      RUNTIME: ${{ matrix.runtime }}
+      BITNESS: ${{ matrix.bitness }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: xlide_vbide
+          persist-credentials: false
+
+      # The engine is built from the analyzer commit a release is built from, named in
+      # .github/analyzer.json.
+      - name: Read the analyzer pin
+        id: pin
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          $pin = Get-Content .github/analyzer.json -Raw | ConvertFrom-Json
+          if ($pin.commit -notmatch '^[0-9a-f]{40}$') { throw '.github/analyzer.json names no full commit SHA.' }
+          "commit=$($pin.commit)" >> $env:GITHUB_OUTPUT
+
+      # Beside this checkout, where the engine build looks for the analyzer.
+      - name: Check out the pinned analyzer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: WilliamSmithEdward/xlide_vscode
+          ref: ${{ steps.pin.outputs.commit }}
+          path: xlide_vscode
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: xlide_vbide/global.json
+
+      - name: Install the analyzer's dependencies
+        working-directory: xlide_vscode
+        run: npm ci
+
+      - name: Install the engine's dependencies
+        working-directory: xlide_vbide/engine
+        run: npm ci
+
+      - name: Package the engine
+        working-directory: xlide_vbide/engine
+        run: npm run package
+
+      - name: Install the page's dependencies
+        working-directory: xlide_vbide/ui/editor
+        run: npm ci
+
+      - name: Build the page
+        working-directory: xlide_vbide/ui/editor
+        run: npm run build
+
+      # Debug, because the harness drives the editor through the api, and only a Debug shim
+      # opens that door without being told to.
+      - name: Publish the Debug shim of this width
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Debug -r $env:RUNTIME
+          if ($LASTEXITCODE -ne 0) { throw "Publishing the Debug shim for $env:RUNTIME failed." }
+
+      - name: Install Excel of this width
+        shell: powershell
+        working-directory: xlide_vbide
+        timeout-minutes: 20
+        run: ./tools/harness/Install-OfficeOnRunner.ps1 -Width $env:WIDTH
+
+      - name: Register the shim with the editor of this width
+        shell: pwsh
+        working-directory: xlide_vbide
+        run: |
+          $shim = Join-Path $PWD "artifacts/publish/Xlide.Vbe.Shim/debug_$env:RUNTIME/Xlide.Vbe.Shim.dll"
+          dotnet run --project tools/Xlide.Vbe.Register -c Debug -- --apply --bitness $env:BITNESS --shim $shim
+          if ($LASTEXITCODE -ne 0) { throw 'The registration failed.' }
+
+      - name: Load xlide into Excel and drive it
+        shell: powershell
+        working-directory: xlide_vbide
+        timeout-minutes: 20
+        run: |
+          $shim = Join-Path $PWD "artifacts\publish\Xlide.Vbe.Shim\debug_$env:RUNTIME\Xlide.Vbe.Shim.dll"
+          ./tools/harness/Test-OfficeHost.ps1 -Width $env:WIDTH -Shim $shim -Suites
+
+      # What was on the screen, and what the shim wrote, for a run that went wrong: a dialog
+      # nobody answered looks like a timeout from everywhere but the screen.
+      - name: Collect the screen and the shim's logs
+        if: always()
+        shell: powershell
+        working-directory: xlide_vbide
+        run: |
+          New-Item -ItemType Directory -Path artifacts/office -Force | Out-Null
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save((Join-Path $PWD 'artifacts/office/screen.png'))
+          } catch {
+            Write-Host "No screenshot: $($_.Exception.Message)"
+          }
+          $logs = Join-Path $env:LOCALAPPDATA 'xlide_vbide/logs'
+          if (Test-Path $logs) { Copy-Item (Join-Path $logs '*.log') artifacts/office/ -ErrorAction SilentlyContinue }
+          Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Keep them
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: office-${{ matrix.width }}
+          path: xlide_vbide/artifacts/office/
+          if-no-files-found: warn
