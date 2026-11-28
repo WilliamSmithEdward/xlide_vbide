@@ -59,6 +59,8 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
     0x014C is 32-bit.
 #>
 function Get-LibraryMachine([string] $Path) {
+    # Resolved here: .NET opens a relative path against the process's folder, not PowerShell's.
+    $Path = (Resolve-Path -LiteralPath $Path).Path
     $stream = [IO.File]::OpenRead($Path)
     try {
         $header = New-Object byte[] 4096
