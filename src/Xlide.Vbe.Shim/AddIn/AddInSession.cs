@@ -1560,14 +1560,14 @@ internal sealed partial class AddInSession : IDisposable
             // setModules, 2026-08-06).
             _lastModulesKey = null;
             _lastLanguageFactsKey = null;
-            _editorSurface?.ShowInstallPath(Interop.ShimModule.Directory);
+            _editorSurface?.ShowInstallPath(Interop.ShimModule.SharedDirectory);
             _editorSurface?.ShowSystemColours();
 
             // The newest release, asked for once per session a few seconds from now; and the
             // updater's state re-said to a reloaded page, so a download in flight keeps its dialog.
             ScheduleUpdateCheck();
             ShowUpdate(open: false);
-            _hostChrome ??= HostChrome.Install(CodePaneTracker.MainWindow(), Interop.ShimModule.Directory);
+            _hostChrome ??= HostChrome.Install(CodePaneTracker.MainWindow(), Interop.ShimModule.SharedDirectory);
             PublishModules();
             PublishProjects();
             PublishFindingsToSurface();

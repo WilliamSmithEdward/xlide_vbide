@@ -2753,6 +2753,94 @@ more than a module scope can.
 
 ---
 
+## 3d. The shim with no host at all: 32-bit, and what an installer registers
+
+Everything above drives an editor. Two scripts drive the shim where there is none, because the
+32-bit shim has no editor on a development machine: 32-bit and 64-bit Office cannot be installed
+side by side.
+
+```powershell
+dotnet publish src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj -c Debug -r win-x86
+dotnet publish src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj -c Debug -r win-x64   # not while an editor holds it
+tools\harness\Test-ShimLoad.ps1
+```
+
+`Test-ShimLoad.ps1` starts the Windows PowerShell of each width (`SysWOW64` for 32-bit) and, inside
+it, loads the shim by path, takes the add-in's class factory from `DllGetClassObject`, creates the
+add-in and calls it by name through IDispatch. A Debug shim also exports `XlideSelfCheck`, and the
+script calls that: stages `layout`, `window`, `dispatch`, `typelib`, `fonts`, `picture`, `uia`,
+`job`, `engine` and `webview`, each the product's own code
+(`src\Xlide.Vbe.Shim\Diagnostics\SelfCheck.cs`). It registers nothing and starts no Office.
+
+| Switch | What it does |
+| --- | --- |
+| `-Architecture x86\|x64\|both` | Which width. `both` (the default) also compares the two reports |
+| `-Configuration Debug\|Release` | Release has no self-check, and having one fails |
+| `-Stage a,b` / `-Skip a,b` | Run only these stages, or leave these out. `-Skip engine` for a tree with no packaged engine |
+| `-InstalledLayout` | Load from a copy laid out as an installation: the 32-bit shim in `x86`, looking one folder up |
+| `-Registered` | Load nothing by path; ask COM by ProgID and check which file each width was given |
+| `-Shim <path>` | One library somewhere else. Needs one architecture |
+
+Reading a report (kept in `artifacts\shim-load\<mode>-<width>.txt`): `ok` and `FAIL` are checks,
+`same` is a fact both widths must report alike, `note` is context, and the last line is always
+`end <n> failed`. A report that does not end that way is a process that died, and the line before
+is where. The shim's own log for the run is in `%LOCALAPPDATA%\xlide_vbide\logs`, one per process,
+and those count toward the twenty the shim keeps.
+
+Things met while building it:
+
+- **`Marshal.GetHRForException` in the probe poisons the next check.** It leaves the exception on
+  the thread as its COM error, and the next automation object to fail without describing itself
+  is reported in those words. The probe reads `Exception.HResult` instead.
+- **The file system object never describes its failures**, so it cannot test the path that reads
+  an exception record's strings. `Msxml2.DOMDocument.6.0` refusing a malformed XPath does.
+- **`-InstalledLayout` copies the engine in**, on purpose. Without a copy the engine stage still
+  passes, by walking up to `engine\dist`, and says nothing about the installed lookup.
+- **The browser stage needs the page beside the shim**, so build the page before publishing.
+
+`Test-InstallerWidths.ps1 -Installer <exe>` is for a CI runner and refuses to run anywhere else
+without `-Force`, because it really installs: over whatever xlide the machine has, and over the
+registration the dev loop depends on. It runs the installer silently, checks the files and keys of
+both widths, runs `Test-ShimLoad.ps1 -Registered`, uninstalls, and checks nothing is left.
+
+### A real Excel of each width, on a runner
+
+`.github/workflows/office.yml` ("Office hosts") is the one place the editor runs inside a 32-bit
+Office. Each of its two jobs takes a hosted runner, installs an Excel of one width, registers the
+Debug shim of that width, and drives the editor there. The 64-bit job is the control: the same
+steps where the product is known to work, so a red 32-bit job is about 32-bit.
+
+```powershell
+tools\harness\Install-OfficeOnRunner.ps1 -Width 32      # a CI runner only
+tools\harness\Test-OfficeHost.ps1 -Width 32 -Shim <the registered shim> -Suites
+```
+
+`Install-OfficeOnRunner.ps1` downloads the Office Deployment Tool from Microsoft at a pinned
+address, holds it to a pinned SHA-256 and to Microsoft's signature, and runs it with a
+configuration for Excel alone in the width asked for. It then opens Excel once through automation
+and closes it, and sets `VBAWarnings` and `AccessVBOM` for the user. **It accepts Microsoft's
+license terms for Office** (`AcceptEULA`), and the Office it leaves is not activated, so it refuses
+to run outside a CI runner without `-Force`. Nothing follows the pin automatically; the script's
+header says how to move it.
+
+`Test-OfficeHost.ps1` installs and registers nothing, so it runs anywhere an Excel and a
+registered Debug shim of its width are. It starts a separate Excel on the scratch workbook, opens
+the editor through the ribbon, and checks that the door answers healthy, that Excel and the shim
+it loaded are the width asked for, and that the shim's own log says so. `-Suites` then builds the
+debug fixture through the api and runs `Test-DebugApi.ps1`, `objbrowser-live-probe.mjs`,
+`debugger-features.mjs`, `locals-hidden-rows.mjs`, `immediate-panel.mjs` and `com-leak.mjs`
+against it: the suites whose code depends on the width of a pointer.
+
+`LibraryMachine.ps1` is dot-sourced by both: `Get-LibraryWidth <file>` answers 32 or 64 from the
+file's own header.
+
+The workflow is not a required check. It rests on a download from Microsoft's servers, and it
+uploads a screenshot and the shim's logs as `office-32` and `office-64` whatever the outcome,
+because a dialog nobody answered looks like a timeout from everywhere but the screen. When the
+analyzer pin moves, the commit written in `office.yml` moves with it, as in `ci.yml`.
+
+---
+
 ## 4. Where the api stops
 
 These are not oversights; they are the boundary.

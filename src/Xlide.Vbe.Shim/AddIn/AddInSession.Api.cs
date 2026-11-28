@@ -1219,7 +1219,7 @@ internal sealed partial class AddInSession
     /// <summary>When the page bundle beside the running shim was built, or "(unknown)".</summary>
     private static string BundleBuiltUtc()
     {
-        var directory = Interop.ShimModule.Directory;
+        var directory = Interop.ShimModule.SharedDirectory;
         var bundle = directory is null ? null : Path.Combine(directory, "ui", "editor", "dist", "editor.js");
         return bundle is not null && File.Exists(bundle)
             ? File.GetLastWriteTimeUtc(bundle).ToString("s", System.Globalization.CultureInfo.InvariantCulture)
@@ -3550,9 +3550,9 @@ internal sealed partial class AddInSession
                 // "why is my fix not in the log" on 2026-08-06 were exactly this.
                 var shimPath = Interop.ShimModule.Directory;
                 var shimFile = shimPath is null ? null : Path.Combine(shimPath, "Xlide.Vbe.Shim.dll");
-                var bundle = shimPath is null
-                    ? null
-                    : Path.Combine(shimPath, "ui", "editor", "dist", "editor.js");
+                var bundle = Interop.ShimModule.SharedDirectory is { } sharedPath
+                    ? Path.Combine(sharedPath, "ui", "editor", "dist", "editor.js")
+                    : null;
 
                 var findings = new List<string>();
 

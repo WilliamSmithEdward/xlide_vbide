@@ -118,9 +118,10 @@ jobs:
         working-directory: xlide_vbide/ui/editor
         run: npm test
 
-      # Publishes the shim, stages the engine and the page as the payload, and
-      # compiles the installer ahead of time. It refuses to build without an
-      # engine or a page.
+      # Publishes the shim for 64-bit and for 32-bit Office, stages both with
+      # the engine and the page as the payload, and compiles the installer
+      # ahead of time. It refuses to build without an engine, a page, or either
+      # shim.
       - name: Build the installer
         shell: pwsh
         working-directory: xlide_vbide
@@ -132,20 +133,36 @@ jobs:
         shell: pwsh
         working-directory: xlide_vbide
         run: |
-          $shim = 'artifacts/bin/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
-          if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
-          $bytes = [IO.File]::ReadAllBytes($shim)
-          $text = [Text.Encoding]::Unicode.GetString($bytes) +
-            [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
-            [Text.Encoding]::ASCII.GetString($bytes)
-          if (-not $text.Contains('this build keeps the door shut unless told otherwise')) { throw 'Release does not say it ships the api shut.' }
-          if ($text.Contains('this build opens the door unless told otherwise')) { throw 'RELEASE SHIPS THE API OPEN.' }
-          foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
-            if ($text.Contains($needle)) { throw "Release carries an unauthenticated door: found '$needle'." }
+          foreach ($runtime in 'win-x64', 'win-x86') {
+            $shim = "artifacts/bin/Xlide.Vbe.Shim/release_$runtime/Xlide.Vbe.Shim.dll"
+            if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
+            $bytes = [IO.File]::ReadAllBytes($shim)
+            $text = [Text.Encoding]::Unicode.GetString($bytes) +
+              [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
+              [Text.Encoding]::ASCII.GetString($bytes)
+            if (-not $text.Contains('this build keeps the door shut unless told otherwise')) { throw "$runtime does not say it ships the api shut." }
+            if ($text.Contains('this build opens the door unless told otherwise')) { throw "RELEASE SHIPS THE API OPEN in $runtime." }
+            foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
+              if ($text.Contains($needle)) { throw "$runtime carries an unauthenticated door: found '$needle'." }
+            }
           }
           $installer = 'artifacts/xlide-setup.exe'
           if (-not (Test-Path $installer)) { throw "No installer at $installer." }
           Get-FileHash $installer -Algorithm SHA256 | Format-List
+
+      # The two checks CI makes of every pull request, made of the files this
+      # release is: each shim loads into a process of its own width, and the
+      # installer, run for real on this throwaway machine, hands a 64-bit and a
+      # 32-bit process each its own library and then removes all of it.
+      - name: Load each shim into a process of its own width
+        shell: powershell
+        working-directory: xlide_vbide
+        run: ./tools/harness/Test-ShimLoad.ps1 -Configuration Release
+
+      - name: Install, check both widths resolve, and uninstall
+        shell: powershell
+        working-directory: xlide_vbide
+        run: ./tools/harness/Test-InstallerWidths.ps1 -Installer artifacts/xlide-setup.exe
 
       - name: Keep the installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

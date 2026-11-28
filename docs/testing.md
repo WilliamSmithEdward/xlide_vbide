@@ -216,6 +216,41 @@ the truth that it is not healthy YET, which is a real answer to the wrong questi
 Debug builds only for anything using the xlide api. Release has none of it, and the gate verifies
 that by inspecting the built binary rather than trusting the compiler flag.
 
+### The 32-bit shim, which no Office on this machine can load
+
+```powershell
+tools\harness\Test-ShimLoad.ps1                    # both widths of the Debug shim, compared
+tools\harness\Test-ShimLoad.ps1 -InstalledLayout   # the same, laid out as the installer lays it out
+tools\harness\Test-ShimLoad.ps1 -Configuration Release   # the load and the late-bound calls only
+```
+
+32-bit and 64-bit Office cannot be installed side by side, so every suite above drives the 64-bit
+shim and the 32-bit one has no host here. A process is enough to load a library, though, and every
+64-bit Windows has a 32-bit Windows PowerShell. `Test-ShimLoad.ps1` loads the shim into the
+PowerShell of its own width, takes its class factory the way COM does, calls the add-in by name
+the way a late-binding host does, and, in a Debug shim, calls `XlideSelfCheck`: the product's own
+window, automation, type library, font, picture, UI Automation, job, engine and browser code, run
+with no editor. It is the non-Quick gate's last headless step and two CI jobs.
+
+Two things keep it honest. The 64-bit run is the control: the same checks, where the product is
+known to work, and every line marked `same` must then match between the two reports. And both
+defects it exists for were put back on purpose and seen to fail before it was trusted: a 32-bit
+shim calling `SetWindowLongPtrW` stops at "Unable to find an entry point", and a 64-bit shim with a
+sixteen-byte variant overwrites the word placed after it.
+
+What it cannot say is that the editor works in a 32-bit Office. Nothing in it talks to a VBE.
+`Test-InstallerWidths.ps1` is the other half and runs only on a CI runner, because it really
+installs: it runs the installer, asks COM for the add-in from a process of each width, checks
+which library each was handed, and uninstalls.
+
+The editor inside a 32-bit Office is the Office hosts workflow's question
+(`.github/workflows/office.yml`). A hosted runner is the one machine that can hold a 32-bit Office
+beside this product's development, so each of its two jobs installs an Excel of one width, and
+`Test-OfficeHost.ps1` loads the Debug shim of that width into it and runs the suites that depend
+on the width of a pointer. The 64-bit job is the control. It is not a required check, because it
+rests on a download from Microsoft that sometimes fails. See
+[driving-excel.md](driving-excel.md), section 3d.
+
 ## What the xlide api gives a probe
 
 `state`, `problems`, `module` read and write, `layout`, `eval` and `await` against the live page,

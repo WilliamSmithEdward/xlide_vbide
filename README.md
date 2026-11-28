@@ -130,6 +130,9 @@ rights, changes nothing outside your own profile, and needs no runtime, framewor
 present first. Everything it needs is inside the one executable. Windows will warn before running
 it, because it carries no code signature.
 
+The one installer serves 64-bit and 32-bit Office on 64-bit Windows. You do not need to know which
+you have.
+
 Close Excel first. If it is open, the installer says so and waits; it continues on its own when
 Excel closes, or force closes it if you ask.
 
@@ -223,7 +226,7 @@ shim and reloads the page in a running editor, without restarting Excel or repub
 ### Checking it
 
 ```powershell
-tools\verify.ps1                   # 19 headless steps, about ninety seconds
+tools\verify.ps1                   # 22 headless steps, about three minutes
 tools\verify.ps1 -Live             # adds four steps that need an open editor
 tools\verify.ps1 -Deep             # four more; the tier to run before a release
 ```
@@ -243,6 +246,14 @@ installer\build.ps1                # produces artifacts\xlide-setup.exe
 
 It refuses to build without a packaged engine and a built page, so an incomplete build fails here
 rather than being discovered by whoever downloads it.
+
+The installer carries the shim twice, for 64-bit and for 32-bit Office, and registers both. The
+32-bit one cannot be loaded by the Office on a development machine, so it is checked in a 32-bit
+process instead:
+
+```powershell
+tools\harness\Test-ShimLoad.ps1    # both widths of the Debug shim, with no Office involved
+```
 
 ## Repository layout
 

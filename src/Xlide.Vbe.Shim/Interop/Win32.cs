@@ -407,11 +407,35 @@ internal static unsafe partial class Win32
     [LibraryImport("oleacc.dll")]
     public static partial int AccessibleObjectFromWindow(nint window, uint objectId, in Guid interfaceId, out nint result);
 
+    /// <summary>
+    /// Writes a pointer-sized value into one of a window's slots and answers the value it held.
+    ///
+    /// The entry point is chosen by the size of a pointer in this process. The 64-bit user32
+    /// exports SetWindowLongPtrW; the 32-bit one does not, because there the Windows headers turn
+    /// that name into SetWindowLongW with a macro, and an import by name never sees a macro. A
+    /// 32-bit build that asked for the Ptr name loaded and then failed the first time it made a
+    /// window of its own. The same holds for the read below and for
+    /// <see cref="GetClassLongPtr"/>.
+    /// </summary>
+    public static nint SetWindowLongPtr(nint window, int index, nint value) =>
+        nint.Size == 8 ? SetWindowLongPtr64(window, index, value) : SetWindowLong32(window, index, value);
+
+    /// <summary>Reads one of a window's pointer-sized slots.</summary>
+    public static nint GetWindowLongPtr(nint window, int index) =>
+        nint.Size == 8 ? GetWindowLongPtr64(window, index) : GetWindowLong32(window, index);
+
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    public static partial nint SetWindowLongPtr(nint window, int index, nint value);
+    private static partial nint SetWindowLongPtr64(nint window, int index, nint value);
 
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
-    public static partial nint GetWindowLongPtr(nint window, int index);
+    private static partial nint GetWindowLongPtr64(nint window, int index);
+
+    // The value is a LONG, which is the width of a pointer in the only process that calls these.
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static partial nint SetWindowLong32(nint window, int index, nint value);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static partial nint GetWindowLong32(nint window, int index);
 
     [LibraryImport("user32.dll", EntryPoint = "LoadCursorW", SetLastError = true)]
     public static partial nint LoadCursor(nint instance, nint cursorName);

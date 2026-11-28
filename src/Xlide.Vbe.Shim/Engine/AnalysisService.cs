@@ -1850,9 +1850,9 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// Where the engine lives. Beside the shim in an installation; in the build tree during
     /// development, so a developer does not have to install to try a change.
     /// </summary>
-    private static string EnginePath()
+    internal static string EnginePath()
     {
-        var directory = ShimModule.Directory;
+        var directory = ShimModule.SharedDirectory;
 
         if (directory is null)
         {

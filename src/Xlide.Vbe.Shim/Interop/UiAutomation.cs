@@ -208,25 +208,31 @@ internal partial interface IUIAutomationScrollPattern
 /// A variant sized for the vtable, never read.
 ///
 /// Several methods above return one. They are placeholders, so this only has to be the right
-/// size - and the right size is TWENTY-FOUR bytes on x64: eight of type tag and padding, then a
-/// sixteen-byte data union (its widest member is a record's two pointers). Sixteen was the x86
-/// size, and an out-parameter eight bytes short is not harmless even on a placeholder: the
-/// callee initialises the whole variant, so the last eight bytes land on whatever the caller
+/// size - and the right size follows the pointer size: eight bytes of type tag and padding, then
+/// a data union whose widest member is a record's two pointers. That is TWENTY-FOUR bytes in a
+/// 64-bit process and SIXTEEN in a 32-bit one, which is why the size is spelled as fields rather
+/// than as a number. An out-parameter eight bytes short is not harmless even on a placeholder:
+/// the callee initialises the whole variant, so the last eight bytes land on whatever the caller
 /// keeps beside the buffer. That is the corruption that took the Locals reader down for a whole
-/// day (2026-08-05): Release stack layouts had left the overhang on dead space, the Debug
-/// builds the dev loop switched to that morning put a live slot there, and every property read
-/// died in a frameless NullReferenceException while the same reads from outside the process -
-/// made with a full-size variant - worked all along.
+/// day (2026-08-05), when this was sixteen bytes in a 64-bit process: Release stack layouts had
+/// left the overhang on dead space, the Debug builds the dev loop switched to that morning put a
+/// live slot there, and every property read died in a frameless NullReferenceException while the
+/// same reads from outside the process - made with a full-size variant - worked all along.
 /// </summary>
-[StructLayout(LayoutKind.Sequential, Size = 24)]
-internal struct ComVariantBlock;
+[StructLayout(LayoutKind.Sequential)]
+internal struct ComVariantBlock
+{
+    public long TypeAndPadding;
+    public nint Data;
+    public nint DataRest;
+}
 
 /// <summary>
-/// A variant that is actually read: the twenty-four bytes above with their real shape. The
-/// first word is the type tag; the data starts at offset eight, which is where a BSTR pointer
-/// or a 32-bit integer sits. Only the two types the property reads produce are handled.
+/// A variant that is actually read: the block above with its real shape. The first word is the
+/// type tag; the data starts at offset eight, which is where a BSTR pointer or a 32-bit integer
+/// sits. Only the types the property reads produce are handled.
 /// </summary>
-[StructLayout(LayoutKind.Sequential, Size = 24)]
+[StructLayout(LayoutKind.Sequential)]
 internal struct UiVariant
 {
     public ushort Type;
@@ -234,6 +240,12 @@ internal struct UiVariant
     public ushort Reserved2;
     public ushort Reserved3;
     public nint Value;
+
+    /// <summary>
+    /// The rest of the data union, which nothing here reads. It is a field so the struct is as
+    /// wide as the variant the callee writes, at either pointer size.
+    /// </summary>
+    public nint ValueRest;
 
     public const ushort TypeBstr = 8;
     public const ushort TypeInt32 = 3;

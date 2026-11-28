@@ -520,7 +520,9 @@ internal sealed partial class AddInSession
     private UpdateStateReply UpdateState()
     {
         var release = _update.Release;
-        var loadedFrom = ShimModule.Directory;
+        // The installation, not the 32-bit shim's subfolder of it: the rule below, and the same
+        // rule in the About dialog, read the end of this path.
+        var loadedFrom = ShimModule.SharedDirectory;
         return new UpdateStateReply(
             Phase: _update.Phase,
             Installed: ProductVersion.Current,

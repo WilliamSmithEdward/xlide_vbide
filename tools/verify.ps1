@@ -566,6 +566,46 @@ if (-not $Quick) {
 
         '{0:N1} MB' -f ((Get-Item (Join-Path $published 'Xlide.Vbe.Shim.dll')).Length / 1MB)
     }
+
+    Step 'the 32-bit shim, in a 32-bit process' {
+        # THE ONLY HOST THIS MACHINE HAS FOR IT. 32-bit and 64-bit Office cannot be installed side
+        # by side, so the live half of this gate, which drives the Office that is here, never
+        # touches the 32-bit shim at all. A process of that width can still load it and run its
+        # own code, and every 64-bit Windows has one: the 32-bit Windows PowerShell. The 64-bit
+        # run beside it is what says the checks are sound, and what both must say alike is
+        # compared. Nothing here opens an editor, in either width.
+        $shimProject = Join-Path $repoRoot 'src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj'
+        $loadCheck = Join-Path $PSScriptRoot 'harness\Test-ShimLoad.ps1'
+
+        dotnet publish $shimProject -c Release -r win-x86 --nologo -v q 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the 32-bit Release publish failed' }
+
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $loadCheck -Configuration Release | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'a Release shim did not load, or did not answer, in a process of its own width' }
+
+        dotnet publish $shimProject -c Debug -r win-x86 --nologo -v q 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the 32-bit Debug publish failed' }
+
+        # The 64-bit Debug shim is the one the dev loop registers, and an open editor holds it.
+        # It is published here only when nothing does; held, it is used as it stands, and one
+        # built before the self-check existed fails the run below by saying it exports none.
+        $debug64 = Join-Path $repoRoot 'artifacts\publish\Xlide.Vbe.Shim\debug_win-x64\Xlide.Vbe.Shim.dll'
+        $held = $false
+        if (Test-Path $debug64) {
+            try { [IO.File]::Open($debug64, 'Open', 'ReadWrite', 'None').Close() } catch { $held = $true }
+        }
+
+        if (-not $held) {
+            dotnet publish $shimProject -c Debug -r win-x64 --nologo -v q 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'the 64-bit Debug publish failed' }
+        }
+
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $loadCheck -InstalledLayout | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the self-check failed in a process of one width, or the two disagreed' }
+
+        if ($held) { 'both widths, laid out as installed; the 64-bit Debug shim was in use and taken as it stood' }
+        else { 'both widths, laid out as installed' }
+    }
 }
 
 $priorPreferenceRoot = $env:XLIDE_TEST_PREFERENCES_ROOT

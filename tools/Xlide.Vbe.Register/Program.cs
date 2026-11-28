@@ -45,7 +45,7 @@ internal static class Program
                     break;
 
                 case Action.Remove:
-                    Remove(options.Bitness);
+                    Remove();
                     Console.WriteLine($"Removed {ProductIdentity.AddInProgId}.");
                     break;
             }
@@ -80,15 +80,20 @@ internal static class Program
         }
     }
 
-    private static void Remove(HostBitness bitness)
+    private static void Remove()
     {
         // Inspect before deleting: only remove keys that name this product.
-        DeleteSubTreeIfPresent($@"{RegistrationPlan.AddInsKeyPath(bitness)}\{ProductIdentity.AddInProgId}");
+        //
+        // Both widths, whichever one was registered. They share the ProgID, so taking one
+        // width's class and the ProgID while leaving the other's add-in key would leave an
+        // entry the editor lists and cannot load.
+        foreach (var bitness in new[] { HostBitness.X64, HostBitness.X86 })
+        {
+            DeleteSubTreeIfPresent($@"{RegistrationPlan.AddInsKeyPath(bitness)}\{ProductIdentity.AddInProgId}");
+            DeleteSubTreeIfPresent(RegistrationPlan.ClassKeyPath(bitness, RegistryScope.CurrentUser));
+        }
 
-        var classes = RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser);
-        DeleteSubTreeIfPresent($@"{classes}\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteSubTreeIfPresent($@"{classes}\{ProductIdentity.AddInProgId}");
-        DeleteSubTreeIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}");
+        DeleteSubTreeIfPresent($@"{RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser)}\{ProductIdentity.AddInProgId}");
     }
 
     private static void DeleteSubTreeIfPresent(string path)
@@ -110,7 +115,8 @@ internal static class Program
             xlide-register --apply|--remove|--print [options]
 
               --shim <path>       Path to Xlide.Vbe.Shim.dll. Required for --apply and --print.
-              --bitness x64|x86   Office bitness to register for. Defaults to x64.
+              --bitness x64|x86   Office bitness to register for. Defaults to x64. The shim
+                                  named must be of that width. --remove removes both.
 
             Registration is per user and needs no administrator rights.
             """);

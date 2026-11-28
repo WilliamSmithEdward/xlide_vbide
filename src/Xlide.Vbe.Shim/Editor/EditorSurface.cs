@@ -979,7 +979,7 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public static EditorSurface? Create(nint host, PixelRect bounds)
     {
-        var directory = ShimModule.Directory;
+        var directory = ShimModule.SharedDirectory;
         if (directory is null)
         {
             return null;

@@ -76,10 +76,16 @@ COM is implemented with source-generated interop (`[GeneratedComInterface]`,
 
 ### 4.2 Loading
 
-The VBE loads add-ins listed under `HKCU\Software\Microsoft\VBA\VBE\6.0\Addins64` (and `Addins`
-for 32-bit hosts). The subkey name is the ProgID; `LoadBehavior` of 3 means load at startup.
-ProgID resolves to CLSID, and CLSID resolves to our DLL through `InprocServer32`. Because the
-shim is native, `InprocServer32` points at it directly.
+The VBE loads add-ins listed under `HKCU\Software\Microsoft\VBA\VBE\6.0\Addins64` in a 64-bit host
+and `Addins` in a 32-bit one. The subkey name is the ProgID; `LoadBehavior` of 3 means load at
+startup. ProgID resolves to CLSID, and CLSID resolves to our DLL through `InprocServer32`. Because
+the shim is native, `InprocServer32` points at it directly.
+
+A host loads only a library of its own width, so the shim is built twice and one installation
+registers both: the 64-bit one under `Classes\CLSID`, which a 64-bit process reads, and the 32-bit
+one under `Classes\WOW6432Node\CLSID`, which a 32-bit process reads. The 32-bit shim and its
+browser loader are installed in an `x86` folder below the rest and share the page, the engine and
+the icon with the 64-bit one. See [decisions.md](decisions.md), decision 20.
 
 Registration is per-user, so installation needs no administrator rights.
 

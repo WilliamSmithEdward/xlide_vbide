@@ -537,3 +537,68 @@ installer continues on its own when the host closes, for everyone, not only for 
 `update` route is the dialog's other half, and `update.mjs` drives the whole path against a
 loopback feed, which is the only kind of feed the debug door accepts and which a shipped build has
 no door for at all.
+
+## 20. One installation serves 64-bit and 32-bit Office
+
+Status: decided and implemented 2026-11-28 (#174).
+
+An Office host loads only a library of its own width, so there are two shims, built from the same
+source with `-r win-x64` and `-r win-x86`. One installer carries both and registers both, whatever
+Office the machine has. It does not ask which one is installed: each width reads its own add-in
+key (`Addins64`, `Addins`) and resolves the class through its own view of the registry, so the
+registration a machine's Office does not read lies inert, and an Office later replaced by one of
+the other width finds xlide already there.
+
+The layout is `InstallLayout`: the 64-bit shim stays in the installation folder with the page, the
+engine and the icon around it, as before, and the 32-bit shim and its browser loader sit in `x86`
+below it and look one folder up for the rest (`ShimModule.SharedDirectory`). Only the loader is
+duplicated, because it has to be the width of the library that loads it. The engine is not: it is
+its own 64-bit process on the far side of a pipe, and a 32-bit shim starts it and talks to it like
+any other. That is also why 32-bit Windows is out of scope.
+
+The two registrations share one ProgID and one CLSID. That works because a per-user class lookup
+on 64-bit Windows reads `Classes\CLSID` in a 64-bit process and `Classes\WOW6432Node\CLSID` in a
+32-bit one, and neither sees the other. Measured, not assumed: a class registered in one view only
+was loaded by a process of the matching width and reported as not registered to the other.
+`RegistrationPlan` writes each width's class to its own key alone, and a unit test holds that the
+two plans can be applied together.
+
+What made the 32-bit build wrong before this was small and would have been fatal: the shim
+imported `SetWindowLongPtrW`, `GetWindowLongPtrW` and `GetClassLongPtrW` by name, and the 32-bit
+user32 exports none of them, because there the Windows headers map those names onto the older
+ones with a macro. It built, loaded, and would have failed at its first window. The Git lookup also
+read `%ProgramFiles%`, which inside a 32-bit process is `Program Files (x86)`.
+
+How it is checked, given that 32-bit and 64-bit Office cannot be installed side by side and a
+development machine therefore has no 32-bit host: a Debug shim exports `XlideSelfCheck`, which runs
+the product's own window, automation, type library, font, picture, UI Automation, job, engine and
+browser code in whatever process loaded it, and `tools\harness\Test-ShimLoad.ps1` runs it in the
+32-bit and the 64-bit Windows PowerShell and compares what both must say alike. CI runs that on
+every pull request, and also installs on the runner and asks COM for the add-in from a process of
+each width (`Test-InstallerWidths.ps1`). See [testing.md](testing.md).
+
+The editor itself, inside a 32-bit Office, runs in one place: the Office hosts workflow, which
+installs an Excel of each width on a hosted runner, registers the Debug shim of that width and
+drives the editor with the harness a development machine uses. On 2026-11-28, in 32-bit Excel
+16.0.20527, the add-in loaded, the engine and the page came up, and the api probe, the Object
+Browser probe, the debugger suite, the Locals rows, the Immediate panel and the leak count all
+passed, as they did in the 64-bit Excel beside it. Excel is the only host installed there; Word,
+PowerPoint and Access have not run 32-bit. The workflow accepts Microsoft's license terms for
+Office on the runner and is not a required check.
+
+Alternatives weighed: a second installer for 32-bit Office, which makes the user answer a question
+most cannot (which Office do I have) and makes the updater choose a download; detecting the
+installed Office and registering one width, which is a second thing to get wrong and goes stale
+when Office is reinstalled; and an out-of-process shim that any host could reach, which gives up
+the in-process window and keyboard work the editor is made of.
+
+Consequences. The installer grows by the 32-bit shim, about five megabytes compressed. The copy of
+the registration the installer plants in the Click-to-Run overlay when it runs elevated is still
+the 64-bit one only, because where a 32-bit Click-to-Run keeps that namespace has not been seen. The
+development loop (`dev.ps1`, `page.ps1`, the live harness) still drives the 64-bit Office a
+development machine has; a machine with a 32-bit Office publishes with `-r win-x86` and registers
+with `xlide-register --apply --bitness x86 --shim <path>`. And the analyzer still judges code by
+64-bit rules in a 32-bit host: the engine sends it no host constants, its worker protocol has no
+field for them, and half an answer (turning `#If Win64` off through the project's constants while
+the `PtrSafe` rule still reads the host as 64-bit) would report correct 32-bit declarations as
+errors. That is asked for upstream; until then a 32-bit host sees the 64-bit reading of its code.

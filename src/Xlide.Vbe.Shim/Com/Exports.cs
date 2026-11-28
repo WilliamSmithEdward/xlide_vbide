@@ -77,4 +77,35 @@ public static unsafe class Exports
     /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "DllCanUnloadNow")]
     public static int DllCanUnloadNow() => HResult.False;
+
+#if DEBUG
+    /// <summary>
+    /// Runs <see cref="SelfCheck"/> in the calling process: the named stages, comma separated, or
+    /// all of them for null or empty, each finding appended to the file at
+    /// <paramref name="reportPath"/>. Answers the number of checks that failed, or minus one
+    /// when it could not run at all. The caller's thread must be a single-threaded apartment,
+    /// as the editor's is.
+    ///
+    /// Debug builds only: a shipped library has no such export.
+    /// </summary>
+    [UnmanagedCallersOnly(EntryPoint = "XlideSelfCheck")]
+    public static int XlideSelfCheck(char* reportPath, char* stages)
+    {
+        if (reportPath is null)
+        {
+            return -1;
+        }
+
+        try
+        {
+            Log.Initialize();
+            return SelfCheck.Run(new string(reportPath), stages is null ? string.Empty : new string(stages));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("the self-check could not run", ex);
+            return -1;
+        }
+    }
+#endif
 }

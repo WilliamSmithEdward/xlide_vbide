@@ -160,8 +160,19 @@ internal static unsafe partial class Win32
     public const int GclpHIcon = -14;
     public const int GclpHIconSm = -34;
 
+    /// <summary>
+    /// Reads one of a window class's pointer-sized slots. The entry point follows the process's
+    /// pointer size, for the reason given on <see cref="SetWindowLongPtr"/>.
+    /// </summary>
+    public static nint GetClassLongPtr(nint window, int index) =>
+        nint.Size == 8 ? GetClassLongPtr64(window, index) : GetClassLong32(window, index);
+
     [LibraryImport("user32.dll", EntryPoint = "GetClassLongPtrW")]
-    public static partial nint GetClassLongPtr(nint window, int index);
+    private static partial nint GetClassLongPtr64(nint window, int index);
+
+    // A DWORD, which is the width of a pointer in the only process that calls this.
+    [LibraryImport("user32.dll", EntryPoint = "GetClassLongW")]
+    private static partial nint GetClassLong32(nint window, int index);
 
     /// <summary>SW_SHOW. Shows a window and activates it.</summary>
     public const int SwShow = 5;
