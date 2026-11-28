@@ -51,6 +51,8 @@ export interface EditorSettings {
   theme: "system" | "light" | "dark";
   /** Run test, Debug test and a count of uses, drawn above procedures. */
   codeLens: boolean;
+  /** Vim's modes and keys in the code editors (#173). Off unless asked for. */
+  vimMode: boolean;
   /** Ask GitHub for the newest release when the editor opens, once per Office session. */
   updateCheckOnStart: boolean;
 }
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   designerGridSize: 6,
   theme: "system",
   codeLens: true,
+  vimMode: false,
   updateCheckOnStart: true,
 };
 
@@ -108,6 +111,7 @@ export function applySettings(next: IncomingSettings): void {
     designerGridSize: Math.min(24, Math.max(2, Math.round(next.designerGridSize ?? 6) || 6)),
     theme: next.theme === "light" ? "light" : next.theme === "dark" ? "dark" : "system",
     codeLens: next.codeLens !== false,
+    vimMode: next.vimMode === true,
     updateCheckOnStart: next.updateCheckOnStart !== false,
   };
 

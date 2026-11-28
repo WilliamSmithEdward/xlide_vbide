@@ -113,7 +113,8 @@ import { Shell } from "./shell.js";
 import { registerTestDirectiveCompletion } from "./testdirectives.js";
 import { TestsPane } from "./testspane.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
-import { installTypingAutomation } from "./typing.js";
+import { installTypingAutomation, type TypingAutomationHandle } from "./typing.js";
+import { VimModeController } from "./vimmode.js";
 import { Workspace } from "./workspace.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 import { isImmediateModel } from "./immediateentry.js";
@@ -744,15 +745,29 @@ function boot(): void {
   let changesPane: ChangesPane | undefined;
   let scmPane: ScmPane | undefined;
 
+  // Vim mode (#173), on the group editors and only on them: the Immediate line, a designer's
+  // markup and a past version's tab keep the plain keys. The developer's switch, read as the
+  // host's settings arrive and on every change after.
+  const typingOf = new WeakMap<monaco.editor.IStandaloneCodeEditor, TypingAutomationHandle>();
+  const vimMode = new VimModeController(document.getElementById("status-vim") as HTMLElement, {
+    save: () => bridge.runCommand({ id: "save", target: "host", icon: "", label: "Save" }),
+    closeTab: (save) => workspace.closeActive(save ? "save" : undefined),
+    undo: (editor) => bridge.undoOnSurface(editor),
+    automated: (editor) => bridge.isApplyingHostEdit || typingOf.get(editor)?.isApplying() === true,
+    activeEditor: () => workspace.activeEditor(),
+  });
+  onSettingsApplied((next) => vimMode.setEnabled(next.vimMode));
+
   /** Everything a new group's editor gets, the moment the workspace creates it. */
   const wireEditor = (editor: monaco.editor.IStandaloneCodeEditor): void => {
     bridge.attachEditor(editor);
     searchWidget.registerOn(editor);
-    installTypingAutomation(editor, bridge);
+    typingOf.set(editor, installTypingAutomation(editor, bridge));
     bookmarks.attach(editor);
     blame.attach(editor);
     registerHostActions(editor, bridge);
     installMarginMenu(editor, bridge);
+    vimMode.attach(editor);
   };
 
   searchWidget = new SearchWidget(() => workspace.activeEditor(), {
@@ -2446,6 +2461,7 @@ function boot(): void {
     bookmarksPane,
     blame,
     lenses,
+    vim: vimMode,
     providers: {
       hover: hoverProvider,
       completion: completionProvider,

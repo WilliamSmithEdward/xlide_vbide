@@ -1912,7 +1912,8 @@ internal sealed class EditorSurface : IDisposable
                 settings.ExplorerSort,
                 settings.Theme,
                 settings.UpdateCheckOnStart,
-                settings.CodeLens),
+                settings.CodeLens,
+                settings.VimMode),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -2847,6 +2848,10 @@ internal sealed class EditorSurface : IDisposable
                     var codeLens = document.RootElement.TryGetProperty("codeLens", out var lensValue)
                         ? lensValue.ValueKind is not JsonValueKind.False
                         : held.CodeLens;
+                    // Only an outright true turns it on: the mode takes every plain key.
+                    var vimMode = document.RootElement.TryGetProperty("vimMode", out var vimValue)
+                        ? vimValue.ValueKind is JsonValueKind.True
+                        : held.VimMode;
 
                     // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
                     // names eight fields and zeroes the rest, so a page settings change silently
@@ -2871,6 +2876,7 @@ internal sealed class EditorSurface : IDisposable
                         Theme = theme,
                         UpdateCheckOnStart = checkForUpdates,
                         CodeLens = codeLens,
+                        VimMode = vimMode,
                     }).Normalized());
                     break;
                 }

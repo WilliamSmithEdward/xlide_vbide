@@ -4905,6 +4905,7 @@ internal sealed partial class AddInSession
                             : settings.Theme,
                         UpdateCheckOnStart = Flag("updateCheckOnStart", settings.UpdateCheckOnStart),
                         CodeLens = Flag("codeLens", settings.CodeLens),
+                        VimMode = Flag("vimMode", settings.VimMode),
                     }).Normalized();
 
                     OnSettingsChanged(settings);
@@ -4926,7 +4927,8 @@ internal sealed partial class AddInSession
                         settings.ExplorerSort,
                         settings.Theme,
                         settings.UpdateCheckOnStart,
-                        settings.CodeLens),
+                        settings.CodeLens,
+                        settings.VimMode),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

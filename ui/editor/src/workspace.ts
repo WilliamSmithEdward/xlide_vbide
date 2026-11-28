@@ -992,11 +992,14 @@ export class Workspace {
     return next.id.module;
   }
 
-  /** The active group's active tab is asked to close. */
-  closeActive(): void {
+  /**
+   * The active group's active tab is asked to close. `action` answers the unsaved-changes
+   * question in advance, as the question's own buttons do: "save" or "discard".
+   */
+  closeActive(action?: string): void {
     const active = this.activeGroup.active;
     if (active) {
-      this.handlers.close(active);
+      this.handlers.close(active, action);
     }
   }
 
